@@ -6,8 +6,10 @@ import {
   CONNECT_WHATSAPP_JOB,
   DISCONNECT_WHATSAPP_JOB,
   RESET_WHATSAPP_JOB,
+  SEND_MANUAL_MESSAGE_JOB,
   SEND_RECIPIENT_JOB,
-  enqueueRecipient
+  enqueueRecipient,
+  type SendManualMessageJobData
 } from "../lib/queue/campaign-queue";
 import { getRedisConnectionOptions } from "../lib/queue/connection";
 import {
@@ -15,8 +17,10 @@ import {
   markWhatsappError,
   resetBaileysSession,
   sendWhatsappMessage,
+  sendWhatsappMessageToJid,
   startBaileysConnection
 } from "../lib/baileys/client";
+import { isGroupJid, normalizeChatJid } from "../lib/baileys/sync";
 import { completeCampaignIfDone } from "../lib/campaigns/progress";
 import { schedulePendingRecipients } from "../lib/campaigns/schedule";
 
@@ -41,6 +45,110 @@ function getErrorMessage(error: unknown) {
 
 async function requeueRecipient(recipientId: string, delayMs = PAUSED_RECHECK_DELAY_MS) {
   await enqueueRecipient(recipientId, delayMs);
+}
+
+function buildManualFallbackMessageId(jobId: string | undefined) {
+  return `manual-${jobId ?? Date.now()}`
+    .replace(/[^a-zA-Z0-9_-]/g, "-")
+    .slice(0, 180);
+}
+
+async function processManualMessage(
+  data: Partial<SendManualMessageJobData>,
+  jobId: string | undefined
+) {
+  const chatId = String(data.chatId ?? "").trim();
+  const normalizedJid = normalizeChatJid(data.jid);
+  const text = String(data.text ?? "").trim();
+
+  if (!chatId) {
+    throw new Error("chatId obrigatorio para envio manual");
+  }
+
+  if (!normalizedJid) {
+    throw new Error("JID invalido para envio manual");
+  }
+
+  if (!text) {
+    throw new Error("Mensagem manual vazia");
+  }
+
+  if (text.length > 4000) {
+    throw new Error("Mensagem manual excede 4000 caracteres");
+  }
+
+  const chat = await prisma.whatsappChat.findUnique({
+    where: {
+      id: chatId
+    }
+  });
+
+  if (!chat) {
+    throw new Error("Conversa nao encontrada para envio manual");
+  }
+
+  if (chat.jid !== normalizedJid) {
+    throw new Error("JID do job nao corresponde a conversa");
+  }
+
+  try {
+    const sentMessage = await sendWhatsappMessageToJid(normalizedJid, text);
+    const sentAt = new Date();
+    const waMessageId = sentMessage.waMessageId ?? buildManualFallbackMessageId(jobId);
+
+    await prisma.whatsappMessage.upsert({
+      where: {
+        jid_waMessageId: {
+          jid: normalizedJid,
+          waMessageId
+        }
+      },
+      update: {
+        chatId,
+        fromMe: true,
+        senderJid: sentMessage.senderJid,
+        timestamp: sentAt,
+        messageType: "text",
+        text,
+        rawJson: sentMessage.rawJson
+      },
+      create: {
+        chatId,
+        jid: normalizedJid,
+        waMessageId,
+        fromMe: true,
+        senderJid: sentMessage.senderJid,
+        timestamp: sentAt,
+        messageType: "text",
+        text,
+        rawJson: sentMessage.rawJson
+      }
+    });
+
+    await prisma.whatsappChat.update({
+      where: {
+        id: chatId
+      },
+      data: {
+        isGroup: isGroupJid(normalizedJid),
+        lastMessageAt: sentAt,
+        lastMessageText: text,
+        lastOutboundAt: sentAt
+      }
+    });
+
+    console.log("[worker] manual message sent", {
+      chatId,
+      jidType: isGroupJid(normalizedJid) ? "group" : "contact"
+    });
+  } catch (error) {
+    console.error("[worker] manual message failed", {
+      chatId,
+      jidType: isGroupJid(normalizedJid) ? "group" : "contact",
+      error: getErrorMessage(error)
+    });
+    throw error;
+  }
 }
 
 async function processRecipient(recipientId: string) {
@@ -194,6 +302,11 @@ const worker = new Worker(
         throw error;
       }
 
+      return;
+    }
+
+    if (job.name === SEND_MANUAL_MESSAGE_JOB) {
+      await processManualMessage(job.data as Partial<SendManualMessageJobData>, job.id);
       return;
     }
 

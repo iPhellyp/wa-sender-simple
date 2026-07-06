@@ -98,3 +98,7 @@ Implementar labels em modo read-only:
 2. Criar `WhatsappLabel` e `WhatsappChatLabel`.
 3. Persistir associacoes sem aplicar etiqueta no WhatsApp.
 4. Exibir etiquetas em `/conversas`.
+
+## Evolucao operacional
+
+A inbox basica com envio manual esta documentada em `docs/INBOX_MANUAL_SEND.md`.

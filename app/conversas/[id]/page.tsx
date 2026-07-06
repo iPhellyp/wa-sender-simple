@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AppShell } from "@/app/components/AppShell";
 import { prisma } from "@/src/lib/prisma/client";
+import { SendMessageForm } from "./SendMessageForm";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -86,6 +87,10 @@ export default async function ConversationDetailPage({ params }: ConversationDet
               <div className="muted">Ultima mensagem</div>
               <strong>{formatDate(chat.lastMessageAt)}</strong>
             </div>
+            <div>
+              <div className="muted">Resumo</div>
+              <strong>{chat.lastMessageText ?? "-"}</strong>
+            </div>
           </div>
         </div>
 
@@ -111,6 +116,11 @@ export default async function ConversationDetailPage({ params }: ConversationDet
               ))}
             </div>
           )}
+        </div>
+
+        <div className="card">
+          <h2 style={{ fontSize: 18, marginTop: 0 }}>Enviar mensagem</h2>
+          <SendMessageForm chatId={chat.id} isGroup={chat.isGroup} />
         </div>
       </section>
     </AppShell>

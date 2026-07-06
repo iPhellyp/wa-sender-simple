@@ -21,7 +21,8 @@ import {
   syncContactsUpsert,
   syncMessagesUpdate,
   syncMessagesUpsert,
-  syncMessagingHistorySet
+  syncMessagingHistorySet,
+  normalizeChatJid
 } from "./sync";
 
 const SESSION_ID = "default";
@@ -66,6 +67,18 @@ function sanitizeErrorMessage(error: unknown) {
 
 function getDisconnectStatusCode(error: unknown) {
   return (error as { output?: { statusCode?: number } } | null)?.output?.statusCode;
+}
+
+function getMessageTimestampForJson(messageTimestamp: unknown) {
+  if (typeof messageTimestamp === "number" || typeof messageTimestamp === "string") {
+    return messageTimestamp;
+  }
+
+  if (messageTimestamp && typeof messageTimestamp === "object" && "toString" in messageTimestamp) {
+    return String(messageTimestamp);
+  }
+
+  return null;
 }
 
 async function saveWhatsappSession(data: {
@@ -502,7 +515,7 @@ export async function resetBaileysSession() {
   });
 }
 
-export async function sendWhatsappMessage(phoneNormalized: string, message: string) {
+async function getConnectedSocket() {
   await startBaileysConnection();
 
   const deadline = Date.now() + 20_000;
@@ -521,7 +534,41 @@ export async function sendWhatsappMessage(phoneNormalized: string, message: stri
     throw new Error(reason);
   }
 
-  await socket.sendMessage(toWhatsappJid(phoneNormalized), {
-    text: message
+  return socket;
+}
+
+export async function sendWhatsappMessageToJid(jid: string, text: string) {
+  const normalizedJid = normalizeChatJid(jid);
+  const messageText = text.trim();
+
+  if (!normalizedJid) {
+    throw new Error("JID de destino invalido");
+  }
+
+  if (!messageText) {
+    throw new Error("Mensagem vazia");
+  }
+
+  const activeSocket = await getConnectedSocket();
+  const sentMessage = await activeSocket.sendMessage(normalizedJid, {
+    text: messageText
   });
+
+  return {
+    waMessageId: sentMessage?.key?.id ?? null,
+    senderJid: normalizeChatJid(activeSocket.user?.id),
+    rawJson: {
+      key: {
+        id: sentMessage?.key?.id ?? null,
+        remoteJid: sentMessage?.key?.remoteJid ?? normalizedJid,
+        fromMe: sentMessage?.key?.fromMe ?? true
+      },
+      messageTimestamp: getMessageTimestampForJson(sentMessage?.messageTimestamp ?? null),
+      status: sentMessage?.status ?? null
+    }
+  };
+}
+
+export async function sendWhatsappMessage(phoneNormalized: string, message: string) {
+  await sendWhatsappMessageToJid(toWhatsappJid(phoneNormalized), message);
 }

@@ -16,6 +16,7 @@ const protectedPagePrefixes = [
 const protectedApiPrefixes = [
   "/api/import",
   "/api/contacts",
+  "/api/conversas",
   "/api/whatsapp",
   "/api/campaigns"
 ];

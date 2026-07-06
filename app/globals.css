@@ -202,6 +202,12 @@ button:disabled {
   border-color: var(--line);
 }
 
+.button.secondary.active {
+  background: var(--surface-soft);
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
 .button.danger {
   background: var(--danger);
   border-color: var(--danger);

@@ -67,6 +67,31 @@ export function isGroupJid(jid: string | null | undefined) {
   return Boolean(jid?.endsWith("@g.us"));
 }
 
+export async function ensureChatForJid(jid: string, optionalName?: string | null) {
+  const normalizedJid = normalizeChatJid(jid);
+
+  if (!normalizedJid) {
+    throw new Error("JID de conversa invalido");
+  }
+
+  const name = compactText(optionalName);
+
+  return prisma.whatsappChat.upsert({
+    where: {
+      jid: normalizedJid
+    },
+    update: {
+      ...(name ? { name } : {}),
+      isGroup: isGroupJid(normalizedJid)
+    },
+    create: {
+      jid: normalizedJid,
+      name,
+      isGroup: isGroupJid(normalizedJid)
+    }
+  });
+}
+
 function extractPhoneFromJid(jid: string) {
   if (!jid.endsWith("@s.whatsapp.net")) {
     return null;

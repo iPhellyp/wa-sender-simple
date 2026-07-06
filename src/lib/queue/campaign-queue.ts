@@ -6,6 +6,13 @@ export const SEND_RECIPIENT_JOB = "send-recipient";
 export const CONNECT_WHATSAPP_JOB = "connect-whatsapp";
 export const DISCONNECT_WHATSAPP_JOB = "disconnect-whatsapp";
 export const RESET_WHATSAPP_JOB = "reset-whatsapp";
+export const SEND_MANUAL_MESSAGE_JOB = "send-manual-message";
+
+export type SendManualMessageJobData = {
+  chatId: string;
+  jid: string;
+  text: string;
+};
 
 let queue: Queue | null = null;
 
@@ -80,4 +87,19 @@ export async function enqueueWhatsappReset() {
       removeOnFail: 100
     }
   );
+}
+
+export async function enqueueManualMessage(data: SendManualMessageJobData) {
+  const job = await getCampaignQueue().add(
+    SEND_MANUAL_MESSAGE_JOB,
+    data,
+    {
+      attempts: 1,
+      jobId: buildJobId("manual-send", data.chatId, String(Date.now())),
+      removeOnComplete: true,
+      removeOnFail: 1000
+    }
+  );
+
+  return job.id ?? null;
 }
