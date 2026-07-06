@@ -104,8 +104,21 @@ export function WhatsappClient() {
             >
               Desconectar
             </button>
+            <button
+              className="button danger"
+              disabled={busy}
+              type="button"
+              onClick={() => void postAction("/api/whatsapp/reset-session")}
+            >
+              Resetar sessao
+            </button>
           </div>
         </div>
+      </div>
+
+      <div className="message">
+        Use o reset de sessao se o QR nao aparecer ou se a sessao estiver corrompida. Depois
+        clique em Reconectar.
       </div>
 
       {error ? <div className="message error">{error}</div> : null}

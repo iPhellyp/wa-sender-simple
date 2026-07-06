@@ -5,6 +5,7 @@ export const CAMPAIGN_QUEUE_NAME = "campaign-sender";
 export const SEND_RECIPIENT_JOB = "send-recipient";
 export const CONNECT_WHATSAPP_JOB = "connect-whatsapp";
 export const DISCONNECT_WHATSAPP_JOB = "disconnect-whatsapp";
+export const RESET_WHATSAPP_JOB = "reset-whatsapp";
 
 let queue: Queue | null = null;
 
@@ -62,6 +63,19 @@ export async function enqueueWhatsappDisconnect() {
     {
       attempts: 1,
       jobId: buildJobId("disconnect-whatsapp", String(Date.now())),
+      removeOnComplete: true,
+      removeOnFail: 100
+    }
+  );
+}
+
+export async function enqueueWhatsappReset() {
+  await getCampaignQueue().add(
+    RESET_WHATSAPP_JOB,
+    {},
+    {
+      attempts: 1,
+      jobId: buildJobId("reset-whatsapp", String(Date.now())),
       removeOnComplete: true,
       removeOnFail: 100
     }

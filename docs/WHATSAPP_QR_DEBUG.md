@@ -22,6 +22,7 @@ Custom Id cannot contain :
 
 ```text
 [worker] connect-whatsapp job received
+[baileys] fetched latest version
 [baileys] creating socket
 [baileys] qr received and saved
 ```
@@ -36,26 +37,28 @@ Custom Id cannot contain :
 
 1. Veja `lastError` na tela `/whatsapp`.
 
-2. Veja os logs do worker:
+2. Se `lastError` indicar status 405, clique em `Resetar sessao`, aguarde o worker processar e depois clique em `Reconectar`.
+
+3. Veja os logs do worker:
 
 ```bash
 docker service logs wa_sender_simple_worker --tail 300 --no-trunc
 ```
 
-3. Teste permissao do volume dentro do container:
+4. Teste permissao do volume dentro do container:
 
 ```bash
 touch /app/data/baileys-session/.write-test
 rm /app/data/baileys-session/.write-test
 ```
 
-4. Confirme que o worker esta rodando:
+5. Confirme que o worker esta rodando:
 
 ```bash
 docker service ps wa_sender_simple_worker
 ```
 
-5. Confirme que Redis e Postgres estao internos no stack, sem portas publicas.
+6. Confirme que Redis e Postgres estao internos no stack, sem portas publicas.
 
 ## Logs uteis
 
@@ -65,6 +68,7 @@ Logs de fila:
 [worker] sender-worker started
 [worker] job received
 [worker] connect-whatsapp job received
+[worker] reset-whatsapp job received
 ```
 
 Logs de Baileys:
@@ -72,6 +76,7 @@ Logs de Baileys:
 ```text
 [baileys] creating socket
 [baileys] session dir: /app/data/baileys-session
+[baileys] fetched latest version
 [baileys] connection.update
 [baileys] qr received and saved
 ```

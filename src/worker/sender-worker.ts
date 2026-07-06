@@ -5,6 +5,7 @@ import {
   CAMPAIGN_QUEUE_NAME,
   CONNECT_WHATSAPP_JOB,
   DISCONNECT_WHATSAPP_JOB,
+  RESET_WHATSAPP_JOB,
   SEND_RECIPIENT_JOB,
   enqueueRecipient
 } from "../lib/queue/campaign-queue";
@@ -12,6 +13,7 @@ import { getRedisConnectionOptions } from "../lib/queue/connection";
 import {
   disconnectBaileys,
   markWhatsappError,
+  resetBaileysSession,
   sendWhatsappMessage,
   startBaileysConnection
 } from "../lib/baileys/client";
@@ -172,6 +174,22 @@ const worker = new Worker(
       } catch (error) {
         const lastError = `Falha ao desconectar WhatsApp no worker: ${getErrorMessage(error)}`;
         console.error("[worker] disconnect-whatsapp failed", { error: lastError });
+        await markWhatsappError(lastError);
+        throw error;
+      }
+
+      return;
+    }
+
+    if (job.name === RESET_WHATSAPP_JOB) {
+      console.log("[worker] reset-whatsapp job received");
+
+      try {
+        await resetBaileysSession();
+        console.log("[worker] reset-whatsapp finished");
+      } catch (error) {
+        const lastError = `Falha ao resetar sessao WhatsApp no worker: ${getErrorMessage(error)}`;
+        console.error("[worker] reset-whatsapp failed", { error: lastError });
         await markWhatsappError(lastError);
         throw error;
       }

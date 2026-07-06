@@ -1,10 +1,12 @@
 import makeWASocket, {
+  Browsers,
   DisconnectReason,
+  fetchLatestBaileysVersion,
   useMultiFileAuthState,
   WASocket
 } from "@whiskeysockets/baileys";
-import { mkdir, unlink, writeFile } from "fs/promises";
-import { join } from "path";
+import { mkdir, readdir, rm, unlink, writeFile } from "fs/promises";
+import { join, parse, resolve } from "path";
 import P from "pino";
 import QRCode from "qrcode";
 import { WhatsappStatus } from "@prisma/client";
@@ -16,6 +18,11 @@ const SESSION_ID = "default";
 
 let socket: WASocket | null = null;
 let startPromise: Promise<WASocket> | null = null;
+let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let qrTimeoutTimer: ReturnType<typeof setTimeout> | null = null;
+let manualDisconnectRequested = false;
+let hasReceivedQr = false;
+let connectRetryCount = 0;
 
 function getSessionDir() {
   return process.env.BAILEYS_SESSION_DIR ?? "./data/baileys-session";
@@ -23,6 +30,20 @@ function getSessionDir() {
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function clearReconnectTimer() {
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+}
+
+function clearQrTimeoutTimer() {
+  if (qrTimeoutTimer) {
+    clearTimeout(qrTimeoutTimer);
+    qrTimeoutTimer = null;
+  }
 }
 
 function sanitizeErrorMessage(error: unknown) {
@@ -74,8 +95,53 @@ async function assertSessionDirWritable(sessionDir: string) {
   }
 }
 
+function getSafeSessionDir() {
+  const sessionDir = resolve(getSessionDir());
+  const root = parse(sessionDir).root;
+  const normalizedSessionDir = sessionDir.toLowerCase();
+
+  if (
+    sessionDir === root ||
+    sessionDir.length < 8 ||
+    (!normalizedSessionDir.includes("baileys") && !normalizedSessionDir.includes("session"))
+  ) {
+    throw new Error(`Diretorio de sessao Baileys inseguro para reset: ${sessionDir}`);
+  }
+
+  return sessionDir;
+}
+
+async function clearSessionDir() {
+  const sessionDir = getSafeSessionDir();
+  await mkdir(sessionDir, { recursive: true });
+
+  const entries = await readdir(sessionDir, { withFileTypes: true });
+
+  for (const entry of entries) {
+    await rm(join(sessionDir, entry.name), {
+      recursive: true,
+      force: true
+    });
+  }
+}
+
+function scheduleReconnect(delayMs: number, reason: string) {
+  if (manualDisconnectRequested) {
+    console.log("[baileys] reconnect skipped after manual disconnect", { reason });
+    return;
+  }
+
+  clearReconnectTimer();
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    void startBaileysConnection({ resetRetry: false });
+  }, delayMs);
+}
+
 function scheduleQrTimeout() {
-  setTimeout(() => {
+  clearQrTimeoutTimer();
+  qrTimeoutTimer = setTimeout(() => {
+    qrTimeoutTimer = null;
     void (async () => {
       const session = await getWhatsappStatus();
 
@@ -135,6 +201,8 @@ async function handleIncomingMessages(event: {
 
 async function createSocket() {
   const sessionDir = getSessionDir();
+  clearReconnectTimer();
+  hasReceivedQr = false;
   console.log("[baileys] creating socket");
   console.log("[baileys] session dir:", sessionDir);
 
@@ -148,11 +216,21 @@ async function createSocket() {
   });
 
   const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
+  const { version, isLatest, error: versionError } = await fetchLatestBaileysVersion();
+
+  console.log("[baileys] fetched latest version", {
+    version: version.join("."),
+    isLatest,
+    error: versionError ? sanitizeErrorMessage(versionError) : null
+  });
+
   const sock = makeWASocket({
     auth: state,
+    version,
     printQRInTerminal: false,
     logger: P({ level: process.env.BAILEYS_LOG_LEVEL ?? "silent" }),
-    browser: ["WA Sender Simple", "Chrome", "1.0.0"]
+    browser: Browsers.macOS("Desktop"),
+    markOnlineOnConnect: false
   });
 
   socket = sock;
@@ -178,6 +256,9 @@ async function createSocket() {
       });
 
       if (update.qr) {
+        clearQrTimeoutTimer();
+        hasReceivedQr = true;
+        connectRetryCount = 0;
         const qrCode = await QRCode.toDataURL(update.qr);
         await saveWhatsappSession({
           status: WhatsappStatus.qr,
@@ -188,6 +269,8 @@ async function createSocket() {
       }
 
       if (update.connection === "open") {
+        clearQrTimeoutTimer();
+        connectRetryCount = 0;
         const connectedPhone = sock.user?.id?.split(":")[0]?.split("@")[0] ?? null;
         await saveWhatsappSession({
           status: WhatsappStatus.connected,
@@ -201,12 +284,32 @@ async function createSocket() {
       }
 
       if (update.connection === "close") {
+        clearQrTimeoutTimer();
+        const isStatus405BeforeQr = statusCode === 405 && !hasReceivedQr;
         const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
-        const lastError = lastDisconnectError ?? "Conexao encerrada";
+        const lastError = isStatus405BeforeQr
+          ? "Baileys fechou com status 405 antes de gerar QR. Possivel sessao corrompida ou versao WhatsApp Web incompativel."
+          : lastDisconnectError ?? "Conexao encerrada";
 
         socket = null;
+
+        if (manualDisconnectRequested) {
+          await saveWhatsappSession({
+            status: WhatsappStatus.disconnected,
+            qrCode: null,
+            connectedPhone: null,
+            lastError: null
+          });
+          console.log("[baileys] connection closed after manual disconnect");
+          return;
+        }
+
         await saveWhatsappSession({
-          status: shouldReconnect ? WhatsappStatus.disconnected : WhatsappStatus.error,
+          status: isStatus405BeforeQr && connectRetryCount >= 1
+            ? WhatsappStatus.error
+            : shouldReconnect
+              ? WhatsappStatus.disconnected
+              : WhatsappStatus.error,
           qrCode: null,
           connectedPhone: null,
           lastError
@@ -217,10 +320,19 @@ async function createSocket() {
           lastError
         });
 
+        if (isStatus405BeforeQr) {
+          if (connectRetryCount < 1) {
+            connectRetryCount += 1;
+            console.warn("[baileys] status 405 before qr, retrying once", {
+              retry: connectRetryCount
+            });
+            scheduleReconnect(3000, "status-405-before-qr");
+          }
+          return;
+        }
+
         if (shouldReconnect) {
-          setTimeout(() => {
-            void startBaileysConnection();
-          }, 5000);
+          scheduleReconnect(5000, "connection-close");
         }
       }
     })();
@@ -229,7 +341,14 @@ async function createSocket() {
   return sock;
 }
 
-export async function startBaileysConnection() {
+export async function startBaileysConnection(options: { resetRetry?: boolean } = {}) {
+  const shouldResetRetry = options.resetRetry ?? true;
+  manualDisconnectRequested = false;
+
+  if (shouldResetRetry) {
+    connectRetryCount = 0;
+  }
+
   if (socket) {
     return socket;
   }
@@ -316,10 +435,37 @@ export async function markWhatsappError(lastError: string) {
 }
 
 export async function disconnectBaileys() {
+  manualDisconnectRequested = true;
+  clearReconnectTimer();
+  clearQrTimeoutTimer();
+
   if (socket) {
     await socket.logout().catch(() => undefined);
     socket = null;
   }
+
+  await saveWhatsappSession({
+    status: WhatsappStatus.disconnected,
+    qrCode: null,
+    connectedPhone: null,
+    lastError: null
+  });
+}
+
+export async function resetBaileysSession() {
+  manualDisconnectRequested = true;
+  clearReconnectTimer();
+  clearQrTimeoutTimer();
+  connectRetryCount = 0;
+  hasReceivedQr = false;
+
+  if (socket) {
+    socket.end(new Error("Reset manual da sessao Baileys"));
+    socket = null;
+  }
+
+  startPromise = null;
+  await clearSessionDir();
 
   await saveWhatsappSession({
     status: WhatsappStatus.disconnected,
