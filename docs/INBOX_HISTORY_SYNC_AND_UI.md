@@ -31,7 +31,7 @@ Se a sessao ja estava pareada antes de `syncFullHistory: true`, o WhatsApp pode 
 
 Alguns contatos tambem podem chegar sem nome amigavel. Dependendo do evento, a Baileys pode entregar apenas JID, telefone, `lid`, `pushName` parcial ou nenhum historico de mensagem.
 
-O botao `Sincronizar historico` enfileira um job para manter o socket ativo e registrar a solicitacao, mas nao executa `fetchMessageHistory` sem cursor seguro. Na versao instalada, `fetchMessageHistory` exige:
+O botao `Verificar historico` consulta o status atual da sessao e retorna orientacao informativa. Ele nao cria socket novo, nao chama `startBaileysConnection` e nao executa `fetchMessageHistory` sem cursor seguro. Na versao instalada, `fetchMessageHistory` exige:
 
 - quantidade;
 - chave da mensagem mais antiga;
@@ -51,6 +51,26 @@ A UI nao usa JID cru como primeira opcao quando existe dado melhor. O nome exibi
 6. JID completo apenas como ultimo fallback.
 
 O sync tambem evita sobrescrever um nome bom com candidato pior. Valores iguais ao JID, `@lid` cru ou telefone puro do proprio JID sao tratados como ausencia de nome.
+
+## Status 428 e sessao removida no celular
+
+O status `428` (`Connection Terminated`) significa sessao encerrada, invalida ou removida no celular. Nesse caso o Baileys **nao** deve reconectar em loop.
+
+Comportamento esperado apos o hotfix:
+
+1. O worker para de criar sockets repetidos.
+2. `WhatsappSession` fica `disconnected` ou `error`, com `qrCode` e `connectedPhone` nulos.
+3. `lastError` orienta: use Resetar sessao e Reconectar para gerar novo QR.
+
+Para gerar QR novo apos remover o dispositivo no celular:
+
+1. Pare o worker se estiver em loop infinito.
+2. Aplique o hotfix e faca deploy.
+3. Em `/whatsapp`, clique em `Resetar sessao`.
+4. Clique em `Reconectar`.
+5. Escaneie o QR Code novo.
+
+Nao clique repetidamente em `Verificar historico`. O botao apenas confirma status e orienta; nao forca historico antigo.
 
 ## Quando usar reset/reconnect manual
 
@@ -101,12 +121,23 @@ Mensagens:
 [sync] messages upsert { type: "notify", messages: X, processed: X, skipped: Y, failed: Z }
 ```
 
-Solicitacao manual de sync:
+Solicitacao manual de verificacao de historico:
 
 ```text
-[worker] sync-whatsapp-history job received
+[baileys] history sync skipped; not connected { status: "disconnected" }
+```
+
+ou, se conectado:
+
+```text
 [baileys] history sync requested { syncFullHistory: true, hasOnDemandHistory: true, mode: "event-driven" }
-[worker] sync-whatsapp-history finished { hasOnDemandHistory: true, mode: "event-driven" }
+```
+
+Sessao encerrada no celular (428):
+
+```text
+[baileys] connection.update { connection: "close", hasQr: false, statusCode: 428, error: "Connection Terminated" }
+[baileys] connection terminated 428; reconnect disabled
 ```
 
 ## Mudancas de UI
@@ -119,7 +150,7 @@ Solicitacao manual de sync:
 - busca grande;
 - lista de conversas em cards com nome amigavel, telefone/JID discreto e badges;
 - botao compacto de nova conversa;
-- botao de sincronizar historico.
+- botao de verificar historico.
 
 O filtro `Sem mensagem` concentra contatos sincronizados que ainda nao possuem mensagem salva. Isso evita que a tela inicial vire uma lista gigante de JIDs ou contatos vazios.
 

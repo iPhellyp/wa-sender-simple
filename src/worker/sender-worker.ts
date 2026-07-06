@@ -310,18 +310,11 @@ const worker = new Worker(
     if (job.name === SYNC_WHATSAPP_HISTORY_JOB) {
       console.log("[worker] sync-whatsapp-history job received");
 
-      try {
-        const result = await requestWhatsappHistorySync();
-        console.log("[worker] sync-whatsapp-history finished", {
-          hasOnDemandHistory: result.hasOnDemandHistory,
-          mode: "event-driven"
-        });
-      } catch (error) {
-        const lastError = `Falha ao solicitar sync de historico WhatsApp no worker: ${getErrorMessage(error)}`;
-        console.error("[worker] sync-whatsapp-history failed", { error: lastError });
-        await markWhatsappError(lastError);
-        throw error;
-      }
+      const result = await requestWhatsappHistorySync();
+      console.log("[worker] sync-whatsapp-history finished", {
+        ok: result.ok,
+        mode: result.mode
+      });
 
       return;
     }

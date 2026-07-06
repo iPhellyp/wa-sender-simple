@@ -82,3 +82,22 @@ Logs de Baileys:
 ```
 
 Nunca cole QR Code, token, senha ou `DATABASE_URL` completo em chamados de suporte.
+
+## Status 428 — sessao removida no celular
+
+Se o usuario removeu o dispositivo no celular, o Baileys pode fechar com:
+
+```text
+[baileys] connection.update { connection: "close", statusCode: 428, error: "Connection Terminated" }
+[baileys] connection terminated 428; reconnect disabled
+```
+
+Nesse cenario:
+
+1. O sistema **nao** reconecta em loop.
+2. A tela `/whatsapp` deve mostrar `disconnected` ou `error`, com `lastError` orientando reset.
+3. Pare o worker se ainda estiver em loop (versao antiga).
+4. Aplique o hotfix e faca deploy.
+5. Clique em `Resetar sessao`, depois `Reconectar`, e escaneie o QR novo.
+
+Nao espere QR novo sem resetar a sessao apos 428.

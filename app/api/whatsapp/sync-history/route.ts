@@ -1,22 +1,17 @@
 import { NextResponse } from "next/server";
-import { enqueueWhatsappHistorySync } from "@/src/lib/queue/campaign-queue";
+import { requestWhatsappHistorySync } from "@/src/lib/baileys/client";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function POST() {
   try {
-    const jobId = await enqueueWhatsappHistorySync();
+    const result = await requestWhatsappHistorySync();
 
-    return NextResponse.json({
-      ok: true,
-      jobId,
-      message:
-        "Solicitacao enviada ao worker. O historico completo depende dos eventos do WhatsApp; se a sessao antiga nao reenviar historico, pode ser necessario reconectar manualmente."
-    });
+    return NextResponse.json(result);
   } catch {
     return NextResponse.json(
-      { error: "Erro ao enfileirar sincronizacao de historico" },
+      { ok: false, error: "Erro ao verificar historico" },
       { status: 500 }
     );
   }

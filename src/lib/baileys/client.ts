@@ -35,6 +35,13 @@ let qrTimeoutTimer: ReturnType<typeof setTimeout> | null = null;
 let manualDisconnectRequested = false;
 let hasReceivedQr = false;
 let connectRetryCount = 0;
+let socketGeneration = 0;
+let status515RestartCount = 0;
+let generalReconnectCount = 0;
+
+const MAX_GENERAL_RECONNECT_ATTEMPTS = 5;
+const TERMINAL_SESSION_MESSAGE =
+  "Conexao WhatsApp encerrada ou removida no celular. Use Resetar sessao e Reconectar para gerar novo QR.";
 
 function getSessionDir() {
   return process.env.BAILEYS_SESSION_DIR ?? "./data/baileys-session";
@@ -56,6 +63,30 @@ function clearQrTimeoutTimer() {
     clearTimeout(qrTimeoutTimer);
     qrTimeoutTimer = null;
   }
+}
+
+function invalidateSocketHandlers() {
+  socketGeneration += 1;
+}
+
+function resetReconnectCounters() {
+  connectRetryCount = 0;
+  status515RestartCount = 0;
+  generalReconnectCount = 0;
+}
+
+function isTerminalSessionStatusCode(statusCode: number | undefined) {
+  if (statusCode === undefined) {
+    return false;
+  }
+
+  return (
+    statusCode === 428 ||
+    statusCode === DisconnectReason.loggedOut ||
+    statusCode === DisconnectReason.badSession ||
+    statusCode === DisconnectReason.connectionReplaced ||
+    statusCode === DisconnectReason.multideviceMismatch
+  );
 }
 
 function sanitizeErrorMessage(error: unknown) {
@@ -257,6 +288,14 @@ async function handleIncomingMessages(event: BaileysEventMap["messages.upsert"])
 }
 
 async function createSocket() {
+  invalidateSocketHandlers();
+  const localGeneration = socketGeneration;
+
+  if (socket) {
+    socket.end(new Error("Replacing existing socket"));
+    socket = null;
+  }
+
   const sessionDir = getSessionDir();
   clearReconnectTimer();
   hasReceivedQr = false;
@@ -322,6 +361,11 @@ async function createSocket() {
 
   sock.ev.on("connection.update", (update) => {
     void (async () => {
+      if (localGeneration !== socketGeneration) {
+        console.log("[baileys] stale connection update ignored");
+        return;
+      }
+
       const statusCode = getDisconnectStatusCode(update.lastDisconnect?.error);
       const lastDisconnectError = update.lastDisconnect?.error
         ? sanitizeErrorMessage(update.lastDisconnect.error)
@@ -337,7 +381,7 @@ async function createSocket() {
       if (update.qr) {
         clearQrTimeoutTimer();
         hasReceivedQr = true;
-        connectRetryCount = 0;
+        resetReconnectCounters();
         const qrCode = await QRCode.toDataURL(update.qr);
         await saveWhatsappSession({
           status: WhatsappStatus.qr,
@@ -349,7 +393,7 @@ async function createSocket() {
 
       if (update.connection === "open") {
         clearQrTimeoutTimer();
-        connectRetryCount = 0;
+        resetReconnectCounters();
         const connectedPhone = sock.user?.id?.split(":")[0]?.split("@")[0] ?? null;
         await saveWhatsappSession({
           status: WhatsappStatus.connected,
@@ -365,12 +409,9 @@ async function createSocket() {
       if (update.connection === "close") {
         clearQrTimeoutTimer();
         const isStatus405BeforeQr = statusCode === 405 && !hasReceivedQr;
-        const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
-        const lastError = isStatus405BeforeQr
-          ? "Baileys fechou com status 405 antes de gerar QR. Possivel sessao corrompida ou versao WhatsApp Web incompativel."
-          : lastDisconnectError ?? "Conexao encerrada";
 
         socket = null;
+        startPromise = null;
 
         if (manualDisconnectRequested) {
           await saveWhatsappSession({
@@ -383,36 +424,118 @@ async function createSocket() {
           return;
         }
 
+        if (statusCode === 428 || isTerminalSessionStatusCode(statusCode)) {
+          clearReconnectTimer();
+          const lastError =
+            statusCode === 428
+              ? TERMINAL_SESSION_MESSAGE
+              : lastDisconnectError ?? TERMINAL_SESSION_MESSAGE;
+
+          await saveWhatsappSession({
+            status: WhatsappStatus.disconnected,
+            qrCode: null,
+            connectedPhone: null,
+            lastError
+          });
+
+          if (statusCode === 428) {
+            console.log("[baileys] connection terminated 428; reconnect disabled");
+          } else {
+            console.log("[baileys] connection terminated; reconnect disabled", { statusCode });
+          }
+
+          return;
+        }
+
+        if (isStatus405BeforeQr) {
+          const lastError =
+            "Baileys fechou com status 405 antes de gerar QR. Possivel sessao corrompida ou versao WhatsApp Web incompativel.";
+
+          if (connectRetryCount < 1) {
+            connectRetryCount += 1;
+            await saveWhatsappSession({
+              status: WhatsappStatus.disconnected,
+              qrCode: null,
+              connectedPhone: null,
+              lastError
+            });
+            console.warn("[baileys] status 405 before qr, retrying once", {
+              retry: connectRetryCount
+            });
+            scheduleReconnect(3000, "status-405-before-qr");
+            return;
+          }
+
+          clearReconnectTimer();
+          await saveWhatsappSession({
+            status: WhatsappStatus.error,
+            qrCode: null,
+            connectedPhone: null,
+            lastError
+          });
+          console.log("[baileys] connection terminated; reconnect disabled", { statusCode: 405 });
+          return;
+        }
+
+        if (statusCode === DisconnectReason.restartRequired) {
+          const lastError = lastDisconnectError ?? "Restart necessario";
+
+          if (status515RestartCount < 1) {
+            status515RestartCount += 1;
+            await saveWhatsappSession({
+              status: WhatsappStatus.disconnected,
+              qrCode: null,
+              connectedPhone: null,
+              lastError
+            });
+            console.warn("[baileys] status 515, restarting once", {
+              retry: status515RestartCount
+            });
+            scheduleReconnect(3000, "status-515-restart");
+            return;
+          }
+
+          clearReconnectTimer();
+          await saveWhatsappSession({
+            status: WhatsappStatus.error,
+            qrCode: null,
+            connectedPhone: null,
+            lastError: "Restart repetido; use Resetar sessao e Reconectar."
+          });
+          console.log("[baileys] connection terminated; reconnect disabled", { statusCode: 515 });
+          return;
+        }
+
+        const lastError = lastDisconnectError ?? "Conexao encerrada";
+
         await saveWhatsappSession({
-          status: isStatus405BeforeQr && connectRetryCount >= 1
-            ? WhatsappStatus.error
-            : shouldReconnect
-              ? WhatsappStatus.disconnected
-              : WhatsappStatus.error,
+          status: WhatsappStatus.disconnected,
           qrCode: null,
           connectedPhone: null,
           lastError
         });
         console.warn("[baileys] connection closed", {
           statusCode,
-          shouldReconnect,
           lastError
         });
 
-        if (isStatus405BeforeQr) {
-          if (connectRetryCount < 1) {
-            connectRetryCount += 1;
-            console.warn("[baileys] status 405 before qr, retrying once", {
-              retry: connectRetryCount
-            });
-            scheduleReconnect(3000, "status-405-before-qr");
-          }
+        if (generalReconnectCount >= MAX_GENERAL_RECONNECT_ATTEMPTS) {
+          clearReconnectTimer();
+          await saveWhatsappSession({
+            status: WhatsappStatus.error,
+            qrCode: null,
+            connectedPhone: null,
+            lastError: `Limite de reconnect atingido (${MAX_GENERAL_RECONNECT_ATTEMPTS}). Use Resetar sessao e Reconectar.`
+          });
+          console.log("[baileys] connection terminated; reconnect disabled", {
+            statusCode,
+            reason: "max-reconnect"
+          });
           return;
         }
 
-        if (shouldReconnect) {
-          scheduleReconnect(5000, "connection-close");
-        }
+        generalReconnectCount += 1;
+        scheduleReconnect(5000, "connection-close");
       }
     })();
   });
@@ -425,29 +548,43 @@ export async function startBaileysConnection(options: { resetRetry?: boolean } =
   manualDisconnectRequested = false;
 
   if (shouldResetRetry) {
-    connectRetryCount = 0;
+    resetReconnectCounters();
+  }
+
+  if (reconnectTimer) {
+    console.log("[baileys] start skipped; reconnect pending");
+    if (startPromise) {
+      return startPromise;
+    }
+    throw new Error("Aguardando reconnect agendado");
+  }
+
+  if (startPromise) {
+    console.log("[baileys] start skipped; socket already starting");
+    return startPromise;
   }
 
   if (socket) {
+    console.log("[baileys] start skipped; socket already exists");
     return socket;
   }
 
-  if (!startPromise) {
-    startPromise = createSocket()
-      .catch(async (error) => {
-        const lastError = sanitizeErrorMessage(error) || "Erro ao iniciar Baileys";
-        await saveWhatsappSession({
-          status: WhatsappStatus.error,
-          qrCode: null,
-          connectedPhone: null,
-          lastError
-        });
-        throw error;
-      })
-      .finally(() => {
-        startPromise = null;
+  startPromise = createSocket()
+    .catch(async (error) => {
+      startPromise = null;
+      const lastError = sanitizeErrorMessage(error) || "Erro ao iniciar Baileys";
+      console.log("[baileys] start failed with terminal status", { lastError });
+      await saveWhatsappSession({
+        status: WhatsappStatus.error,
+        qrCode: null,
+        connectedPhone: null,
+        lastError
       });
-  }
+      throw error;
+    })
+    .finally(() => {
+      startPromise = null;
+    });
 
   return startPromise;
 }
@@ -515,8 +652,11 @@ export async function markWhatsappError(lastError: string) {
 
 export async function disconnectBaileys() {
   manualDisconnectRequested = true;
+  invalidateSocketHandlers();
   clearReconnectTimer();
   clearQrTimeoutTimer();
+  resetReconnectCounters();
+  startPromise = null;
 
   if (socket) {
     await socket.logout().catch(() => undefined);
@@ -533,17 +673,18 @@ export async function disconnectBaileys() {
 
 export async function resetBaileysSession() {
   manualDisconnectRequested = true;
+  invalidateSocketHandlers();
   clearReconnectTimer();
   clearQrTimeoutTimer();
-  connectRetryCount = 0;
+  resetReconnectCounters();
   hasReceivedQr = false;
+  startPromise = null;
 
   if (socket) {
     socket.end(new Error("Reset manual da sessao Baileys"));
     socket = null;
   }
 
-  startPromise = null;
   await clearSessionDir();
 
   await saveWhatsappSession({
@@ -555,20 +696,31 @@ export async function resetBaileysSession() {
 }
 
 export async function requestWhatsappHistorySync() {
-  await startBaileysConnection();
+  const session = await getWhatsappStatus();
 
-  const hasOnDemandHistory = typeof socket?.fetchMessageHistory === "function";
+  if (session.status !== WhatsappStatus.connected) {
+    console.log("[baileys] history sync skipped; not connected", {
+      status: session.status
+    });
+
+    return {
+      ok: false,
+      mode: "event-driven" as const,
+      message: "WhatsApp nao esta conectado. Reconecte primeiro."
+    };
+  }
+
   console.log("[baileys] history sync requested", {
     syncFullHistory: true,
-    hasOnDemandHistory,
+    hasOnDemandHistory: typeof socket?.fetchMessageHistory === "function",
     mode: "event-driven"
   });
 
   return {
     ok: true,
-    hasOnDemandHistory,
+    mode: "event-driven" as const,
     message:
-      "Sync full history esta configurado. A chegada de historico depende dos eventos do WhatsApp; fetchMessageHistory exige cursor de mensagem e nao foi executado sem referencia segura."
+      "O historico depende dos eventos enviados pelo WhatsApp. Para tentar historico completo, resetar e parear novamente."
   };
 }
 
