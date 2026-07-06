@@ -2,6 +2,10 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AppShell } from "@/app/components/AppShell";
 import { prisma } from "@/src/lib/prisma/client";
+import {
+  getWhatsappDisplayName,
+  getWhatsappIdentityLabel
+} from "@/src/lib/whatsapp/display-name";
 import { SendMessageForm } from "./SendMessageForm";
 
 export const runtime = "nodejs";
@@ -11,6 +15,12 @@ type ConversationDetailPageProps = {
   params: Promise<{
     id: string;
   }>;
+};
+
+type ContactSummary = {
+  jid: string;
+  name: string | null;
+  pushName: string | null;
 };
 
 const dateFormatter = new Intl.DateTimeFormat("pt-BR", {
@@ -30,15 +40,18 @@ function messageText(message: {
   return message.text ?? (message.messageType ? `[${message.messageType}]` : "Sem texto");
 }
 
-function getTitle(chat: {
-  jid: string;
-  name: string | null;
-}) {
-  if (chat.name) {
-    return chat.name;
+function getContactDisplayName(jid: string | null, contactByJid: Map<string, ContactSummary>) {
+  if (!jid) {
+    return null;
   }
 
-  return chat.jid.endsWith("@s.whatsapp.net") ? chat.jid.split("@")[0] : chat.jid;
+  const contact = contactByJid.get(jid);
+
+  return getWhatsappDisplayName({
+    jid,
+    contactName: contact?.name,
+    contactPushName: contact?.pushName
+  });
 }
 
 export default async function ConversationDetailPage({ params }: ConversationDetailPageProps) {
@@ -67,7 +80,34 @@ export default async function ConversationDetailPage({ params }: ConversationDet
   }
 
   const messages = [...chat.messages].reverse();
-  const title = getTitle(chat);
+  const contactJids = Array.from(
+    new Set([chat.jid, ...messages.map((message) => message.senderJid).filter((jid): jid is string => Boolean(jid))])
+  );
+  const contacts = contactJids.length > 0
+    ? await prisma.whatsappContact.findMany({
+        where: {
+          jid: {
+            in: contactJids
+          }
+        },
+        select: {
+          jid: true,
+          name: true,
+          pushName: true
+        }
+      })
+    : [];
+  const contactByJid = new Map<string, ContactSummary>(
+    contacts.map((contact) => [contact.jid, contact])
+  );
+  const chatContact = contactByJid.get(chat.jid);
+  const title = getWhatsappDisplayName({
+    jid: chat.jid,
+    chatName: chat.name,
+    contactName: chatContact?.name,
+    contactPushName: chatContact?.pushName,
+    isGroup: chat.isGroup
+  });
 
   return (
     <AppShell
@@ -95,7 +135,7 @@ export default async function ConversationDetailPage({ params }: ConversationDet
                 {chat.isGroup ? "grupo" : "contato"}
               </span>
             </div>
-            <div className="chat-subtitle">{chat.jid}</div>
+            <div className="chat-subtitle">{getWhatsappIdentityLabel(chat.jid)}</div>
             <div className="chat-meta-row">
               <span>Ultima mensagem: {formatDate(chat.lastMessageAt)}</span>
               <span>{messages.length} exibidas</span>
@@ -118,7 +158,9 @@ export default async function ConversationDetailPage({ params }: ConversationDet
               >
                 <div className="chat-bubble">
                   {chat.isGroup && !message.fromMe && message.senderJid ? (
-                    <div className="chat-sender">{message.senderJid}</div>
+                    <div className="chat-sender">
+                      {getContactDisplayName(message.senderJid, contactByJid)}
+                    </div>
                   ) : null}
                   <div className="chat-message-text">{messageText(message)}</div>
                   <div className="chat-message-time">

@@ -2,6 +2,10 @@ import Link from "next/link";
 import type { Prisma } from "@prisma/client";
 import { AppShell } from "@/app/components/AppShell";
 import { prisma } from "@/src/lib/prisma/client";
+import {
+  getWhatsappDisplayName,
+  getWhatsappIdentityLabel
+} from "@/src/lib/whatsapp/display-name";
 import { StartConversationForm } from "./StartConversationForm";
 import { SyncHistoryButton } from "./SyncHistoryButton";
 
@@ -15,7 +19,25 @@ type ConversationsPageProps = {
   }>;
 };
 
-type ConversationFilter = "all" | "contacts" | "groups" | "unread";
+type ConversationFilter = "recent" | "all" | "contacts" | "groups" | "empty";
+
+const chatListInclude = {
+  _count: {
+    select: {
+      messages: true
+    }
+  }
+} satisfies Prisma.WhatsappChatInclude;
+
+type ChatListItem = Prisma.WhatsappChatGetPayload<{
+  include: typeof chatListInclude;
+}>;
+
+type ContactSummary = {
+  jid: string;
+  name: string | null;
+  pushName: string | null;
+};
 
 const dateFormatter = new Intl.DateTimeFormat("pt-BR", {
   dateStyle: "short",
@@ -24,14 +46,15 @@ const dateFormatter = new Intl.DateTimeFormat("pt-BR", {
 });
 
 const filterLabels: Record<ConversationFilter, string> = {
+  recent: "Recentes",
   all: "Todas",
   contacts: "Contatos",
   groups: "Grupos",
-  unread: "Nao lidas"
+  empty: "Sem mensagem"
 };
 
 function formatDate(value: Date | null) {
-  return value ? dateFormatter.format(value) : "-";
+  return value ? dateFormatter.format(value) : null;
 }
 
 function getLastDirection(chat: {
@@ -46,7 +69,7 @@ function getLastDirection(chat: {
     return "Contato";
   }
 
-  return "-";
+  return null;
 }
 
 function getSearchValue(searchParams: Awaited<ConversationsPageProps["searchParams"]>) {
@@ -60,17 +83,23 @@ function getFilterValue(searchParams: Awaited<ConversationsPageProps["searchPara
   const rawType = searchParams?.type;
   const type = Array.isArray(rawType) ? rawType[0] : rawType;
 
-  if (type === "contacts" || type === "groups" || type === "unread") {
+  if (
+    type === "all" ||
+    type === "contacts" ||
+    type === "groups" ||
+    type === "empty" ||
+    type === "recent"
+  ) {
     return type;
   }
 
-  return "all";
+  return "recent";
 }
 
 function buildFilterHref(type: ConversationFilter, query: string) {
   const params = new URLSearchParams();
 
-  if (type !== "all") {
+  if (type !== "recent") {
     params.set("type", type);
   }
 
@@ -82,17 +111,6 @@ function buildFilterHref(type: ConversationFilter, query: string) {
   return suffix ? `/conversas?${suffix}` : "/conversas";
 }
 
-function getPhoneFromJid(jid: string) {
-  return jid.endsWith("@s.whatsapp.net") ? jid.split("@")[0] : jid;
-}
-
-function getConversationName(chat: {
-  jid: string;
-  name: string | null;
-}) {
-  return chat.name ?? getPhoneFromJid(chat.jid);
-}
-
 function getAvatarText(name: string, isGroup: boolean) {
   if (isGroup) {
     return "G";
@@ -101,81 +119,272 @@ function getAvatarText(name: string, isGroup: boolean) {
   return name.replace(/\W/g, "").slice(0, 1).toUpperCase() || "#";
 }
 
+function andWhere(...items: Prisma.WhatsappChatWhereInput[]): Prisma.WhatsappChatWhereInput {
+  const filters = items.filter((item) => Object.keys(item).length > 0);
+
+  if (filters.length === 0) {
+    return {};
+  }
+
+  return {
+    AND: filters
+  } satisfies Prisma.WhatsappChatWhereInput;
+}
+
+function getScopeWhere(type: ConversationFilter): Prisma.WhatsappChatWhereInput {
+  if (type === "contacts") {
+    return {
+      isGroup: false
+    };
+  }
+
+  if (type === "groups") {
+    return {
+      isGroup: true
+    };
+  }
+
+  if (type === "empty") {
+    return {
+      messages: {
+        none: {}
+      }
+    };
+  }
+
+  if (type === "recent") {
+    return {
+      messages: {
+        some: {}
+      }
+    };
+  }
+
+  return {};
+}
+
+function getSearchWhere(query: string, matchedContactJids: string[]): Prisma.WhatsappChatWhereInput {
+  if (!query) {
+    return {};
+  }
+
+  const filters: Prisma.WhatsappChatWhereInput[] = [
+    {
+      name: {
+        contains: query,
+        mode: "insensitive"
+      }
+    },
+    {
+      jid: {
+        contains: query,
+        mode: "insensitive"
+      }
+    },
+    {
+      lastMessageText: {
+        contains: query,
+        mode: "insensitive"
+      }
+    }
+  ];
+
+  if (matchedContactJids.length > 0) {
+    filters.push({
+      jid: {
+        in: matchedContactJids
+      }
+    });
+  }
+
+  return {
+    OR: filters
+  };
+}
+
+function sortConversations(a: ChatListItem, b: ChatListItem) {
+  const aHasMessage = a._count.messages > 0 || Boolean(a.lastMessageAt);
+  const bHasMessage = b._count.messages > 0 || Boolean(b.lastMessageAt);
+
+  if (aHasMessage !== bHasMessage) {
+    return aHasMessage ? -1 : 1;
+  }
+
+  if (aHasMessage && bHasMessage) {
+    const lastA = a.lastMessageAt?.getTime() ?? a.updatedAt.getTime();
+    const lastB = b.lastMessageAt?.getTime() ?? b.updatedAt.getTime();
+
+    return lastB - lastA;
+  }
+
+  if (a.isGroup !== b.isGroup) {
+    return a.isGroup ? -1 : 1;
+  }
+
+  return b.updatedAt.getTime() - a.updatedAt.getTime();
+}
+
+async function findMatchingContactJids(query: string) {
+  if (!query) {
+    return [];
+  }
+
+  const numericQuery = query.replace(/\D/g, "");
+  const filters: Prisma.WhatsappContactWhereInput[] = [
+    {
+      jid: {
+        contains: query,
+        mode: "insensitive"
+      }
+    },
+    {
+      name: {
+        contains: query,
+        mode: "insensitive"
+      }
+    },
+    {
+      pushName: {
+        contains: query,
+        mode: "insensitive"
+      }
+    }
+  ];
+
+  if (numericQuery) {
+    filters.push({
+      phone: {
+        contains: numericQuery
+      }
+    });
+  }
+
+  const contacts = await prisma.whatsappContact.findMany({
+    where: {
+      OR: filters
+    },
+    select: {
+      jid: true
+    },
+    take: 150
+  });
+
+  return contacts.map((contact) => contact.jid);
+}
+
+function getFilterCount(type: ConversationFilter, counts: {
+  totalChats: number;
+  withMessagesCount: number;
+  individualCount: number;
+  groupCount: number;
+  emptyCount: number;
+}) {
+  if (type === "all") {
+    return counts.totalChats;
+  }
+
+  if (type === "contacts") {
+    return counts.individualCount;
+  }
+
+  if (type === "groups") {
+    return counts.groupCount;
+  }
+
+  if (type === "empty") {
+    return counts.emptyCount;
+  }
+
+  return counts.withMessagesCount;
+}
+
 export default async function ConversationsPage({ searchParams }: ConversationsPageProps) {
   const resolvedSearchParams = await searchParams;
   const query = getSearchValue(resolvedSearchParams);
   const type = getFilterValue(resolvedSearchParams);
-  const where: Prisma.WhatsappChatWhereInput = {
-    ...(type === "contacts" ? { isGroup: false } : {}),
-    ...(type === "groups" ? { isGroup: true } : {}),
-    ...(type === "unread" ? { unreadCount: { gt: 0 } } : {}),
-    ...(query
-      ? {
-          OR: [
-            {
-              name: {
-                contains: query,
-                mode: "insensitive"
-              }
-            },
-            {
-              jid: {
-                contains: query,
-                mode: "insensitive"
-              }
-            },
-            {
-              lastMessageText: {
-                contains: query,
-                mode: "insensitive"
-              }
-            }
-          ]
-        }
-      : {})
-  };
+  const matchedContactJids = await findMatchingContactJids(query);
+  const where = andWhere(getScopeWhere(type), getSearchWhere(query, matchedContactJids));
 
-  const [chats, totalChats, individualCount, groupCount, unreadCount, messageCount] =
-    await Promise.all([
-      prisma.whatsappChat.findMany({
-        where,
-        orderBy: [
-          {
-            lastMessageAt: "desc"
-          },
-          {
-            updatedAt: "desc"
+  const [
+    chats,
+    totalChats,
+    withMessagesCount,
+    individualCount,
+    groupCount,
+    emptyCount
+  ] = await Promise.all([
+    prisma.whatsappChat.findMany({
+      where,
+      orderBy: [
+        {
+          lastMessageAt: {
+            sort: "desc",
+            nulls: "last"
           }
-        ],
-        take: 100,
-        include: {
-          _count: {
-            select: {
-              messages: true
-            }
+        },
+        {
+          isGroup: "desc"
+        },
+        {
+          updatedAt: "desc"
+        }
+      ],
+      take: type === "empty" ? 120 : 150,
+      include: chatListInclude
+    }),
+    prisma.whatsappChat.count(),
+    prisma.whatsappChat.count({
+      where: {
+        messages: {
+          some: {}
+        }
+      }
+    }),
+    prisma.whatsappChat.count({
+      where: {
+        isGroup: false
+      }
+    }),
+    prisma.whatsappChat.count({
+      where: {
+        isGroup: true
+      }
+    }),
+    prisma.whatsappChat.count({
+      where: {
+        messages: {
+          none: {}
+        }
+      }
+    })
+  ]);
+
+  const sortedChats = [...chats].sort(sortConversations);
+  const chatJids = sortedChats.map((chat) => chat.jid);
+  const contacts = chatJids.length > 0
+    ? await prisma.whatsappContact.findMany({
+        where: {
+          jid: {
+            in: chatJids
           }
+        },
+        select: {
+          jid: true,
+          name: true,
+          pushName: true
         }
-      }),
-      prisma.whatsappChat.count(),
-      prisma.whatsappChat.count({
-        where: {
-          isGroup: false
-        }
-      }),
-      prisma.whatsappChat.count({
-        where: {
-          isGroup: true
-        }
-      }),
-      prisma.whatsappChat.count({
-        where: {
-          unreadCount: {
-            gt: 0
-          }
-        }
-      }),
-      prisma.whatsappMessage.count()
-    ]);
+      })
+    : [];
+  const contactByJid = new Map<string, ContactSummary>(
+    contacts.map((contact) => [contact.jid, contact])
+  );
+  const counts = {
+    totalChats,
+    withMessagesCount,
+    individualCount,
+    groupCount,
+    emptyCount
+  };
 
   return (
     <AppShell title="Inbox WhatsApp">
@@ -183,11 +392,12 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
         <div className="inbox-hero">
           <div>
             <p className="page-subtitle">
-              {totalChats} conversas sincronizadas, {messageCount} mensagens salvas
+              {withMessagesCount} conversas com mensagens, {emptyCount} contatos sem mensagem salva
             </p>
             <p className="muted">
-              Use a sincronizacao para escutar eventos de historico. Se a sessao antiga nao reenviar tudo,
-              pode ser necessario reconectar manualmente.
+              Alguns contatos podem aparecer sem nome ou mensagem porque o WhatsApp nem sempre envia todo
+              o historico para sessao ja pareada. Se o historico antigo nao vier, pode ser necessario
+              resetar/reconectar manualmente.
             </p>
           </div>
           <div className="inbox-actions">
@@ -202,6 +412,10 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
             <strong>{totalChats}</strong>
           </article>
           <article className="metric-card">
+            <span>Com mensagem</span>
+            <strong>{withMessagesCount}</strong>
+          </article>
+          <article className="metric-card">
             <span>Contatos individuais</span>
             <strong>{individualCount}</strong>
           </article>
@@ -210,8 +424,8 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
             <strong>{groupCount}</strong>
           </article>
           <article className="metric-card">
-            <span>Mensagens salvas</span>
-            <strong>{messageCount}</strong>
+            <span>Sem mensagem</span>
+            <strong>{emptyCount}</strong>
           </article>
         </div>
 
@@ -224,13 +438,13 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
                 key={filter}
               >
                 {filterLabels[filter]}
-                {filter === "unread" && unreadCount > 0 ? <span>{unreadCount}</span> : null}
+                <span>{getFilterCount(filter, counts)}</span>
               </Link>
             ))}
           </nav>
 
           <form action="/conversas" className="inbox-search" method="get">
-            {type !== "all" ? <input name="type" type="hidden" value={type} /> : null}
+            {type !== "recent" ? <input name="type" type="hidden" value={type} /> : null}
             <input
               className="input"
               defaultValue={query}
@@ -244,22 +458,32 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
           </form>
         </div>
 
-        {individualCount === 0 && groupCount > 0 ? (
+        {type !== "empty" && emptyCount > 0 ? (
           <div className="empty-hint">
-            Ainda nao ha conversas individuais sincronizadas. Tente Sincronizar historico ou inicie uma nova
-            conversa por telefone.
+            A inbox abre em Recentes para evitar uma lista poluida. Use o filtro Sem mensagem para ver
+            contatos sincronizados sem historico salvo.
           </div>
         ) : null}
 
-        {chats.length === 0 ? (
+        {sortedChats.length === 0 ? (
           <div className="empty-state">
             <strong>Nenhuma conversa encontrada.</strong>
             <span>Altere o filtro, sincronize o historico ou inicie uma conversa por telefone.</span>
           </div>
         ) : (
           <div className="conversation-grid">
-            {chats.map((chat) => {
-              const name = getConversationName(chat);
+            {sortedChats.map((chat) => {
+              const contact = contactByJid.get(chat.jid);
+              const name = getWhatsappDisplayName({
+                jid: chat.jid,
+                chatName: chat.name,
+                contactName: contact?.name,
+                contactPushName: contact?.pushName,
+                isGroup: chat.isGroup
+              });
+              const hasMessages = chat._count.messages > 0 || Boolean(chat.lastMessageText);
+              const date = formatDate(chat.lastMessageAt);
+              const lastDirection = getLastDirection(chat);
 
               return (
                 <Link className="inbox-conversation-card" href={`/conversas/${chat.id}`} key={chat.id}>
@@ -268,22 +492,28 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
                   </span>
                   <span className="conversation-card-body">
                     <span className="conversation-card-top">
-                      <strong>{name}</strong>
-                      <span>{formatDate(chat.lastMessageAt)}</span>
+                      <span className="conversation-title-block">
+                        <strong>{name}</strong>
+                        <span>{getWhatsappIdentityLabel(chat.jid)}</span>
+                      </span>
+                      {date ? <span className="conversation-time">{date}</span> : null}
                     </span>
                     <span className="conversation-card-meta">
                       <span className={`badge ${chat.isGroup ? "info" : "success"}`}>
                         {chat.isGroup ? "grupo" : "contato"}
                       </span>
-                      <span>{getLastDirection(chat)}</span>
-                      <span>{chat._count.messages} mensagens</span>
+                      {!hasMessages ? <span className="badge warning">sem mensagem</span> : null}
+                      {lastDirection ? <span>{lastDirection}</span> : null}
+                      {chat._count.messages > 0 ? <span>{chat._count.messages} mensagens</span> : null}
                       {chat.unreadCount > 0 ? <span>{chat.unreadCount} nao lidas</span> : null}
                     </span>
-                    <span className="conversation-preview">{chat.lastMessageText ?? "Sem mensagem salva"}</span>
-                    <span className="conversation-card-footer">
-                      <span>{chat.jid}</span>
-                      <span className="future-tag">Etiquetas em breve</span>
-                    </span>
+                    {hasMessages ? (
+                      <span className="conversation-preview">{chat.lastMessageText ?? "Mensagem salva"}</span>
+                    ) : (
+                      <span className="conversation-preview empty">
+                        Contato sincronizado, sem mensagens salvas
+                      </span>
+                    )}
                   </span>
                 </Link>
               );

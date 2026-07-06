@@ -427,7 +427,7 @@ button:disabled {
 .inbox-metrics {
   display: grid;
   gap: 12px;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
 }
 
 .metric-card {
@@ -545,7 +545,7 @@ button:disabled {
   display: grid;
   gap: 12px;
   grid-template-columns: 48px minmax(0, 1fr);
-  padding: 14px;
+  padding: 12px 14px;
 }
 
 .inbox-conversation-card:hover {
@@ -593,18 +593,39 @@ button:disabled {
   justify-content: space-between;
 }
 
-.conversation-card-top strong {
+.conversation-title-block {
+  display: grid;
+  gap: 3px;
   min-width: 0;
+}
+
+.conversation-title-block strong {
+  color: var(--text);
+  font-size: 16px;
+  line-height: 1.2;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.conversation-card-top span,
+.conversation-title-block span {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conversation-time,
 .conversation-card-meta,
 .conversation-card-footer {
   color: var(--muted);
   font-size: 13px;
+}
+
+.conversation-time {
+  white-space: nowrap;
 }
 
 .conversation-card-meta {
@@ -618,6 +639,10 @@ button:disabled {
   overflow: hidden;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
+}
+
+.conversation-preview.empty {
+  color: var(--muted);
 }
 
 .conversation-card-footer {

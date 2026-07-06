@@ -29,6 +29,8 @@ Isso pede ao WhatsApp Web historico completo quando a sessao permite.
 
 Se a sessao ja estava pareada antes de `syncFullHistory: true`, o WhatsApp pode nao reenviar todo o historico antigo. Nesse caso, a aplicacao nao consegue inventar conversas que nao chegaram por evento.
 
+Alguns contatos tambem podem chegar sem nome amigavel. Dependendo do evento, a Baileys pode entregar apenas JID, telefone, `lid`, `pushName` parcial ou nenhum historico de mensagem.
+
 O botao `Sincronizar historico` enfileira um job para manter o socket ativo e registrar a solicitacao, mas nao executa `fetchMessageHistory` sem cursor seguro. Na versao instalada, `fetchMessageHistory` exige:
 
 - quantidade;
@@ -36,6 +38,19 @@ O botao `Sincronizar historico` enfileira um job para manter o socket ativo e re
 - timestamp da mensagem mais antiga.
 
 Sem essa referencia, uma sincronizacao completa sob demanda nao e segura.
+
+## Como os nomes da inbox sao resolvidos
+
+A UI nao usa JID cru como primeira opcao quando existe dado melhor. O nome exibido segue esta prioridade:
+
+1. `WhatsappChat.name`, se existir e nao for JID cru.
+2. `WhatsappContact.name`, se existir.
+3. `WhatsappContact.pushName`, se existir.
+4. Telefone formatado a partir do JID, quando o JID for `@s.whatsapp.net`.
+5. Fallback amigavel para grupo ou `lid`.
+6. JID completo apenas como ultimo fallback.
+
+O sync tambem evita sobrescrever um nome bom com candidato pior. Valores iguais ao JID, `@lid` cru ou telefone puro do proprio JID sao tratados como ausencia de nome.
 
 ## Quando usar reset/reconnect manual
 
@@ -99,15 +114,19 @@ Solicitacao manual de sync:
 `/conversas` agora usa layout de inbox:
 
 - cards de metricas;
-- filtros por todas, contatos, grupos e nao lidas;
+- filtro padrao `Recentes`, mostrando primeiro conversas com mensagem salva;
+- filtros por todas, contatos, grupos e sem mensagem;
 - busca grande;
-- lista de conversas em cards;
+- lista de conversas em cards com nome amigavel, telefone/JID discreto e badges;
 - botao compacto de nova conversa;
 - botao de sincronizar historico.
+
+O filtro `Sem mensagem` concentra contatos sincronizados que ainda nao possuem mensagem salva. Isso evita que a tela inicial vire uma lista gigante de JIDs ou contatos vazios.
 
 `/conversas/[id]` agora usa layout de chat:
 
 - cabecalho de conversa;
+- display name amigavel e telefone/JID abaixo;
 - bolhas inbound/outbound;
 - composer no rodape;
 - aviso ao enviar para grupo.

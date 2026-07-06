@@ -7,6 +7,7 @@ import type {
 } from "@whiskeysockets/baileys";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../prisma/client";
+import { cleanDisplayName, isBetterDisplayName } from "../whatsapp/display-name";
 import { extractMessageText as extractOptOutMessageText } from "./opt-out";
 
 const BATCH_SIZE = 25;
@@ -74,14 +75,23 @@ export async function ensureChatForJid(jid: string, optionalName?: string | null
     throw new Error("JID de conversa invalido");
   }
 
-  const name = compactText(optionalName);
+  const name = cleanDisplayName(optionalName, normalizedJid);
+  const existingChat = await prisma.whatsappChat.findUnique({
+    where: {
+      jid: normalizedJid
+    },
+    select: {
+      name: true
+    }
+  });
+  const shouldUpdateName = isBetterDisplayName(existingChat?.name, name, normalizedJid);
 
   return prisma.whatsappChat.upsert({
     where: {
       jid: normalizedJid
     },
     update: {
-      ...(name ? { name } : {}),
+      ...(shouldUpdateName ? { name } : {}),
       isGroup: isGroupJid(normalizedJid)
     },
     create: {
@@ -289,7 +299,7 @@ export async function upsertChatFromBaileys(chat: Partial<Chat>) {
     return false;
   }
 
-  const name = compactText(chat.name);
+  const name = cleanDisplayName(chat.name, jid);
   const unreadCount = typeof chat.unreadCount === "number" ? chat.unreadCount : undefined;
   const lastMessageAt =
     getMessageTimestamp(chat.conversationTimestamp) ??
@@ -300,9 +310,11 @@ export async function upsertChatFromBaileys(chat: Partial<Chat>) {
       jid
     },
     select: {
+      name: true,
       lastMessageAt: true
     }
   });
+  const shouldUpdateName = isBetterDisplayName(existingChat?.name, name, jid);
   const shouldUpdateLastMessageAt = Boolean(
     lastMessageAt && (!existingChat?.lastMessageAt || lastMessageAt >= existingChat.lastMessageAt)
   );
@@ -312,7 +324,7 @@ export async function upsertChatFromBaileys(chat: Partial<Chat>) {
       jid
     },
     update: {
-      ...(name ? { name } : {}),
+      ...(shouldUpdateName ? { name } : {}),
       isGroup: isGroupJid(jid),
       ...(unreadCount !== undefined ? { unreadCount } : {}),
       ...(shouldUpdateLastMessageAt ? { lastMessageAt } : {})
@@ -336,8 +348,8 @@ export async function upsertContactFromBaileys(contact: Partial<Contact>) {
     return false;
   }
 
-  const name = compactText(contact.name ?? contact.verifiedName ?? contact.notify);
-  const pushName = compactText(contact.notify);
+  const name = cleanDisplayName(contact.name ?? contact.verifiedName ?? contact.notify, jid);
+  const pushName = cleanDisplayName(contact.notify, jid);
 
   await prisma.whatsappContact.upsert({
     where: {
@@ -360,6 +372,28 @@ export async function upsertContactFromBaileys(contact: Partial<Contact>) {
 
   if (jid.endsWith("@s.whatsapp.net")) {
     await ensureChatForJid(jid, name ?? pushName);
+  } else if (!isGroupJid(jid)) {
+    const existingChat = await prisma.whatsappChat.findUnique({
+      where: {
+        jid
+      },
+      select: {
+        id: true,
+        name: true
+      }
+    });
+    const candidateName = name ?? pushName;
+
+    if (existingChat && isBetterDisplayName(existingChat.name, candidateName, jid)) {
+      await prisma.whatsappChat.update({
+        where: {
+          id: existingChat.id
+        },
+        data: {
+          name: candidateName
+        }
+      });
+    }
   }
 
   return true;
@@ -379,8 +413,17 @@ export async function upsertMessageFromBaileys(message: WAMessage) {
   const messageType = extractMessageType(message.message);
   const text = extractMessageText(message.message);
   const lastMessageText = previewText(text, messageType);
-  const pushName = compactText(message.pushName);
+  const pushName = cleanDisplayName(message.pushName, jid);
   const rawJson = toPrismaJson(message);
+  const existingChat = await prisma.whatsappChat.findUnique({
+    where: {
+      jid
+    },
+    select: {
+      name: true
+    }
+  });
+  const shouldUpdateName = !isGroupJid(jid) && isBetterDisplayName(existingChat?.name, pushName, jid);
 
   const chat = await prisma.whatsappChat.upsert({
     where: {
@@ -388,7 +431,7 @@ export async function upsertMessageFromBaileys(message: WAMessage) {
     },
     update: {
       isGroup: isGroupJid(jid),
-      ...(!isGroupJid(jid) && pushName ? { name: pushName } : {})
+      ...(shouldUpdateName ? { name: pushName } : {})
     },
     create: {
       jid,
