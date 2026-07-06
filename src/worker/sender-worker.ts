@@ -11,6 +11,7 @@ import {
 import { getRedisConnectionOptions } from "../lib/queue/connection";
 import {
   disconnectBaileys,
+  markWhatsappError,
   sendWhatsappMessage,
   startBaileysConnection
 } from "../lib/baileys/client";
@@ -23,6 +24,18 @@ const finalRecipientStatuses: CampaignRecipientStatus[] = [
   CampaignRecipientStatus.failed,
   CampaignRecipientStatus.canceled
 ];
+const redisConnectionOptions = getRedisConnectionOptions();
+
+console.log("[worker] sender-worker started");
+console.log("[worker] redis connection", {
+  host: redisConnectionOptions.host,
+  port: redisConnectionOptions.port,
+  db: redisConnectionOptions.db
+});
+
+function getErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : "Erro desconhecido";
+}
 
 async function requeueRecipient(recipientId: string, delayMs = PAUSED_RECHECK_DELAY_MS) {
   await enqueueRecipient(recipientId, delayMs);
@@ -129,13 +142,40 @@ async function processRecipient(recipientId: string) {
 const worker = new Worker(
   CAMPAIGN_QUEUE_NAME,
   async (job) => {
+    console.log("[worker] job received", {
+      name: job.name,
+      id: job.id
+    });
+
     if (job.name === CONNECT_WHATSAPP_JOB) {
-      await startBaileysConnection();
+      console.log("[worker] connect-whatsapp job received");
+
+      try {
+        await startBaileysConnection();
+        console.log("[worker] connect-whatsapp started");
+      } catch (error) {
+        const lastError = `Falha ao iniciar conexao WhatsApp no worker: ${getErrorMessage(error)}`;
+        console.error("[worker] connect-whatsapp failed", { error: lastError });
+        await markWhatsappError(lastError);
+        throw error;
+      }
+
       return;
     }
 
     if (job.name === DISCONNECT_WHATSAPP_JOB) {
-      await disconnectBaileys();
+      console.log("[worker] disconnect-whatsapp job received");
+
+      try {
+        await disconnectBaileys();
+        console.log("[worker] disconnect-whatsapp finished");
+      } catch (error) {
+        const lastError = `Falha ao desconectar WhatsApp no worker: ${getErrorMessage(error)}`;
+        console.error("[worker] disconnect-whatsapp failed", { error: lastError });
+        await markWhatsappError(lastError);
+        throw error;
+      }
+
       return;
     }
 
@@ -152,14 +192,15 @@ const worker = new Worker(
     await processRecipient(recipientId);
   },
   {
-    connection: getRedisConnectionOptions(),
+    connection: redisConnectionOptions,
     concurrency: 1
   }
 );
 
 worker.on("failed", (job, error) => {
-  console.error("sender-worker job failed", {
+  console.error("[worker] sender-worker job failed", {
     jobId: job?.id,
+    jobName: job?.name,
     error: error.message
   });
 });

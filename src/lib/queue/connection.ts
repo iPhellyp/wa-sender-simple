@@ -61,3 +61,13 @@ export function getRedisConnectionOptions(): RedisConnectionOptions {
 
   return options;
 }
+
+export function getRedisConnectionLogInfo() {
+  const options = getRedisConnectionOptions();
+
+  return {
+    host: options.host,
+    port: options.port,
+    db: options.db
+  };
+}

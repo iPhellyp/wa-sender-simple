@@ -3,10 +3,15 @@
 import { useEffect, useState } from "react";
 
 type WhatsappSession = {
+  id: string;
   status: string;
   qrCode: string | null;
+  hasQrCode: boolean;
   connectedPhone: string | null;
   lastError: string | null;
+  updatedAt: string;
+  message?: string;
+  error?: string;
 };
 
 export function WhatsappClient() {
@@ -16,10 +21,21 @@ export function WhatsappClient() {
   const [error, setError] = useState<string | null>(null);
 
   async function loadStatus() {
-    const response = await fetch("/api/whatsapp/status", { cache: "no-store" });
-    const data = (await response.json()) as WhatsappSession;
-    setSession(data);
-    setLoading(false);
+    try {
+      const response = await fetch("/api/whatsapp/status", { cache: "no-store" });
+      const data = (await response.json()) as WhatsappSession;
+
+      if (!response.ok) {
+        throw new Error(data.error ?? "Falha ao carregar status do WhatsApp");
+      }
+
+      setSession(data);
+      setError(null);
+    } catch (statusError) {
+      setError(statusError instanceof Error ? statusError.message : "Erro inesperado");
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function postAction(path: string) {
@@ -31,11 +47,12 @@ export function WhatsappClient() {
         method: "POST"
       });
 
-      if (!response.ok) {
-        throw new Error("Falha ao atualizar conexao");
-      }
+      const data = (await response.json()) as WhatsappSession;
+      setSession(data);
 
-      setSession((await response.json()) as WhatsappSession);
+      if (!response.ok || data.error) {
+        throw new Error(data.error ?? data.lastError ?? "Falha ao atualizar conexao");
+      }
     } catch (actionError) {
       setError(actionError instanceof Error ? actionError.message : "Erro inesperado");
     } finally {
@@ -47,7 +64,7 @@ export function WhatsappClient() {
     void loadStatus();
     const interval = window.setInterval(() => {
       void loadStatus();
-    }, 5000);
+    }, 3000);
 
     return () => window.clearInterval(interval);
   }, []);
@@ -64,6 +81,11 @@ export function WhatsappClient() {
             <div className="muted">Status</div>
             <div className="stat-value">{session?.status ?? "disconnected"}</div>
             {session?.connectedPhone ? <div className="muted">{session.connectedPhone}</div> : null}
+            {session?.updatedAt ? (
+              <div className="muted">
+                Atualizado em {new Date(session.updatedAt).toLocaleString("pt-BR")}
+              </div>
+            ) : null}
           </div>
           <div className="button-row">
             <button
@@ -87,9 +109,21 @@ export function WhatsappClient() {
       </div>
 
       {error ? <div className="message error">{error}</div> : null}
-      {session?.lastError ? <div className="message error">{session.lastError}</div> : null}
+      {session?.lastError && session.status !== "error" ? (
+        <div className="message error">{session.lastError}</div>
+      ) : null}
 
-      {session?.qrCode ? (
+      {session?.status === "connecting" ? (
+        <div className="message">
+          Aguardando QR Code. Isso pode levar alguns segundos.
+        </div>
+      ) : null}
+
+      {session?.status === "error" && session.lastError ? (
+        <div className="message error">{session.lastError}</div>
+      ) : null}
+
+      {session?.status === "qr" && session.qrCode ? (
         <div className="card">
           <img className="qr" src={session.qrCode} alt="QR Code do WhatsApp" />
         </div>

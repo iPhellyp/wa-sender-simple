@@ -8,6 +8,14 @@ export const DISCONNECT_WHATSAPP_JOB = "disconnect-whatsapp";
 
 let queue: Queue | null = null;
 
+function safeJobIdPart(value: string) {
+  return value.replace(/[^a-zA-Z0-9_-]/g, "-").slice(0, 120);
+}
+
+function buildJobId(...parts: string[]) {
+  return parts.map(safeJobIdPart).filter(Boolean).join("-");
+}
+
 export function getCampaignQueue() {
   if (!queue) {
     queue = new Queue(CAMPAIGN_QUEUE_NAME, {
@@ -27,7 +35,7 @@ export async function enqueueRecipient(recipientId: string, delayMs: number, job
     {
       delay: safeDelay,
       attempts: 1,
-      jobId: `recipient:${recipientId}:${jobKey ?? `${Date.now()}:${safeDelay}`}`,
+      jobId: buildJobId("recipient", recipientId, jobKey ?? `${Date.now()}-${safeDelay}`),
       removeOnComplete: true,
       removeOnFail: 5000
     }
@@ -40,7 +48,7 @@ export async function enqueueWhatsappConnect() {
     {},
     {
       attempts: 1,
-      jobId: `connect-whatsapp:${Date.now()}`,
+      jobId: buildJobId("connect-whatsapp", String(Date.now())),
       removeOnComplete: true,
       removeOnFail: 100
     }
@@ -53,7 +61,7 @@ export async function enqueueWhatsappDisconnect() {
     {},
     {
       attempts: 1,
-      jobId: `disconnect-whatsapp:${Date.now()}`,
+      jobId: buildJobId("disconnect-whatsapp", String(Date.now())),
       removeOnComplete: true,
       removeOnFail: 100
     }

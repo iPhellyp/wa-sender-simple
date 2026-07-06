@@ -3,11 +3,10 @@ version: "3.8"
 services:
   postgres:
     image: postgres:16-alpine
-    env_file:
-      - .env
     environment:
-      POSTGRES_DB: wa_sender_simple
-      POSTGRES_USER: wa_sender
+      POSTGRES_DB: ${POSTGRES_DB:-wa_sender_simple}
+      POSTGRES_USER: ${POSTGRES_USER:-wa_sender}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-wa_sender}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks:
@@ -28,11 +27,14 @@ services:
 
   app:
     image: wa-sender-simple-app:latest
-    env_file:
-      - .env
     environment:
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      APP_URL: "${APP_URL:-https://wa2.supereducarbrasil.com.br}"
       BAILEYS_SESSION_DIR: /app/data/baileys-session
-      REDIS_URL: redis://redis:6379
+      BAILEYS_LOG_LEVEL: ${BAILEYS_LOG_LEVEL:-silent}
+      DATABASE_URL: "${DATABASE_URL:-postgresql://wa_sender:wa_sender@wa_sender_simple_postgres:5432/wa_sender_simple?schema=public}"
+      NEXT_PUBLIC_APP_URL: "${NEXT_PUBLIC_APP_URL:-https://wa2.supereducarbrasil.com.br}"
+      REDIS_URL: "${REDIS_URL:-redis://wa_sender_simple_redis:6379}"
     volumes:
       - baileys_session:/app/data/baileys-session
       - uploads:/app/uploads
@@ -55,11 +57,14 @@ services:
   worker:
     image: wa-sender-simple-worker:latest
     command: npm run worker
-    env_file:
-      - .env
     environment:
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      APP_URL: "${APP_URL:-https://wa2.supereducarbrasil.com.br}"
       BAILEYS_SESSION_DIR: /app/data/baileys-session
-      REDIS_URL: redis://redis:6379
+      BAILEYS_LOG_LEVEL: ${BAILEYS_LOG_LEVEL:-silent}
+      DATABASE_URL: "${DATABASE_URL:-postgresql://wa_sender:wa_sender@wa_sender_simple_postgres:5432/wa_sender_simple?schema=public}"
+      NEXT_PUBLIC_APP_URL: "${NEXT_PUBLIC_APP_URL:-https://wa2.supereducarbrasil.com.br}"
+      REDIS_URL: "${REDIS_URL:-redis://wa_sender_simple_redis:6379}"
     volumes:
       - baileys_session:/app/data/baileys-session
       - uploads:/app/uploads

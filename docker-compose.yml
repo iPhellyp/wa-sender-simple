@@ -53,8 +53,8 @@ services:
 
 volumes:
   postgres_data:
-    name: postgres_data
+    name: wa-sender-simple_postgres_data
   baileys_session:
-    name: baileys_session
+    name: wa-sender-simple_baileys_session
   uploads:
-    name: uploads
+    name: wa-sender-simple_uploads

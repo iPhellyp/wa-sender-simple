@@ -3,7 +3,8 @@ import makeWASocket, {
   useMultiFileAuthState,
   WASocket
 } from "@whiskeysockets/baileys";
-import { mkdir } from "fs/promises";
+import { mkdir, unlink, writeFile } from "fs/promises";
+import { join } from "path";
 import P from "pino";
 import QRCode from "qrcode";
 import { WhatsappStatus } from "@prisma/client";
@@ -24,6 +25,18 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function sanitizeErrorMessage(error: unknown) {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return typeof error === "string" ? error : "Erro desconhecido";
+}
+
+function getDisconnectStatusCode(error: unknown) {
+  return (error as { output?: { statusCode?: number } } | null)?.output?.statusCode;
+}
+
 async function saveWhatsappSession(data: {
   status: WhatsappStatus;
   qrCode?: string | null;
@@ -40,6 +53,46 @@ async function saveWhatsappSession(data: {
       ...data
     }
   });
+}
+
+async function assertSessionDirWritable(sessionDir: string) {
+  const writeTestPath = join(sessionDir, ".write-test");
+
+  try {
+    await writeFile(writeTestPath, "ok");
+    await unlink(writeTestPath);
+  } catch {
+    await unlink(writeTestPath).catch(() => undefined);
+    const message = `Sem permissao de escrita no diretorio da sessao Baileys: ${sessionDir}`;
+    await saveWhatsappSession({
+      status: WhatsappStatus.error,
+      qrCode: null,
+      connectedPhone: null,
+      lastError: message
+    });
+    throw new Error(message);
+  }
+}
+
+function scheduleQrTimeout() {
+  setTimeout(() => {
+    void (async () => {
+      const session = await getWhatsappStatus();
+
+      if (session.status !== WhatsappStatus.connecting) {
+        return;
+      }
+
+      const lastError = "Baileys iniciou, mas ainda nao recebeu QR Code";
+      await saveWhatsappSession({
+        status: WhatsappStatus.connecting,
+        qrCode: null,
+        connectedPhone: null,
+        lastError
+      });
+      console.warn("[baileys] qr timeout", { lastError });
+    })();
+  }, 25_000);
 }
 
 async function handleIncomingMessages(event: {
@@ -81,13 +134,20 @@ async function handleIncomingMessages(event: {
 }
 
 async function createSocket() {
-  await mkdir(getSessionDir(), { recursive: true });
+  const sessionDir = getSessionDir();
+  console.log("[baileys] creating socket");
+  console.log("[baileys] session dir:", sessionDir);
+
+  await mkdir(sessionDir, { recursive: true });
+  await assertSessionDirWritable(sessionDir);
   await saveWhatsappSession({
     status: WhatsappStatus.connecting,
+    qrCode: null,
+    connectedPhone: null,
     lastError: null
   });
 
-  const { state, saveCreds } = await useMultiFileAuthState(getSessionDir());
+  const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
   const sock = makeWASocket({
     auth: state,
     printQRInTerminal: false,
@@ -96,6 +156,7 @@ async function createSocket() {
   });
 
   socket = sock;
+  scheduleQrTimeout();
 
   sock.ev.on("creds.update", saveCreds);
   sock.ev.on("messages.upsert", (event) => {
@@ -104,6 +165,18 @@ async function createSocket() {
 
   sock.ev.on("connection.update", (update) => {
     void (async () => {
+      const statusCode = getDisconnectStatusCode(update.lastDisconnect?.error);
+      const lastDisconnectError = update.lastDisconnect?.error
+        ? sanitizeErrorMessage(update.lastDisconnect.error)
+        : null;
+
+      console.log("[baileys] connection.update", {
+        connection: update.connection ?? null,
+        hasQr: Boolean(update.qr),
+        statusCode,
+        error: lastDisconnectError
+      });
+
       if (update.qr) {
         const qrCode = await QRCode.toDataURL(update.qr);
         await saveWhatsappSession({
@@ -111,6 +184,7 @@ async function createSocket() {
           qrCode,
           lastError: null
         });
+        console.log("[baileys] qr received and saved");
       }
 
       if (update.connection === "open") {
@@ -121,19 +195,26 @@ async function createSocket() {
           connectedPhone,
           lastError: null
         });
+        console.log("[baileys] connected", {
+          connectedPhone: connectedPhone ? "present" : "unknown"
+        });
       }
 
       if (update.connection === "close") {
-        const statusCode = (update.lastDisconnect?.error as { output?: { statusCode?: number } })
-          ?.output?.statusCode;
         const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+        const lastError = lastDisconnectError ?? "Conexao encerrada";
 
         socket = null;
         await saveWhatsappSession({
           status: shouldReconnect ? WhatsappStatus.disconnected : WhatsappStatus.error,
           qrCode: null,
           connectedPhone: null,
-          lastError: update.lastDisconnect?.error?.message ?? "Conexao encerrada"
+          lastError
+        });
+        console.warn("[baileys] connection closed", {
+          statusCode,
+          shouldReconnect,
+          lastError
         });
 
         if (shouldReconnect) {
@@ -156,11 +237,12 @@ export async function startBaileysConnection() {
   if (!startPromise) {
     startPromise = createSocket()
       .catch(async (error) => {
+        const lastError = sanitizeErrorMessage(error) || "Erro ao iniciar Baileys";
         await saveWhatsappSession({
           status: WhatsappStatus.error,
           qrCode: null,
           connectedPhone: null,
-          lastError: error instanceof Error ? error.message : "Erro ao iniciar Baileys"
+          lastError
         });
         throw error;
       })
@@ -192,6 +274,20 @@ export async function getWhatsappStatus() {
   );
 }
 
+export async function getWhatsappStatusPayload() {
+  const session = await getWhatsappStatus();
+
+  return {
+    id: session.id,
+    status: session.status,
+    qrCode: session.qrCode,
+    hasQrCode: Boolean(session.qrCode),
+    connectedPhone: session.connectedPhone,
+    lastError: session.lastError,
+    updatedAt: session.updatedAt
+  };
+}
+
 export async function markWhatsappConnecting() {
   await saveWhatsappSession({
     status: WhatsappStatus.connecting,
@@ -207,6 +303,15 @@ export async function markWhatsappDisconnected() {
     qrCode: null,
     connectedPhone: null,
     lastError: null
+  });
+}
+
+export async function markWhatsappError(lastError: string) {
+  await saveWhatsappSession({
+    status: WhatsappStatus.error,
+    qrCode: null,
+    connectedPhone: null,
+    lastError
   });
 }
 
