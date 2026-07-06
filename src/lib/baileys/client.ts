@@ -4,13 +4,14 @@ import makeWASocket, {
   fetchLatestBaileysVersion,
   useMultiFileAuthState,
   type BaileysEventMap,
+  type proto,
   type WASocket
 } from "@whiskeysockets/baileys";
 import { mkdir, readdir, rm, unlink, writeFile } from "fs/promises";
 import { join, parse, resolve } from "path";
 import P from "pino";
 import QRCode from "qrcode";
-import { WhatsappStatus } from "@prisma/client";
+import { WhatsappStatus, type Prisma } from "@prisma/client";
 import { prisma } from "../prisma/client";
 import { normalizeBrazilPhone, toWhatsappJid } from "../phone/normalize";
 import { extractMessageText, isOptOutMessage } from "./opt-out";
@@ -79,6 +80,41 @@ function getMessageTimestampForJson(messageTimestamp: unknown) {
   }
 
   return null;
+}
+
+function isJsonObject(value: Prisma.JsonValue | null | undefined): value is Prisma.JsonObject {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function extractStoredMessage(rawJson: Prisma.JsonValue | null): proto.IMessage | undefined {
+  if (!isJsonObject(rawJson) || !isJsonObject(rawJson.message)) {
+    return undefined;
+  }
+
+  return rawJson.message as proto.IMessage;
+}
+
+async function getStoredMessage(key: proto.IMessageKey) {
+  const jid = normalizeChatJid(key.remoteJid);
+  const waMessageId = String(key.id ?? "").trim();
+
+  if (!jid || !waMessageId) {
+    return undefined;
+  }
+
+  const storedMessage = await prisma.whatsappMessage.findUnique({
+    where: {
+      jid_waMessageId: {
+        jid,
+        waMessageId
+      }
+    },
+    select: {
+      rawJson: true
+    }
+  });
+
+  return extractStoredMessage(storedMessage?.rawJson ?? null);
 }
 
 async function saveWhatsappSession(data: {
@@ -251,6 +287,9 @@ async function createSocket() {
     printQRInTerminal: false,
     logger: P({ level: process.env.BAILEYS_LOG_LEVEL ?? "silent" }),
     browser: Browsers.macOS("Desktop"),
+    syncFullHistory: true,
+    shouldSyncHistoryMessage: () => true,
+    getMessage: getStoredMessage,
     markOnlineOnConnect: false
   });
 
@@ -513,6 +552,24 @@ export async function resetBaileysSession() {
     connectedPhone: null,
     lastError: null
   });
+}
+
+export async function requestWhatsappHistorySync() {
+  await startBaileysConnection();
+
+  const hasOnDemandHistory = typeof socket?.fetchMessageHistory === "function";
+  console.log("[baileys] history sync requested", {
+    syncFullHistory: true,
+    hasOnDemandHistory,
+    mode: "event-driven"
+  });
+
+  return {
+    ok: true,
+    hasOnDemandHistory,
+    message:
+      "Sync full history esta configurado. A chegada de historico depende dos eventos do WhatsApp; fetchMessageHistory exige cursor de mensagem e nao foi executado sem referencia segura."
+  };
 }
 
 async function getConnectedSocket() {

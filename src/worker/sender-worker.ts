@@ -8,6 +8,7 @@ import {
   RESET_WHATSAPP_JOB,
   SEND_MANUAL_MESSAGE_JOB,
   SEND_RECIPIENT_JOB,
+  SYNC_WHATSAPP_HISTORY_JOB,
   enqueueRecipient,
   type SendManualMessageJobData
 } from "../lib/queue/campaign-queue";
@@ -15,6 +16,7 @@ import { getRedisConnectionOptions } from "../lib/queue/connection";
 import {
   disconnectBaileys,
   markWhatsappError,
+  requestWhatsappHistorySync,
   resetBaileysSession,
   sendWhatsappMessage,
   sendWhatsappMessageToJid,
@@ -298,6 +300,25 @@ const worker = new Worker(
       } catch (error) {
         const lastError = `Falha ao resetar sessao WhatsApp no worker: ${getErrorMessage(error)}`;
         console.error("[worker] reset-whatsapp failed", { error: lastError });
+        await markWhatsappError(lastError);
+        throw error;
+      }
+
+      return;
+    }
+
+    if (job.name === SYNC_WHATSAPP_HISTORY_JOB) {
+      console.log("[worker] sync-whatsapp-history job received");
+
+      try {
+        const result = await requestWhatsappHistorySync();
+        console.log("[worker] sync-whatsapp-history finished", {
+          hasOnDemandHistory: result.hasOnDemandHistory,
+          mode: "event-driven"
+        });
+      } catch (error) {
+        const lastError = `Falha ao solicitar sync de historico WhatsApp no worker: ${getErrorMessage(error)}`;
+        console.error("[worker] sync-whatsapp-history failed", { error: lastError });
         await markWhatsappError(lastError);
         throw error;
       }

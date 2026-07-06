@@ -30,6 +30,17 @@ function messageText(message: {
   return message.text ?? (message.messageType ? `[${message.messageType}]` : "Sem texto");
 }
 
+function getTitle(chat: {
+  jid: string;
+  name: string | null;
+}) {
+  if (chat.name) {
+    return chat.name;
+  }
+
+  return chat.jid.endsWith("@s.whatsapp.net") ? chat.jid.split("@")[0] : chat.jid;
+}
+
 export default async function ConversationDetailPage({ params }: ConversationDetailPageProps) {
   const { id } = await params;
   const chat = await prisma.whatsappChat.findUnique({
@@ -56,72 +67,72 @@ export default async function ConversationDetailPage({ params }: ConversationDet
   }
 
   const messages = [...chat.messages].reverse();
+  const title = getTitle(chat);
 
   return (
     <AppShell
-      title={chat.name ?? chat.jid}
+      title="Conversa"
       actions={
-        <Link className="button secondary" href="/conversas">
-          Voltar
-        </Link>
+        <div className="button-row">
+          <Link className="button secondary" href="/conversas">
+            Voltar
+          </Link>
+          <Link className="button secondary" href={`/conversas/${chat.id}`}>
+            Atualizar
+          </Link>
+        </div>
       }
     >
-      <section className="grid">
-        <div className="card">
-          <div className="conversation-meta">
-            <div>
-              <div className="muted">JID</div>
-              <strong>{chat.jid}</strong>
-            </div>
-            <div>
-              <div className="muted">Tipo</div>
+      <section className="chat-page">
+        <header className="chat-header">
+          <div className={`conversation-avatar large ${chat.isGroup ? "group" : ""}`}>
+            {chat.isGroup ? "G" : title.replace(/\W/g, "").slice(0, 1).toUpperCase() || "#"}
+          </div>
+          <div className="chat-header-main">
+            <div className="chat-title-row">
+              <h2>{title}</h2>
               <span className={`badge ${chat.isGroup ? "info" : "success"}`}>
                 {chat.isGroup ? "grupo" : "contato"}
               </span>
             </div>
-            <div>
-              <div className="muted">Nao lidas</div>
-              <strong>{chat.unreadCount}</strong>
-            </div>
-            <div>
-              <div className="muted">Ultima mensagem</div>
-              <strong>{formatDate(chat.lastMessageAt)}</strong>
-            </div>
-            <div>
-              <div className="muted">Resumo</div>
-              <strong>{chat.lastMessageText ?? "-"}</strong>
+            <div className="chat-subtitle">{chat.jid}</div>
+            <div className="chat-meta-row">
+              <span>Ultima mensagem: {formatDate(chat.lastMessageAt)}</span>
+              <span>{messages.length} exibidas</span>
+              <span>{chat.unreadCount} nao lidas</span>
             </div>
           </div>
-        </div>
+        </header>
 
-        <div className="card">
+        <div className="chat-thread">
           {messages.length === 0 ? (
-            <div className="muted">Nenhuma mensagem sincronizada para esta conversa.</div>
-          ) : (
-            <div className="message-list">
-              {messages.map((message) => (
-                <article
-                  className={`conversation-message ${message.fromMe ? "outbound" : "inbound"}`}
-                  key={message.id}
-                >
-                  <div className="conversation-message-header">
-                    <strong>{message.fromMe ? "Eu" : "Contato"}</strong>
-                    <span className="muted">{formatDate(message.timestamp)}</span>
-                  </div>
-                  <div>{messageText(message)}</div>
-                  {message.senderJid && message.senderJid !== chat.jid ? (
-                    <div className="muted">Origem: {message.senderJid}</div>
-                  ) : null}
-                </article>
-              ))}
+            <div className="empty-state">
+              <strong>Nenhuma mensagem salva para esta conversa.</strong>
+              <span>Envie uma mensagem manual ou aguarde novos eventos do WhatsApp.</span>
             </div>
+          ) : (
+            messages.map((message) => (
+              <article
+                className={`chat-message-row ${message.fromMe ? "outbound" : "inbound"}`}
+                key={message.id}
+              >
+                <div className="chat-bubble">
+                  {chat.isGroup && !message.fromMe && message.senderJid ? (
+                    <div className="chat-sender">{message.senderJid}</div>
+                  ) : null}
+                  <div className="chat-message-text">{messageText(message)}</div>
+                  <div className="chat-message-time">
+                    {message.fromMe ? "Eu" : "Contato"} | {formatDate(message.timestamp)}
+                  </div>
+                </div>
+              </article>
+            ))
           )}
         </div>
 
-        <div className="card">
-          <h2 style={{ fontSize: 18, marginTop: 0 }}>Enviar mensagem</h2>
+        <footer className="chat-composer">
           <SendMessageForm chatId={chat.id} isGroup={chat.isGroup} />
-        </div>
+        </footer>
       </section>
     </AppShell>
   );

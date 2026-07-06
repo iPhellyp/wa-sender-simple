@@ -8,6 +8,8 @@ Sincronizar conversas, contatos e mensagens recebidas pelo Baileys sem alterar o
 
 O worker cria o socket Baileys e registra listeners em `sock.ev`. Cada evento recebido e persistido no Postgres por helpers em `src/lib/baileys/sync.ts`.
 
+O socket usa `syncFullHistory: true`, `Browsers.macOS("Desktop")`, `shouldSyncHistoryMessage: () => true` e `getMessage` lendo mensagens salvas para auxiliar retries internos da Baileys.
+
 O processamento e idempotente:
 
 - chats usam `jid` unico;
@@ -61,33 +63,32 @@ Campos principais:
 Ao sincronizar historico:
 
 ```text
-[sync] history set { chats: X, contacts: Y, messages: Z }
-[sync] history chats { processed: X, skipped: Y, failed: Z, firstError: null }
-[sync] history contacts { processed: X, skipped: Y, failed: Z, firstError: null }
-[sync] history messages { processed: X, skipped: Y, failed: Z, firstError: null }
+[sync] history set { syncType: "...", chats: X, contacts: Y, messages: Z }
+[sync] history chats { syncType: "...", chats: X, processed: X, skipped: Y, failed: Z }
+[sync] history contacts { syncType: "...", contacts: X, processed: X, skipped: Y, failed: Z }
+[sync] history messages { syncType: "...", messages: X, processed: X, skipped: Y, failed: Z }
 ```
 
 Ao receber mensagem nova:
 
 ```text
-[sync] messages upsert { messages: X, type: "notify" }
-[sync] messages upsert { processed: X, skipped: Y, failed: Z, firstError: null }
+[sync] messages upsert { type: "notify", messages: X, processed: X, skipped: Y, failed: Z }
+[sync] messages upsert { type: "append", messages: X, processed: X, skipped: Y, failed: Z }
 ```
 
 Ao atualizar mensagem:
 
 ```text
-[sync] messages update { messages: X }
-[sync] messages update { processed: X, skipped: Y, failed: Z, firstError: null }
+[sync] messages update { messages: X, processed: X, skipped: Y, failed: Z }
 ```
 
 ## Limitacoes
 
 - Nao sincroniza labels nesta fase.
 - Nao cria `accountId`, pois ainda existe apenas um numero.
-- Nao envia mensagem pela tela de conversa.
 - Nao altera campanhas.
 - Nao apaga ou reseta sessao Baileys.
+- Historico completo depende do que o WhatsApp reenviar para a sessao.
 - `messages.update` ainda nao possui campo de status dedicado; salva atualizacao simples em `rawJson`.
 
 ## Proxima fase sugerida
@@ -102,3 +103,5 @@ Implementar labels em modo read-only:
 ## Evolucao operacional
 
 A inbox basica com envio manual esta documentada em `docs/INBOX_MANUAL_SEND.md`.
+
+O redesenho da inbox e as limitacoes de historico completo estao documentados em `docs/INBOX_HISTORY_SYNC_AND_UI.md`.

@@ -11,6 +11,7 @@ type StartConversationResponse = {
 
 export function StartConversationForm() {
   const router = useRouter();
+  const [open, setOpen] = useState(false);
   const [phone, setPhone] = useState("");
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
@@ -47,34 +48,42 @@ export function StartConversationForm() {
   }
 
   return (
-    <form className="form-grid" onSubmit={(event) => void handleSubmit(event)}>
-      <div className="field">
-        <label htmlFor="new-conversation-phone">Telefone</label>
-        <input
-          className="input"
-          id="new-conversation-phone"
-          name="phone"
-          placeholder="DDD + numero"
-          required
-          type="tel"
-          value={phone}
-          onChange={(event) => setPhone(event.target.value)}
-        />
-      </div>
-      <div className="field">
-        <label htmlFor="new-conversation-name">Nome opcional</label>
-        <input
-          className="input"
-          id="new-conversation-name"
-          name="name"
-          value={name}
-          onChange={(event) => setName(event.target.value)}
-        />
-      </div>
-      {error ? <div className="message error">{error}</div> : null}
-      <button className="button" disabled={busy} type="submit">
-        {busy ? "Abrindo..." : "Abrir conversa"}
+    <div className="popover-action">
+      <button className="button" type="button" onClick={() => setOpen((current) => !current)}>
+        Nova conversa
       </button>
-    </form>
+
+      {open ? (
+        <form className="compact-form" onSubmit={(event) => void handleSubmit(event)}>
+          <div className="field">
+            <label htmlFor="new-conversation-phone">Telefone</label>
+            <input
+              className="input"
+              id="new-conversation-phone"
+              name="phone"
+              placeholder="DDD + numero"
+              required
+              type="tel"
+              value={phone}
+              onChange={(event) => setPhone(event.target.value)}
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="new-conversation-name">Nome opcional</label>
+            <input
+              className="input"
+              id="new-conversation-name"
+              name="name"
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+            />
+          </div>
+          {error ? <div className="message error">{error}</div> : null}
+          <button className="button" disabled={busy} type="submit">
+            {busy ? "Abrindo..." : "Abrir conversa"}
+          </button>
+        </form>
+      ) : null}
+    </div>
   );
 }

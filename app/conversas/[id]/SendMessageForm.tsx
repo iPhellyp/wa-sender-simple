@@ -54,29 +54,27 @@ export function SendMessageForm({ chatId, isGroup }: SendMessageFormProps) {
   }
 
   return (
-    <form className="form-grid" onSubmit={(event) => void handleSubmit(event)}>
+    <form className="composer-form" onSubmit={(event) => void handleSubmit(event)}>
       {isGroup ? (
-        <div className="message">
+        <div className="inline-note">
           Esta conversa e um grupo. A mensagem manual sera enviada para todos os participantes.
         </div>
       ) : null}
-      <div className="field">
-        <label htmlFor="manual-message">Mensagem</label>
+      <div className="composer-row">
         <textarea
-          className="textarea"
+          className="composer-input"
           id="manual-message"
           maxLength={4000}
+          placeholder="Digite uma mensagem"
           required
           value={text}
           onChange={(event) => setText(event.target.value)}
         />
-      </div>
-      <div className="button-row">
         <button className="button" disabled={busy || !text.trim()} type="submit">
           {busy ? "Enfileirando..." : "Enviar"}
         </button>
-        <span className="muted">{text.length}/4000</span>
       </div>
+      <span className="muted">{text.length}/4000</span>
       {message ? <div className="message success">{message}</div> : null}
       {error ? <div className="message error">{error}</div> : null}
     </form>

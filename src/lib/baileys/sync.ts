@@ -268,12 +268,17 @@ async function settleInBatches<T>(
   return result;
 }
 
-function logBatchResult(scope: string, result: BatchResult) {
+function logSyncResult(
+  scope: string,
+  counts: Record<string, number | string | null | undefined>,
+  result: BatchResult
+) {
   console.log(`[sync] ${scope}`, {
+    ...counts,
     processed: result.processed,
     skipped: result.skipped,
     failed: result.failed,
-    firstError: result.firstError
+    ...(result.firstError ? { firstError: result.firstError } : {})
   });
 }
 
@@ -353,6 +358,10 @@ export async function upsertContactFromBaileys(contact: Partial<Contact>) {
     }
   });
 
+  if (jid.endsWith("@s.whatsapp.net")) {
+    await ensureChatForJid(jid, name ?? pushName);
+  }
+
   return true;
 }
 
@@ -370,6 +379,7 @@ export async function upsertMessageFromBaileys(message: WAMessage) {
   const messageType = extractMessageType(message.message);
   const text = extractMessageText(message.message);
   const lastMessageText = previewText(text, messageType);
+  const pushName = compactText(message.pushName);
   const rawJson = toPrismaJson(message);
 
   const chat = await prisma.whatsappChat.upsert({
@@ -377,10 +387,12 @@ export async function upsertMessageFromBaileys(message: WAMessage) {
       jid
     },
     update: {
-      isGroup: isGroupJid(jid)
+      isGroup: isGroupJid(jid),
+      ...(!isGroupJid(jid) && pushName ? { name: pushName } : {})
     },
     create: {
       jid,
+      ...(!isGroupJid(jid) && pushName ? { name: pushName } : {}),
       isGroup: isGroupJid(jid),
       lastMessageAt: timestamp,
       lastMessageText,
@@ -477,55 +489,73 @@ export async function updateMessageFromBaileys(messageUpdate: WAMessageUpdate) {
 
 export async function syncMessagingHistorySet(event: BaileysEventMap["messaging-history.set"]) {
   console.log("[sync] history set", {
+    syncType: event.syncType ?? null,
     chats: event.chats.length,
     contacts: event.contacts.length,
     messages: event.messages.length
   });
 
-  logBatchResult("history chats", await settleInBatches(event.chats, upsertChatFromBaileys));
-  logBatchResult("history contacts", await settleInBatches(event.contacts, upsertContactFromBaileys));
-  logBatchResult("history messages", await settleInBatches(event.messages, upsertMessageFromBaileys));
+  logSyncResult(
+    "history chats",
+    { syncType: event.syncType ?? null, chats: event.chats.length },
+    await settleInBatches(event.chats, upsertChatFromBaileys)
+  );
+  logSyncResult(
+    "history contacts",
+    { syncType: event.syncType ?? null, contacts: event.contacts.length },
+    await settleInBatches(event.contacts, upsertContactFromBaileys)
+  );
+  logSyncResult(
+    "history messages",
+    { syncType: event.syncType ?? null, messages: event.messages.length },
+    await settleInBatches(event.messages, upsertMessageFromBaileys)
+  );
 }
 
 export async function syncChatsUpsert(chats: BaileysEventMap["chats.upsert"]) {
-  console.log("[sync] chats upsert", {
-    chats: chats.length
-  });
-  logBatchResult("chats upsert", await settleInBatches(chats, upsertChatFromBaileys));
+  logSyncResult(
+    "chats upsert",
+    { chats: chats.length },
+    await settleInBatches(chats, upsertChatFromBaileys)
+  );
 }
 
 export async function syncChatsUpdate(chats: BaileysEventMap["chats.update"]) {
-  console.log("[sync] chats update", {
-    chats: chats.length
-  });
-  logBatchResult("chats update", await settleInBatches(chats, upsertChatFromBaileys));
+  logSyncResult(
+    "chats update",
+    { chats: chats.length },
+    await settleInBatches(chats, upsertChatFromBaileys)
+  );
 }
 
 export async function syncContactsUpsert(contacts: BaileysEventMap["contacts.upsert"]) {
-  console.log("[sync] contacts upsert", {
-    contacts: contacts.length
-  });
-  logBatchResult("contacts upsert", await settleInBatches(contacts, upsertContactFromBaileys));
+  logSyncResult(
+    "contacts upsert",
+    { contacts: contacts.length },
+    await settleInBatches(contacts, upsertContactFromBaileys)
+  );
 }
 
 export async function syncContactsUpdate(contacts: BaileysEventMap["contacts.update"]) {
-  console.log("[sync] contacts update", {
-    contacts: contacts.length
-  });
-  logBatchResult("contacts update", await settleInBatches(contacts, upsertContactFromBaileys));
+  logSyncResult(
+    "contacts update",
+    { contacts: contacts.length },
+    await settleInBatches(contacts, upsertContactFromBaileys)
+  );
 }
 
 export async function syncMessagesUpsert(event: BaileysEventMap["messages.upsert"]) {
-  console.log("[sync] messages upsert", {
-    messages: event.messages.length,
-    type: event.type
-  });
-  logBatchResult("messages upsert", await settleInBatches(event.messages, upsertMessageFromBaileys));
+  logSyncResult(
+    "messages upsert",
+    { type: event.type, messages: event.messages.length },
+    await settleInBatches(event.messages, upsertMessageFromBaileys)
+  );
 }
 
 export async function syncMessagesUpdate(messages: BaileysEventMap["messages.update"]) {
-  console.log("[sync] messages update", {
-    messages: messages.length
-  });
-  logBatchResult("messages update", await settleInBatches(messages, updateMessageFromBaileys));
+  logSyncResult(
+    "messages update",
+    { messages: messages.length },
+    await settleInBatches(messages, updateMessageFromBaileys)
+  );
 }

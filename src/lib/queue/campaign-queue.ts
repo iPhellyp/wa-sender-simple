@@ -7,6 +7,7 @@ export const CONNECT_WHATSAPP_JOB = "connect-whatsapp";
 export const DISCONNECT_WHATSAPP_JOB = "disconnect-whatsapp";
 export const RESET_WHATSAPP_JOB = "reset-whatsapp";
 export const SEND_MANUAL_MESSAGE_JOB = "send-manual-message";
+export const SYNC_WHATSAPP_HISTORY_JOB = "sync-whatsapp-history";
 
 export type SendManualMessageJobData = {
   chatId: string;
@@ -98,6 +99,21 @@ export async function enqueueManualMessage(data: SendManualMessageJobData) {
       jobId: buildJobId("manual-send", data.chatId, String(Date.now())),
       removeOnComplete: true,
       removeOnFail: 1000
+    }
+  );
+
+  return job.id ?? null;
+}
+
+export async function enqueueWhatsappHistorySync() {
+  const job = await getCampaignQueue().add(
+    SYNC_WHATSAPP_HISTORY_JOB,
+    {},
+    {
+      attempts: 1,
+      jobId: buildJobId("sync-whatsapp-history", String(Date.now())),
+      removeOnComplete: true,
+      removeOnFail: 100
     }
   );
 
