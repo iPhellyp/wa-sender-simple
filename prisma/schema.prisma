@@ -68,6 +68,57 @@ model WhatsappSession {
   updatedAt      DateTime       @updatedAt
 }
 
+model WhatsappChat {
+  id              String            @id @default(cuid())
+  jid             String            @unique
+  name            String?
+  isGroup         Boolean           @default(false)
+  unreadCount     Int               @default(0)
+  lastMessageAt   DateTime?
+  lastMessageText String?           @db.Text
+  lastInboundAt   DateTime?
+  lastOutboundAt  DateTime?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  messages        WhatsappMessage[]
+
+  @@index([lastMessageAt])
+  @@index([isGroup])
+}
+
+model WhatsappContact {
+  id         String   @id @default(cuid())
+  jid        String   @unique
+  phone      String?
+  name       String?
+  pushName   String?
+  isBusiness Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([phone])
+}
+
+model WhatsappMessage {
+  id          String        @id @default(cuid())
+  chatId      String
+  waMessageId String
+  jid         String
+  fromMe      Boolean       @default(false)
+  senderJid   String?
+  timestamp   DateTime?
+  messageType String?
+  text        String?       @db.Text
+  rawJson     Json?
+  createdAt   DateTime      @default(now())
+  chat        WhatsappChat  @relation(fields: [chatId], references: [id], onDelete: Cascade)
+
+  @@unique([jid, waMessageId])
+  @@index([chatId, timestamp])
+  @@index([fromMe])
+  @@index([jid])
+}
+
 model Campaign {
   id              String              @id @default(cuid())
   name            String

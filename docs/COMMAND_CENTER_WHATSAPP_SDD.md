@@ -27,9 +27,11 @@ Transformar o `wa-sender-simple` em um Command Center WhatsApp interno para oper
 
 ### Fase 1 - Sync read-only
 
-- Salvar chats, contatos, mensagens, labels e associacoes.
+- Status: implementada parcialmente em `20260706174000_whatsapp_sync_read_only`.
+- Salvar chats, contatos e mensagens.
 - Tratar eventos Baileys sem alterar fluxo de campanha.
-- Criar tela basica de conversas e etiquetas.
+- Criar tela basica de conversas.
+- Labels e associacoes ficam documentadas para fase futura.
 - Nao implementar envio por etiqueta ainda.
 
 ### Fase 2 - Multiplos numeros
@@ -82,14 +84,10 @@ Transformar o `wa-sender-simple` em um Command Center WhatsApp interno para oper
 ### WhatsappChat
 
 - `id`
-- `accountId`
 - `jid`
 - `name`
 - `isGroup`
 - `unreadCount`
-- `archived`
-- `pinned`
-- `muted`
 - `lastMessageAt`
 - `lastMessageText`
 - `lastInboundAt`
@@ -100,7 +98,6 @@ Transformar o `wa-sender-simple` em um Command Center WhatsApp interno para oper
 ### WhatsappContact
 
 - `id`
-- `accountId`
 - `jid`
 - `phone`
 - `name`
@@ -112,9 +109,9 @@ Transformar o `wa-sender-simple` em um Command Center WhatsApp interno para oper
 ### WhatsappMessage
 
 - `id`
-- `accountId`
 - `chatId`
 - `waMessageId`
+- `jid`
 - `fromMe`
 - `senderJid`
 - `timestamp`
@@ -215,11 +212,26 @@ Eventos confirmados nos tipos instalados:
 - `labels.edit`
 - `labels.association`
 
+Eventos implementados na Fase 1 read-only:
+
+- `messaging-history.set`
+- `chats.upsert`
+- `chats.update`
+- `contacts.upsert`
+- `contacts.update`
+- `messages.upsert`
+- `messages.update`
+
+Eventos de labels confirmados, mas nao implementados nesta fase:
+
+- `labels.edit`
+- `labels.association`
+
 Funcao confirmada no socket:
 
 - `fetchMessageHistory`
 
-Observacao: `messaging-history.status` nao apareceu nos tipos locais da versao 6.7.23. Deve ser reavaliado antes da Fase 1.
+Observacao: `messaging-history.status` nao apareceu nos tipos locais da versao 6.7.23. Deve ser reavaliado antes de qualquer fase que dependa desse evento.
 
 ## 6. Regras Anti-Repeticao
 
@@ -332,9 +344,10 @@ Fase 0:
 
 Fase 1:
 
-- Chats, contatos, mensagens e labels sao salvos sem envio por etiqueta.
+- Chats, contatos e mensagens sao salvos sem envio por etiqueta.
 - Reprocessamento nao duplica dados.
-- Tela de conversas e etiquetas mostra dados reais.
+- Tela de conversas mostra dados reais.
+- Labels seguem fora do escopo ate a proxima fase.
 
 Fase 2:
 
@@ -370,3 +383,48 @@ Fase 5:
 7. Implementar anti-repeticao forte.
 8. Implementar automacoes de etiquetas.
 9. Implementar retry/manual e observabilidade avancada.
+
+## 13. Fase 1 Read-Only Implementada
+
+Migration criada:
+
+- `20260706174000_whatsapp_sync_read_only`
+
+Models criados:
+
+- `WhatsappChat`
+- `WhatsappContact`
+- `WhatsappMessage`
+
+Eventos tratados no worker:
+
+- `messaging-history.set`
+- `chats.upsert`
+- `chats.update`
+- `contacts.upsert`
+- `contacts.update`
+- `messages.upsert`
+- `messages.update`
+
+Telas criadas:
+
+- `/conversas`
+- `/conversas/[id]`
+
+Limitacoes desta fase:
+
+- Sem multiplos numeros.
+- Sem accountId.
+- Sem envio manual pela conversa.
+- Sem etiquetas sincronizadas.
+- Sem automacao de etiquetas.
+- Sem alterar campanhas.
+- `messages.update` persiste atualizacao simples em `rawJson`, sem modelar status dedicado.
+
+Proximos passos para etiquetas:
+
+1. Confirmar payload real de `labels.edit` e `labels.association` em producao.
+2. Criar `WhatsappLabel` e `WhatsappChatLabel`.
+3. Sincronizar labels em modo read-only.
+4. Exibir labels na tela de conversas.
+5. So depois usar labels como alvo de campanha.

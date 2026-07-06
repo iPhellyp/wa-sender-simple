@@ -3,7 +3,8 @@ import makeWASocket, {
   DisconnectReason,
   fetchLatestBaileysVersion,
   useMultiFileAuthState,
-  WASocket
+  type BaileysEventMap,
+  type WASocket
 } from "@whiskeysockets/baileys";
 import { mkdir, readdir, rm, unlink, writeFile } from "fs/promises";
 import { join, parse, resolve } from "path";
@@ -13,6 +14,15 @@ import { WhatsappStatus } from "@prisma/client";
 import { prisma } from "../prisma/client";
 import { normalizeBrazilPhone, toWhatsappJid } from "../phone/normalize";
 import { extractMessageText, isOptOutMessage } from "./opt-out";
+import {
+  syncChatsUpdate,
+  syncChatsUpsert,
+  syncContactsUpdate,
+  syncContactsUpsert,
+  syncMessagesUpdate,
+  syncMessagesUpsert,
+  syncMessagingHistorySet
+} from "./sync";
 
 const SESSION_ID = "default";
 
@@ -161,15 +171,13 @@ function scheduleQrTimeout() {
   }, 25_000);
 }
 
-async function handleIncomingMessages(event: {
-  messages?: Array<{
-    key: {
-      fromMe?: boolean | null;
-      remoteJid?: string | null;
-    };
-    message?: unknown;
-  }>;
-}) {
+function logAsyncHandlerError(scope: string, error: unknown) {
+  console.warn(`[${scope}] handler failed`, {
+    error: sanitizeErrorMessage(error)
+  });
+}
+
+async function handleIncomingMessages(event: BaileysEventMap["messages.upsert"]) {
   for (const message of event.messages ?? []) {
     if (message.key.fromMe === true || !message.key.remoteJid?.endsWith("@s.whatsapp.net")) {
       continue;
@@ -237,8 +245,27 @@ async function createSocket() {
   scheduleQrTimeout();
 
   sock.ev.on("creds.update", saveCreds);
+  sock.ev.on("messaging-history.set", (event) => {
+    void syncMessagingHistorySet(event).catch((error) => logAsyncHandlerError("sync history set", error));
+  });
+  sock.ev.on("chats.upsert", (event) => {
+    void syncChatsUpsert(event).catch((error) => logAsyncHandlerError("sync chats upsert", error));
+  });
+  sock.ev.on("chats.update", (event) => {
+    void syncChatsUpdate(event).catch((error) => logAsyncHandlerError("sync chats update", error));
+  });
+  sock.ev.on("contacts.upsert", (event) => {
+    void syncContactsUpsert(event).catch((error) => logAsyncHandlerError("sync contacts upsert", error));
+  });
+  sock.ev.on("contacts.update", (event) => {
+    void syncContactsUpdate(event).catch((error) => logAsyncHandlerError("sync contacts update", error));
+  });
   sock.ev.on("messages.upsert", (event) => {
-    void handleIncomingMessages(event);
+    void handleIncomingMessages(event).catch((error) => logAsyncHandlerError("baileys opt-out", error));
+    void syncMessagesUpsert(event).catch((error) => logAsyncHandlerError("sync messages upsert", error));
+  });
+  sock.ev.on("messages.update", (event) => {
+    void syncMessagesUpdate(event).catch((error) => logAsyncHandlerError("sync messages update", error));
   });
 
   sock.ev.on("connection.update", (update) => {

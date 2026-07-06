@@ -16,6 +16,7 @@ export function AppShell({ title, children, actions }: AppShellProps) {
         <nav className="nav" aria-label="Principal">
           <Link href="/dashboard">Dashboard</Link>
           <Link href="/whatsapp">WhatsApp</Link>
+          <Link href="/conversas">Conversas</Link>
           <Link href="/contatos">Contatos</Link>
           <Link href="/campanhas">Campanhas</Link>
           <form action="/api/auth/logout" method="post">

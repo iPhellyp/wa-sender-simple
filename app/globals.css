@@ -302,6 +302,44 @@ button:disabled {
   border-bottom: 0;
 }
 
+.conversation-meta {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+}
+
+.message-list {
+  display: grid;
+  gap: 10px;
+}
+
+.conversation-message {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  max-width: 820px;
+  padding: 12px;
+}
+
+.conversation-message.inbound {
+  background: #f8fafc;
+}
+
+.conversation-message.outbound {
+  background: #ecfdf3;
+  border-color: #abefc6;
+  margin-left: auto;
+}
+
+.conversation-message-header {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: space-between;
+}
+
 @media (max-width: 820px) {
   .topbar,
   .page-header {

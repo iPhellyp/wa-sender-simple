@@ -8,6 +8,7 @@ import {
 const protectedPagePrefixes = [
   "/dashboard",
   "/whatsapp",
+  "/conversas",
   "/contatos",
   "/campanhas"
 ];
