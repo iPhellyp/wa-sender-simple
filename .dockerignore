@@ -1,0 +1,13 @@
+node_modules
+.next
+.env
+.env.*
+!.env.example
+data/baileys-session
+uploads
+logs
+*.log
+*.db
+*.sqlite
+*.sqlite3
+.git

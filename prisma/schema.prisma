@@ -1,0 +1,103 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum WhatsappStatus {
+  disconnected
+  connecting
+  qr
+  connected
+  error
+}
+
+enum CampaignStatus {
+  draft
+  running
+  paused
+  completed
+  canceled
+}
+
+enum CampaignRecipientStatus {
+  pending
+  scheduled
+  sending
+  sent
+  failed
+  canceled
+}
+
+model Contact {
+  id              String              @id @default(cuid())
+  name            String
+  phoneRaw        String
+  phoneNormalized String              @unique
+  message         String?             @db.Text
+  source          String
+  optedOut        Boolean             @default(false)
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+  recipients      CampaignRecipient[]
+
+  @@index([source])
+  @@index([optedOut])
+}
+
+model ImportBatch {
+  id             String   @id @default(cuid())
+  filename       String
+  totalRows      Int
+  insertedRows   Int
+  duplicatedRows Int
+  invalidRows    Int
+  createdAt      DateTime @default(now())
+}
+
+model WhatsappSession {
+  id             String         @id @default(cuid())
+  status         WhatsappStatus @default(disconnected)
+  qrCode         String?        @db.Text
+  connectedPhone String?
+  lastError      String?        @db.Text
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+}
+
+model Campaign {
+  id              String              @id @default(cuid())
+  name            String
+  defaultMessage  String?             @db.Text
+  intervalMinutes Int
+  status          CampaignStatus      @default(draft)
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+  startedAt       DateTime?
+  completedAt     DateTime?
+  recipients      CampaignRecipient[]
+
+  @@index([status])
+}
+
+model CampaignRecipient {
+  id           String                  @id @default(cuid())
+  campaignId   String
+  contactId    String
+  messageFinal String                  @db.Text
+  status       CampaignRecipientStatus @default(pending)
+  scheduledAt  DateTime?
+  sentAt       DateTime?
+  error        String?                 @db.Text
+  createdAt    DateTime                @default(now())
+  updatedAt    DateTime                @updatedAt
+  campaign     Campaign                @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  contact      Contact                 @relation(fields: [contactId], references: [id], onDelete: Restrict)
+
+  @@unique([campaignId, contactId])
+  @@index([campaignId, status])
+  @@index([contactId])
+}
