@@ -2,10 +2,11 @@ services:
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
+    env_file:
+      - .env
     environment:
       POSTGRES_DB: wa_sender_simple
       POSTGRES_USER: wa_sender
-      POSTGRES_PASSWORD: wa_sender
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
@@ -14,25 +15,25 @@ services:
     restart: unless-stopped
 
   app:
+    image: wa-sender-simple-app:latest
     build:
       context: .
     restart: unless-stopped
     env_file:
       - .env
     environment:
-      DATABASE_URL: postgresql://wa_sender:wa_sender@postgres:5432/wa_sender_simple?schema=public
+      DATABASE_URL: postgresql://${POSTGRES_USER:-wa_sender}:${POSTGRES_PASSWORD:-wa_sender}@postgres:5432/${POSTGRES_DB:-wa_sender_simple}?schema=public
       REDIS_URL: redis://redis:6379
       BAILEYS_SESSION_DIR: /app/data/baileys-session
     depends_on:
       - postgres
       - redis
-    ports:
-      - "3000:3000"
     volumes:
       - baileys_session:/app/data/baileys-session
       - uploads:/app/uploads
 
   worker:
+    image: wa-sender-simple-worker:latest
     build:
       context: .
     restart: unless-stopped
@@ -40,7 +41,7 @@ services:
     env_file:
       - .env
     environment:
-      DATABASE_URL: postgresql://wa_sender:wa_sender@postgres:5432/wa_sender_simple?schema=public
+      DATABASE_URL: postgresql://${POSTGRES_USER:-wa_sender}:${POSTGRES_PASSWORD:-wa_sender}@postgres:5432/${POSTGRES_DB:-wa_sender_simple}?schema=public
       REDIS_URL: redis://redis:6379
       BAILEYS_SESSION_DIR: /app/data/baileys-session
     depends_on:
@@ -52,5 +53,8 @@ services:
 
 volumes:
   postgres_data:
+    name: postgres_data
   baileys_session:
+    name: baileys_session
   uploads:
+    name: uploads

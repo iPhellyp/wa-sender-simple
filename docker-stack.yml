@@ -1,0 +1,91 @@
+version: "3.8"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    env_file:
+      - .env
+    environment:
+      POSTGRES_DB: wa_sender_simple
+      POSTGRES_USER: wa_sender
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - wa_sender_internal
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: any
+
+  redis:
+    image: redis:7-alpine
+    networks:
+      - wa_sender_internal
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: any
+
+  app:
+    image: wa-sender-simple-app:latest
+    env_file:
+      - .env
+    environment:
+      BAILEYS_SESSION_DIR: /app/data/baileys-session
+      REDIS_URL: redis://redis:6379
+    volumes:
+      - baileys_session:/app/data/baileys-session
+      - uploads:/app/uploads
+    networks:
+      - wa_sender_internal
+      - iPHnet
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: any
+      labels:
+        - traefik.enable=true
+        - traefik.docker.network=iPHnet
+        - traefik.http.routers.wa-sender-simple.rule=Host(`wa2.supereducarbrasil.com.br`)
+        - traefik.http.routers.wa-sender-simple.entrypoints=websecure
+        - traefik.http.routers.wa-sender-simple.tls=true
+        - traefik.http.routers.wa-sender-simple.tls.certresolver=letsencryptresolver
+        - traefik.http.services.wa-sender-simple.loadbalancer.server.port=3000
+
+  worker:
+    image: wa-sender-simple-worker:latest
+    command: npm run worker
+    env_file:
+      - .env
+    environment:
+      BAILEYS_SESSION_DIR: /app/data/baileys-session
+      REDIS_URL: redis://redis:6379
+    volumes:
+      - baileys_session:/app/data/baileys-session
+      - uploads:/app/uploads
+    networks:
+      - wa_sender_internal
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: any
+
+networks:
+  wa_sender_internal:
+    driver: overlay
+  iPHnet:
+    external: true
+    name: iPHnet
+
+volumes:
+  postgres_data:
+    external: true
+    name: wa-sender-simple_postgres_data
+
+  baileys_session:
+    external: true
+    name: wa-sender-simple_baileys_session
+
+  uploads:
+    external: true
+    name: wa-sender-simple_uploads
