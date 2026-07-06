@@ -19,6 +19,12 @@ Troque as senhas padrao do Postgres no `docker-compose.yml` antes de usar em pro
 
 No Docker, `DATABASE_URL` deve apontar para o host `postgres` e `REDIS_URL` para `redis`. `localhost` dentro do container apontaria para o proprio container, nao para o banco.
 
+## Rede interna Docker
+
+Postgres e Redis nao precisam expor portas publicas na VPS. O `docker-compose.yml` deixa esses servicos acessiveis apenas pela rede interna do Docker, usando os hosts `postgres` e `redis`.
+
+Isso evita conflito com outros bancos ou servicos que ja estejam usando `5432` ou `6379` na VPS.
+
 ## Primeiro deploy manual
 
 Comandos manuais:
