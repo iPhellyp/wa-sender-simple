@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   ADMIN_SESSION_COOKIE,
   createAdminSessionToken,
+  getRequestBaseUrl,
   isAdminPasswordConfigured,
   isPasswordValid
 } from "@/src/lib/auth/session";
@@ -9,21 +10,23 @@ import {
 export const runtime = "nodejs";
 
 export async function POST(request: NextRequest) {
+  const baseUrl = getRequestBaseUrl(request);
   const formData = await request.formData();
   const password = String(formData.get("password") ?? "");
-  const requestedNextPath = String(formData.get("next") ?? "/dashboard");
-  const nextPath =
-    requestedNextPath.startsWith("/") && !requestedNextPath.startsWith("//")
-      ? requestedNextPath
-      : "/dashboard";
 
-  if (!isAdminPasswordConfigured() || !isPasswordValid(password)) {
-    const loginUrl = new URL("/login", request.url);
+  if (!isAdminPasswordConfigured()) {
+    const loginUrl = new URL("/login", baseUrl);
+    loginUrl.searchParams.set("error", "server_config");
+    return NextResponse.redirect(loginUrl, { status: 303 });
+  }
+
+  if (!isPasswordValid(password)) {
+    const loginUrl = new URL("/login", baseUrl);
     loginUrl.searchParams.set("error", "1");
     return NextResponse.redirect(loginUrl, { status: 303 });
   }
 
-  const response = NextResponse.redirect(new URL(nextPath || "/dashboard", request.url), {
+  const response = NextResponse.redirect(new URL("/dashboard", baseUrl), {
     status: 303
   });
 

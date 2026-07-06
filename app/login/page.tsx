@@ -5,8 +5,10 @@ type LoginPageProps = {
 export default async function LoginPage({ searchParams }: LoginPageProps) {
   const params = (await searchParams) ?? {};
   const nextParam = typeof params.next === "string" ? params.next : "/dashboard";
-  const nextPath = nextParam.startsWith("/") ? nextParam : "/dashboard";
+  const nextPath =
+    nextParam.startsWith("/") && !nextParam.startsWith("//") ? nextParam : "/dashboard";
   const hasError = params.error === "1";
+  const hasServerConfigError = params.error === "server_config";
 
   return (
     <main className="page" style={{ maxWidth: 460 }}>
@@ -25,7 +27,10 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
               required
             />
           </div>
-          {hasError ? <div className="message error">Senha invalida ou ADMIN_PASSWORD ausente.</div> : null}
+          {hasError ? <div className="message error">Senha invalida.</div> : null}
+          {hasServerConfigError ? (
+            <div className="message error">ADMIN_PASSWORD ausente no servidor.</div>
+          ) : null}
           <button className="button" type="submit">
             Entrar
           </button>

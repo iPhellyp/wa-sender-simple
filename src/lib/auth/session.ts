@@ -2,6 +2,26 @@ export const ADMIN_SESSION_COOKIE = "wa_sender_admin_session";
 
 const SESSION_MESSAGE = "wa-sender-simple-admin-session";
 
+function firstHeaderValue(value: string | null) {
+  return value?.split(",")[0]?.trim() || null;
+}
+
+export function getRequestBaseUrl(request: {
+  headers: Headers;
+  nextUrl: {
+    origin: string;
+  };
+}) {
+  const forwardedHost = firstHeaderValue(request.headers.get("x-forwarded-host"));
+  const forwardedProto = firstHeaderValue(request.headers.get("x-forwarded-proto")) ?? "https";
+
+  if (forwardedHost) {
+    return `${forwardedProto}://${forwardedHost}`;
+  }
+
+  return request.nextUrl.origin;
+}
+
 function getAdminPassword() {
   return process.env.ADMIN_PASSWORD ?? "";
 }

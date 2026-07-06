@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   ADMIN_SESSION_COOKIE,
+  getRequestBaseUrl,
   isValidAdminSessionToken
 } from "./src/lib/auth/session";
 
@@ -42,8 +43,7 @@ export async function middleware(request: NextRequest) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  const loginUrl = request.nextUrl.clone();
-  loginUrl.pathname = "/login";
+  const loginUrl = new URL("/login", getRequestBaseUrl(request));
   loginUrl.searchParams.set("next", pathname);
   return NextResponse.redirect(loginUrl);
 }

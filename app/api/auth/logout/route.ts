@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { ADMIN_SESSION_COOKIE } from "@/src/lib/auth/session";
+import { ADMIN_SESSION_COOKIE, getRequestBaseUrl } from "@/src/lib/auth/session";
 
 export const runtime = "nodejs";
 
 function logout(request: NextRequest) {
-  const response = NextResponse.redirect(new URL("/login", request.url), {
+  const response = NextResponse.redirect(new URL("/login", getRequestBaseUrl(request)), {
     status: 303
   });
   response.cookies.delete(ADMIN_SESSION_COOKIE);
