@@ -11,7 +11,7 @@ export default async function LabelDetailPage({ params }: LabelDetailPageProps) 
   const { id } = await params;
 
   return (
-    <AppShell title="Detalhe da etiqueta">
+    <AppShell title="Segmento WhatsApp" subtitle="Contatos X1 vinculados à etiqueta e prontos para campanha.">
       <LabelDetailClient labelId={id} />
     </AppShell>
   );

@@ -12,6 +12,17 @@ type LabelSummary = {
   contactCount: number;
   groupCount: number;
   updatedAt: string;
+  sendStats: {
+    sent: number;
+    failed: number;
+    pending: number;
+  };
+  lastCampaign: {
+    id: string;
+    name: string;
+    status: string;
+    updatedAt: string;
+  } | null;
 };
 
 type LabelsResponse = {
@@ -38,12 +49,12 @@ function labelColorStyle(color: string | null) {
   }
 
   const palette = [
-    "#136f63",
+    "#0f766e",
     "#175cd3",
-    "#9a6700",
-    "#b42318",
+    "#d97706",
+    "#dc2626",
     "#6941c6",
-    "#067647",
+    "#059669",
     "#c11574",
     "#3538cd"
   ];
@@ -51,6 +62,22 @@ function labelColorStyle(color: string | null) {
   return {
     backgroundColor: palette[index % palette.length]
   };
+}
+
+function statusClass(status: string) {
+  if (status === "completed") {
+    return "success";
+  }
+
+  if (status === "canceled") {
+    return "danger";
+  }
+
+  if (status === "running") {
+    return "info";
+  }
+
+  return "warning";
 }
 
 export function LabelsClient() {
@@ -78,7 +105,7 @@ export function LabelsClient() {
   }, []);
 
   if (loading) {
-    return <div className="card">Carregando etiquetas...</div>;
+    return <div className="card">Carregando segmentos...</div>;
   }
 
   if (error) {
@@ -89,10 +116,9 @@ export function LabelsClient() {
 
   return (
     <section className="grid">
-      <p className="page-subtitle">Etiquetas sincronizadas do WhatsApp conectado</p>
       <div className="message">
-        Fast Label Sender Mode: etiquetas de grupos sao ignoradas automaticamente e o foco e enviar
-        para contatos individuais elegiveis, sem depender de historico de mensagens.
+        Segmentos vindos das etiquetas do WhatsApp. Grupos são contados como ignorados e os
+        contatos X1 continuam elegíveis para campanha.
       </div>
 
       <div className="inbox-metrics">
@@ -109,8 +135,8 @@ export function LabelsClient() {
           <strong>{metrics?.labeledChats ?? 0}</strong>
         </article>
         <article className="metric-card">
-          <span>Contatos x1 elegiveis</span>
-          <strong>{metrics?.eligibleX1Contacts ?? metrics?.contactLabels ?? 0}</strong>
+          <span>Contatos X1 elegíveis</span>
+          <strong>{metrics?.eligibleX1Contacts ?? 0}</strong>
         </article>
         <article className="metric-card">
           <span>Grupos ignorados</span>
@@ -121,36 +147,57 @@ export function LabelsClient() {
       {data?.labels.length === 0 ? (
         <div className="empty-state">
           <strong>Nenhuma etiqueta sincronizada ainda.</strong>
-          <span>
-            Conecte o WhatsApp e aguarde os eventos labels.edit / labels.association. Etiquetas antigas
-            podem exigir novo pareamento.
-          </span>
+          <span>Conecte o WhatsApp, force resync de catálogo/app-state e aguarde labels.</span>
         </div>
       ) : (
-        <div className="conversation-grid">
+        <div className="label-segment-grid">
           {data?.labels.map((label) => (
-            <article className="inbox-conversation-card label-card" key={label.id}>
-              <span className="label-chip" style={labelColorStyle(label.color)}>
-                {label.name.slice(0, 1).toUpperCase()}
-              </span>
-              <span className="conversation-card-body">
-                <strong>{label.name}</strong>
-                <span className="conversation-card-meta">
-                  <span>{label.contactCount} contatos</span>
-                  <span>{label.groupCount} grupos ignorados</span>
+            <article className="section-card label-segment-card" key={label.id}>
+              <div className="label-segment-header">
+                <span className="label-chip" style={labelColorStyle(label.color)}>
+                  {label.name.slice(0, 1).toUpperCase()}
                 </span>
-                <span className="muted">
-                  Atualizada em {new Date(label.updatedAt).toLocaleString("pt-BR")}
-                </span>
-                <span className="button-row">
-                  <Link className="button secondary" href={`/etiquetas/${label.id}`}>
-                    Abrir
+                <div>
+                  <h2>{label.name}</h2>
+                  <p>Atualizada em {new Date(label.updatedAt).toLocaleString("pt-BR")}</p>
+                </div>
+              </div>
+
+              <div className="row-meta">
+                <span>{label.contactCount} contatos X1</span>
+                <span>{label.groupCount} grupos ignorados</span>
+                <span>{label.sendStats.sent} enviados</span>
+                {label.sendStats.failed > 0 ? <span>{label.sendStats.failed} falhas</span> : null}
+              </div>
+
+              {label.lastCampaign ? (
+                <div className="message">
+                  Último envio: <strong>{label.lastCampaign.name}</strong>{" "}
+                  <span className={`badge ${statusClass(label.lastCampaign.status)}`}>
+                    {label.lastCampaign.status}
+                  </span>
+                </div>
+              ) : (
+                <div className="message">Nenhuma campanha registrada para este segmento.</div>
+              )}
+
+              <div className="button-row">
+                <Link className="button secondary" href={`/etiquetas/${label.id}`}>
+                  Abrir contatos
+                </Link>
+                <Link className="button" href={`/campanhas?labelId=${label.id}`}>
+                  Criar campanha
+                </Link>
+                {label.lastCampaign ? (
+                  <Link className="button secondary" href={`/envios?campaign=${label.lastCampaign.id}`}>
+                    Ver histórico
                   </Link>
-                  <Link className="button" href={`/etiquetas/${label.id}/enviar`}>
-                    Criar envio
+                ) : (
+                  <Link className="button secondary" href="/envios">
+                    Ver envios
                   </Link>
-                </span>
-              </span>
+                )}
+              </div>
             </article>
           ))}
         </div>

@@ -15,6 +15,16 @@ type LabelDetailResponse = {
     conversationCount: number;
     contactCount: number;
     groupCount: number;
+    sentCount: number;
+    failedCount: number;
+    pendingCount: number;
+    neverSentCount: number;
+  };
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
   };
   conversations: Array<{
     chatId: string;
@@ -22,15 +32,55 @@ type LabelDetailResponse = {
     name: string;
     isGroup: boolean;
     lastMessageAt: string | null;
+    updatedAt: string;
     lastMessageText: string | null;
+    sendStatus: "sent" | "failed" | "pending" | "never_sent";
+    sentAt: string | null;
+    campaignName: string | null;
+    error: string | null;
   }>;
   error?: string;
 };
 
+const MAX_QUERY_CHAT_IDS = 80;
+
+function sendStatusLabel(status: string) {
+  if (status === "sent") {
+    return "já enviado";
+  }
+
+  if (status === "failed") {
+    return "falhou";
+  }
+
+  if (status === "pending") {
+    return "pendente";
+  }
+
+  return "nunca enviado";
+}
+
+function sendStatusClass(status: string) {
+  if (status === "sent") {
+    return "success";
+  }
+
+  if (status === "failed") {
+    return "danger";
+  }
+
+  if (status === "pending") {
+    return "warning";
+  }
+
+  return "neutral";
+}
+
 export function LabelDetailClient({ labelId }: { labelId: string }) {
-  const [type, setType] = useState<"all" | "contacts">("contacts");
   const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
   const [data, setData] = useState<LabelDetailResponse | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -40,7 +90,8 @@ export function LabelDetailClient({ labelId }: { labelId: string }) {
 
       try {
         const params = new URLSearchParams();
-        params.set("type", type);
+        params.set("page", String(page));
+        params.set("limit", "50");
         if (search.trim()) {
           params.set("search", search.trim());
         }
@@ -62,12 +113,32 @@ export function LabelDetailClient({ labelId }: { labelId: string }) {
         setLoading(false);
       }
     })();
-  }, [labelId, type, search]);
+  }, [labelId, page, search]);
 
   const conversations = useMemo(() => data?.conversations ?? [], [data]);
+  const selected = conversations.filter((conversation) => selectedIds.has(conversation.chatId));
+  const exceedsQueryLimit = selected.length > MAX_QUERY_CHAT_IDS;
+  const selectedCampaignHref =
+    selected.length > 0 && !exceedsQueryLimit
+      ? `/campanhas?chatIds=${selected.map((item) => item.chatId).join(",")}`
+      : "/campanhas";
+
+  function toggle(chatId: string) {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+
+      if (next.has(chatId)) {
+        next.delete(chatId);
+      } else {
+        next.add(chatId);
+      }
+
+      return next;
+    });
+  }
 
   if (loading && !data) {
-    return <div className="card">Carregando etiqueta...</div>;
+    return <div className="card">Carregando segmento...</div>;
   }
 
   if (error && !data) {
@@ -80,78 +151,177 @@ export function LabelDetailClient({ labelId }: { labelId: string }) {
         <Link className="button secondary" href="/etiquetas">
           Voltar
         </Link>
-        <Link className="button" href={`/etiquetas/${labelId}/enviar`}>
-          Criar envio para esta etiqueta
+        <Link className="button" href={`/campanhas?labelId=${labelId}`}>
+          Criar campanha com a etiqueta
         </Link>
       </div>
 
-      <div className="card">
-        <h2>{data?.label.name}</h2>
-        <p className="muted">ID WhatsApp: {data?.label.waLabelId}</p>
+      <div className="section-card">
+        <div className="section-card-header">
+          <div>
+            <h2>{data?.label.name}</h2>
+            <p>ID WhatsApp: {data?.label.waLabelId}</p>
+          </div>
+          <span className="badge success">segmento X1</span>
+        </div>
         <div className="inbox-metrics">
           <article className="metric-card">
             <span>Contatos X1</span>
-            <strong>{data?.metrics.conversationCount ?? 0}</strong>
-          </article>
-          <article className="metric-card">
-            <span>Contatos</span>
             <strong>{data?.metrics.contactCount ?? 0}</strong>
           </article>
           <article className="metric-card">
             <span>Grupos ignorados</span>
             <strong>{data?.metrics.groupCount ?? 0}</strong>
           </article>
+          <article className="metric-card">
+            <span>Já enviados</span>
+            <strong>{data?.metrics.sentCount ?? 0}</strong>
+          </article>
+          <article className="metric-card">
+            <span>Nunca enviados</span>
+            <strong>{data?.metrics.neverSentCount ?? 0}</strong>
+          </article>
+          <article className="metric-card">
+            <span>Falhas</span>
+            <strong>{data?.metrics.failedCount ?? 0}</strong>
+          </article>
         </div>
       </div>
 
-      <div className="inbox-toolbar">
-        <nav className="segmented" aria-label="Filtro da etiqueta">
-          {(["contacts", "all"] as const).map((filter) => (
-            <button
-              className={type === filter ? "active" : ""}
-              key={filter}
-              type="button"
-              onClick={() => setType(filter)}
-            >
-              {filter === "all" ? "Todos X1" : "Contatos"}
-            </button>
-          ))}
-        </nav>
+      <div className="inbox-toolbar catalog-toolbar">
         <input
           className="input"
-          placeholder="Buscar conversa"
+          placeholder="Buscar por nome, JID ou mensagem salva"
           value={search}
-          onChange={(event) => setSearch(event.target.value)}
+          onChange={(event) => {
+            setSearch(event.target.value);
+            setPage(1);
+            setSelectedIds(new Set());
+          }}
         />
+        <div className="button-row">
+          <button
+            className="button secondary"
+            disabled={conversations.length === 0}
+            type="button"
+            onClick={() => setSelectedIds(new Set(conversations.map((item) => item.chatId)))}
+          >
+            Selecionar visíveis
+          </button>
+          <button
+            className="button secondary"
+            disabled={selected.length === 0}
+            type="button"
+            onClick={() => setSelectedIds(new Set())}
+          >
+            Limpar seleção
+          </button>
+          <span className="muted">{selected.length} selecionado(s)</span>
+          <Link
+            className={`button ${selected.length > 0 && !exceedsQueryLimit ? "" : "secondary"}`}
+            href={selectedCampaignHref}
+          >
+            Criar campanha com selecionados
+          </Link>
+        </div>
       </div>
+
+      {exceedsQueryLimit ? (
+        <div className="message error">
+          Selecione até {MAX_QUERY_CHAT_IDS} contatos para enviar por query string.
+        </div>
+      ) : null}
+
+      {loading ? <div className="message">Atualizando lista...</div> : null}
 
       {conversations.length === 0 ? (
         <div className="empty-state">
-          <strong>Nenhuma conversa nesta etiqueta.</strong>
+          <strong>Nenhum contato nesta etiqueta.</strong>
+          <span>Altere a busca ou force resync de catálogo/app-state na página WhatsApp.</span>
         </div>
       ) : (
         <div className="conversation-grid">
           {conversations.map((conversation) => (
-            <Link
-              className="inbox-conversation-card"
-              href={`/conversas/${conversation.chatId}`}
-              key={conversation.chatId}
-            >
+            <article className="inbox-conversation-card label-detail-card" key={conversation.chatId}>
+              <label className="catalog-checkbox" title="Selecionar contato">
+                <input
+                  checked={selectedIds.has(conversation.chatId)}
+                  type="checkbox"
+                  onChange={() => toggle(conversation.chatId)}
+                />
+              </label>
               <span className="conversation-card-body">
-                <strong>{conversation.name}</strong>
-                <span className="conversation-card-meta">
-                  <span className={`badge ${conversation.isGroup ? "info" : "success"}`}>
-                    {conversation.isGroup ? "grupo" : "contato"}
+                <span className="conversation-card-top">
+                  <span className="conversation-title-block">
+                    <strong>{conversation.name}</strong>
+                    <span>{conversation.jid}</span>
                   </span>
+                  <span className="conversation-time">
+                    {new Date(conversation.lastMessageAt ?? conversation.updatedAt).toLocaleString("pt-BR")}
+                  </span>
+                </span>
+                <span className="conversation-card-meta">
+                  <span className="badge success">contato</span>
+                  <span className={`badge ${sendStatusClass(conversation.sendStatus)}`}>
+                    {sendStatusLabel(conversation.sendStatus)}
+                  </span>
+                  {conversation.sentAt ? (
+                    <span>enviado em {new Date(conversation.sentAt).toLocaleString("pt-BR")}</span>
+                  ) : null}
+                  {conversation.campaignName ? <span>{conversation.campaignName}</span> : null}
                 </span>
                 <span className="conversation-preview">
                   {conversation.lastMessageText ?? "Sem mensagem salva"}
                 </span>
+                <span className="conversation-card-footer">
+                  <Link className="button secondary compact-button" href={`/conversas/${conversation.chatId}`}>
+                    Abrir contato
+                  </Link>
+                  <Link className="button secondary compact-button" href={`/campanhas?chatIds=${conversation.chatId}`}>
+                    Campanha
+                  </Link>
+                  {conversation.error ? <span className="send-error">{conversation.error}</span> : null}
+                </span>
               </span>
-            </Link>
+            </article>
           ))}
         </div>
       )}
+
+      <div className="button-row" style={{ justifyContent: "space-between" }}>
+        <span className="muted">
+          Exibindo {data?.pagination.total ? (data.pagination.page - 1) * data.pagination.limit + 1 : 0}-
+          {Math.min((data?.pagination.page ?? 1) * (data?.pagination.limit ?? 50), data?.pagination.total ?? 0)} de{" "}
+          {data?.pagination.total ?? 0}
+        </span>
+        <div className="button-row">
+          <button
+            className="button secondary"
+            disabled={(data?.pagination.page ?? 1) <= 1}
+            type="button"
+            onClick={() => {
+              setSelectedIds(new Set());
+              setPage((current) => Math.max(1, current - 1));
+            }}
+          >
+            Anterior
+          </button>
+          <span className="muted">
+            Página {data?.pagination.page ?? 1} de {data?.pagination.totalPages ?? 1}
+          </span>
+          <button
+            className="button secondary"
+            disabled={(data?.pagination.page ?? 1) >= (data?.pagination.totalPages ?? 1)}
+            type="button"
+            onClick={() => {
+              setSelectedIds(new Set());
+              setPage((current) => current + 1);
+            }}
+          >
+            Próxima
+          </button>
+        </div>
+      </div>
     </section>
   );
 }

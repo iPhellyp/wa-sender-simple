@@ -1,14 +1,17 @@
 import Link from "next/link";
 import type { Prisma } from "@prisma/client";
 import { AppShell } from "@/app/components/AppShell";
+import { StatCard } from "@/app/components/ui/StatCard";
 import { prisma } from "@/src/lib/prisma/client";
+import { getWhatsappStatusPayload } from "@/src/lib/baileys/client";
 import {
   getWhatsappDisplayName,
   getWhatsappIdentityLabel
 } from "@/src/lib/whatsapp/display-name";
+import { getLastSendByJids, getSendJidSets } from "@/src/lib/labels/send-stats";
+import { CatalogSelectionClient, type CatalogConversationItem } from "./CatalogSelectionClient";
 import { StartConversationForm } from "./StartConversationForm";
 import { SyncHistoryButton } from "./SyncHistoryButton";
-import { getWhatsappStatusPayload } from "@/src/lib/baileys/client";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -18,22 +21,90 @@ type ConversationsPageProps = {
     q?: string | string[];
     type?: string | string[];
     labelId?: string | string[];
+    sendStatus?: string | string[];
+    sort?: string | string[];
     page?: string | string[];
     limit?: string | string[];
   }>;
 };
 
-type ConversationFilter =
-  | "all"
-  | "contacts"
-  | "with-message"
-  | "without-message"
-  | "labeled";
+type ConversationFilter = "all" | "contacts" | "with-message" | "without-message" | "labeled";
+type SendStatusFilter = "all" | "sent" | "never_sent" | "failed";
+type ConversationSort = "recent" | "oldest" | "no_message" | "tagged" | "sent" | "never_sent";
+
 const DEFAULT_FILTER: ConversationFilter = "contacts";
+const DEFAULT_SEND_STATUS: SendStatusFilter = "all";
+const DEFAULT_SORT: ConversationSort = "recent";
 const DEFAULT_PAGE_SIZE = 50;
 const PAGE_SIZE_OPTIONS = [30, 50] as const;
 
-const chatListInclude = {
+const dateFormatter = new Intl.DateTimeFormat("pt-BR", {
+  dateStyle: "short",
+  timeStyle: "short",
+  timeZone: "America/Sao_Paulo"
+});
+
+const filterLabels: Record<ConversationFilter, string> = {
+  all: "Todos X1",
+  contacts: "Contatos",
+  "with-message": "Com mensagem",
+  "without-message": "Sem mensagem",
+  labeled: "Etiquetados"
+};
+
+const sendStatusLabels: Record<SendStatusFilter, string> = {
+  all: "Todos envios",
+  sent: "Já enviado",
+  never_sent: "Nunca enviado",
+  failed: "Com falha"
+};
+
+const sortLabels: Record<ConversationSort, string> = {
+  recent: "Mais recentes primeiro",
+  oldest: "Mais antigos primeiro",
+  no_message: "Sem mensagem primeiro",
+  tagged: "Etiquetados primeiro",
+  sent: "Já enviados primeiro",
+  never_sent: "Nunca enviados primeiro"
+};
+
+const recentOrder: Prisma.WhatsappChatOrderByWithRelationInput[] = [
+  {
+    lastMessageAt: {
+      sort: "desc",
+      nulls: "last"
+    }
+  },
+  {
+    updatedAt: "desc"
+  },
+  {
+    createdAt: "desc"
+  },
+  {
+    id: "desc"
+  }
+];
+
+const oldestOrder: Prisma.WhatsappChatOrderByWithRelationInput[] = [
+  {
+    lastMessageAt: {
+      sort: "asc",
+      nulls: "last"
+    }
+  },
+  {
+    updatedAt: "asc"
+  },
+  {
+    createdAt: "asc"
+  },
+  {
+    id: "asc"
+  }
+];
+
+const chatInclude = {
   labels: {
     include: {
       label: {
@@ -48,55 +119,30 @@ const chatListInclude = {
   }
 } satisfies Prisma.WhatsappChatInclude;
 
+type ChatRow = Prisma.WhatsappChatGetPayload<{
+  include: typeof chatInclude;
+}>;
+
 type ContactSummary = {
   jid: string;
   name: string | null;
   pushName: string | null;
 };
 
-const dateFormatter = new Intl.DateTimeFormat("pt-BR", {
-  dateStyle: "short",
-  timeStyle: "short",
-  timeZone: "America/Sao_Paulo"
-});
-
-const filterLabels: Record<ConversationFilter, string> = {
-  all: "Todos",
-  contacts: "Contatos",
-  "with-message": "Com mensagem",
-  "without-message": "Sem mensagem",
-  labeled: "Etiquetados"
-};
-
-function formatDate(value: Date | null) {
-  return value ? dateFormatter.format(value) : null;
+function pickSingle(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] : value;
 }
 
-function getLastDirection(chat: {
-  lastInboundAt: Date | null;
-  lastOutboundAt: Date | null;
-}) {
-  if (chat.lastOutboundAt && (!chat.lastInboundAt || chat.lastOutboundAt >= chat.lastInboundAt)) {
-    return "Eu";
-  }
-
-  if (chat.lastInboundAt) {
-    return "Contato";
-  }
-
-  return null;
+function formatDate(value: Date | null | undefined) {
+  return value ? dateFormatter.format(value) : "Sem registro";
 }
 
 function getSearchValue(searchParams: Awaited<ConversationsPageProps["searchParams"]>) {
-  const rawQuery = searchParams?.q;
-  const query = Array.isArray(rawQuery) ? rawQuery[0] : rawQuery;
-
-  return query?.trim() ?? "";
+  return pickSingle(searchParams?.q)?.trim() ?? "";
 }
 
-function getFilterValue(searchParams: Awaited<ConversationsPageProps["searchParams"]>) {
-  const rawType = searchParams?.type;
-  const type = Array.isArray(rawType) ? rawType[0] : rawType;
+function getFilterValue(searchParams: Awaited<ConversationsPageProps["searchParams"]>): ConversationFilter {
+  const type = pickSingle(searchParams?.type);
 
   if (type === "recent") {
     return "with-message";
@@ -119,134 +165,105 @@ function getFilterValue(searchParams: Awaited<ConversationsPageProps["searchPara
   return DEFAULT_FILTER;
 }
 
+function getSendStatusValue(
+  searchParams: Awaited<ConversationsPageProps["searchParams"]>
+): SendStatusFilter {
+  const value = pickSingle(searchParams?.sendStatus);
+
+  if (value === "sent" || value === "never_sent" || value === "failed") {
+    return value;
+  }
+
+  return DEFAULT_SEND_STATUS;
+}
+
+function getSortValue(searchParams: Awaited<ConversationsPageProps["searchParams"]>): ConversationSort {
+  const value = pickSingle(searchParams?.sort);
+
+  if (
+    value === "oldest" ||
+    value === "no_message" ||
+    value === "tagged" ||
+    value === "sent" ||
+    value === "never_sent"
+  ) {
+    return value;
+  }
+
+  return DEFAULT_SORT;
+}
+
 function getLabelIdValue(searchParams: Awaited<ConversationsPageProps["searchParams"]>) {
-  const rawLabelId = searchParams?.labelId;
-  const labelId = Array.isArray(rawLabelId) ? rawLabelId[0] : rawLabelId;
-  return labelId?.trim() ?? "";
+  return pickSingle(searchParams?.labelId)?.trim() ?? "";
 }
 
 function getPageValue(searchParams: Awaited<ConversationsPageProps["searchParams"]>) {
-  const rawPage = searchParams?.page;
-  const page = Number(Array.isArray(rawPage) ? rawPage[0] : rawPage);
+  const page = Number(pickSingle(searchParams?.page));
 
   return Number.isInteger(page) && page > 0 ? page : 1;
 }
 
 function getLimitValue(searchParams: Awaited<ConversationsPageProps["searchParams"]>) {
-  const rawLimit = searchParams?.limit;
-  const limit = Number(Array.isArray(rawLimit) ? rawLimit[0] : rawLimit);
+  const limit = Number(pickSingle(searchParams?.limit));
 
   return PAGE_SIZE_OPTIONS.includes(limit as (typeof PAGE_SIZE_OPTIONS)[number])
     ? limit
     : DEFAULT_PAGE_SIZE;
 }
 
-function buildFilterHref(
-  type: ConversationFilter,
-  query: string,
-  labelId: string,
-  limit: number
-) {
+function buildHref(options: {
+  type: ConversationFilter;
+  query: string;
+  labelId: string;
+  sendStatus: SendStatusFilter;
+  sort: ConversationSort;
+  page?: number;
+  limit: number;
+}) {
   const params = new URLSearchParams();
 
-  if (type !== DEFAULT_FILTER) {
-    params.set("type", type);
+  if (options.type !== DEFAULT_FILTER) {
+    params.set("type", options.type);
   }
 
-  if (query) {
-    params.set("q", query);
+  if (options.query) {
+    params.set("q", options.query);
   }
 
-  if (labelId) {
-    params.set("labelId", labelId);
+  if (options.labelId) {
+    params.set("labelId", options.labelId);
   }
 
-  if (limit !== DEFAULT_PAGE_SIZE) {
-    params.set("limit", String(limit));
+  if (options.sendStatus !== DEFAULT_SEND_STATUS) {
+    params.set("sendStatus", options.sendStatus);
+  }
+
+  if (options.sort !== DEFAULT_SORT) {
+    params.set("sort", options.sort);
+  }
+
+  if (options.page && options.page > 1) {
+    params.set("page", String(options.page));
+  }
+
+  if (options.limit !== DEFAULT_PAGE_SIZE) {
+    params.set("limit", String(options.limit));
   }
 
   const suffix = params.toString();
   return suffix ? `/conversas?${suffix}` : "/conversas";
-}
-
-function buildPageHref(
-  page: number,
-  type: ConversationFilter,
-  query: string,
-  labelId: string,
-  limit: number
-) {
-  const params = new URLSearchParams();
-
-  if (type !== DEFAULT_FILTER) {
-    params.set("type", type);
-  }
-
-  if (query) {
-    params.set("q", query);
-  }
-
-  if (labelId) {
-    params.set("labelId", labelId);
-  }
-
-  if (page > 1) {
-    params.set("page", String(page));
-  }
-
-  if (limit !== DEFAULT_PAGE_SIZE) {
-    params.set("limit", String(limit));
-  }
-
-  const suffix = params.toString();
-  return suffix ? `/conversas?${suffix}` : "/conversas";
-}
-
-function getAvatarText(name: string, isGroup: boolean) {
-  if (isGroup) {
-    return "G";
-  }
-
-  return name.replace(/\W/g, "").slice(0, 1).toUpperCase() || "#";
 }
 
 function andWhere(...items: Prisma.WhatsappChatWhereInput[]): Prisma.WhatsappChatWhereInput {
   const filters = items.filter((item) => Object.keys(item).length > 0);
 
-  if (filters.length === 0) {
-    return {};
-  }
-
-  return {
-    AND: filters
-  } satisfies Prisma.WhatsappChatWhereInput;
-}
-
-function getLabelWhere(labelId: string): Prisma.WhatsappChatWhereInput {
-  if (!labelId) {
-    return {};
-  }
-
-  return {
-    labels: {
-      some: {
-        labelId,
-        label: {
-          deleted: false
-        }
-      }
-    }
-  };
+  return filters.length > 0 ? { AND: filters } : {};
 }
 
 function getScopeWhere(type: ConversationFilter): Prisma.WhatsappChatWhereInput {
   const x1Only: Prisma.WhatsappChatWhereInput = {
     isGroup: false
   };
-
-  if (type === "contacts" || type === "all") {
-    return x1Only;
-  }
 
   if (type === "without-message") {
     return andWhere(x1Only, {
@@ -275,6 +292,42 @@ function getScopeWhere(type: ConversationFilter): Prisma.WhatsappChatWhereInput 
   }
 
   return x1Only;
+}
+
+function getLabelWhere(labelId: string): Prisma.WhatsappChatWhereInput {
+  return labelId
+    ? {
+        labels: {
+          some: {
+            labelId,
+            label: {
+              deleted: false
+            }
+          }
+        }
+      }
+    : {};
+}
+
+function getSendStatusWhere(
+  sendStatus: SendStatusFilter,
+  jidSets: Awaited<ReturnType<typeof getSendJidSets>>
+): Prisma.WhatsappChatWhereInput {
+  if (sendStatus === "sent") {
+    return jidSets.sentJids.length > 0 ? { jid: { in: jidSets.sentJids } } : { id: { in: [] } };
+  }
+
+  if (sendStatus === "failed") {
+    return jidSets.failedJids.length > 0 ? { jid: { in: jidSets.failedJids } } : { id: { in: [] } };
+  }
+
+  if (sendStatus === "never_sent") {
+    return jidSets.anyRecipientJids.length > 0
+      ? { jid: { notIn: jidSets.anyRecipientJids } }
+      : {};
+  }
+
+  return {};
 }
 
 function getSearchWhere(query: string, matchedContactJids: string[]): Prisma.WhatsappChatWhereInput {
@@ -314,6 +367,63 @@ function getSearchWhere(query: string, matchedContactJids: string[]): Prisma.Wha
   return {
     OR: filters
   };
+}
+
+function getPriorityWhere(
+  sort: ConversationSort,
+  jidSets: Awaited<ReturnType<typeof getSendJidSets>>
+) {
+  if (sort === "no_message") {
+    return {
+      first: { lastMessageAt: null },
+      second: { lastMessageAt: { not: null } }
+    } satisfies { first: Prisma.WhatsappChatWhereInput; second: Prisma.WhatsappChatWhereInput };
+  }
+
+  if (sort === "tagged") {
+    return {
+      first: {
+        labels: {
+          some: {
+            label: {
+              deleted: false
+            }
+          }
+        }
+      },
+      second: {
+        labels: {
+          none: {
+            label: {
+              deleted: false
+            }
+          }
+        }
+      }
+    } satisfies { first: Prisma.WhatsappChatWhereInput; second: Prisma.WhatsappChatWhereInput };
+  }
+
+  if (sort === "sent") {
+    return {
+      first: jidSets.sentJids.length > 0 ? { jid: { in: jidSets.sentJids } } : { id: { in: [] } },
+      second: jidSets.sentJids.length > 0 ? { jid: { notIn: jidSets.sentJids } } : {}
+    } satisfies { first: Prisma.WhatsappChatWhereInput; second: Prisma.WhatsappChatWhereInput };
+  }
+
+  if (sort === "never_sent") {
+    return {
+      first:
+        jidSets.anyRecipientJids.length > 0
+          ? { jid: { notIn: jidSets.anyRecipientJids } }
+          : {},
+      second:
+        jidSets.anyRecipientJids.length > 0
+          ? { jid: { in: jidSets.anyRecipientJids } }
+          : { id: { in: [] } }
+    } satisfies { first: Prisma.WhatsappChatWhereInput; second: Prisma.WhatsappChatWhereInput };
+  }
+
+  return null;
 }
 
 async function findMatchingContactJids(query: string) {
@@ -364,19 +474,90 @@ async function findMatchingContactJids(query: string) {
   return contacts.map((contact) => contact.jid);
 }
 
+async function fetchPagedChats(options: {
+  where: Prisma.WhatsappChatWhereInput;
+  sort: ConversationSort;
+  skip: number;
+  limit: number;
+  jidSets: Awaited<ReturnType<typeof getSendJidSets>>;
+}) {
+  if (options.sort === "recent" || options.sort === "oldest") {
+    return prisma.whatsappChat.findMany({
+      where: options.where,
+      orderBy: options.sort === "oldest" ? oldestOrder : recentOrder,
+      skip: options.skip,
+      take: options.limit,
+      include: chatInclude
+    });
+  }
+
+  const priority = getPriorityWhere(options.sort, options.jidSets);
+
+  if (!priority) {
+    return [];
+  }
+
+  const firstWhere = andWhere(options.where, priority.first);
+  const firstCount = await prisma.whatsappChat.count({
+    where: firstWhere
+  });
+  const rows: ChatRow[] = [];
+
+  if (options.skip < firstCount) {
+    rows.push(
+      ...(await prisma.whatsappChat.findMany({
+        where: firstWhere,
+        orderBy: recentOrder,
+        skip: options.skip,
+        take: options.limit,
+        include: chatInclude
+      }))
+    );
+  }
+
+  if (rows.length < options.limit) {
+    const secondWhere = andWhere(options.where, priority.second);
+    rows.push(
+      ...(await prisma.whatsappChat.findMany({
+        where: secondWhere,
+        orderBy: recentOrder,
+        skip: Math.max(0, options.skip - firstCount),
+        take: options.limit - rows.length,
+        include: chatInclude
+      }))
+    );
+  }
+
+  return rows;
+}
+
+function getAvatarText(name: string) {
+  return name.replace(/\W/g, "").slice(0, 1).toUpperCase() || "#";
+}
+
+function getLastDirection(chat: {
+  lastInboundAt: Date | null;
+  lastOutboundAt: Date | null;
+}) {
+  if (chat.lastOutboundAt && (!chat.lastInboundAt || chat.lastOutboundAt >= chat.lastInboundAt)) {
+    return "Eu";
+  }
+
+  if (chat.lastInboundAt) {
+    return "Contato";
+  }
+
+  return null;
+}
+
 function getFilterCount(type: ConversationFilter, counts: {
   totalX1Chats: number;
   withMessageCount: number;
-  individualCount: number;
   withoutMessageCount: number;
   labeledCount: number;
 }) {
-  if (type === "all") {
-    return counts.totalX1Chats;
-  }
-
-  if (type === "contacts") {
-    return counts.individualCount;
+  if (type === "with-message") {
+    return counts.withMessageCount;
   }
 
   if (type === "without-message") {
@@ -387,22 +568,44 @@ function getFilterCount(type: ConversationFilter, counts: {
     return counts.labeledCount;
   }
 
-  return counts.withMessageCount;
+  return counts.totalX1Chats;
+}
+
+function getSendStatusLabel(status: CatalogConversationItem["sendStatus"]) {
+  if (status === "sent") {
+    return "já enviado";
+  }
+
+  if (status === "failed") {
+    return "falhou";
+  }
+
+  if (status === "pending") {
+    return "pendente";
+  }
+
+  return "nunca enviado";
 }
 
 export default async function ConversationsPage({ searchParams }: ConversationsPageProps) {
   const resolvedSearchParams = await searchParams;
   const query = getSearchValue(resolvedSearchParams);
   const type = getFilterValue(resolvedSearchParams);
+  const sendStatus = getSendStatusValue(resolvedSearchParams);
+  const sort = getSortValue(resolvedSearchParams);
   const labelId = getLabelIdValue(resolvedSearchParams);
   const page = getPageValue(resolvedSearchParams);
   const limit = getLimitValue(resolvedSearchParams);
   const skip = (page - 1) * limit;
-  const matchedContactJids = await findMatchingContactJids(query);
+  const [matchedContactJids, jidSets] = await Promise.all([
+    findMatchingContactJids(query),
+    getSendJidSets()
+  ]);
   const where = andWhere(
     getScopeWhere(type),
     getSearchWhere(query, matchedContactJids),
-    getLabelWhere(labelId)
+    getLabelWhere(labelId),
+    getSendStatusWhere(sendStatus, jidSets)
   );
 
   const [
@@ -411,12 +614,12 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
     filteredCount,
     totalX1Chats,
     withMessageCount,
-    individualCount,
     withoutMessageCount,
     labeledCount,
+    sentChatCount,
+    failedChatCount,
     whatsappSession
-  ] =
-    await Promise.all([
+  ] = await Promise.all([
     prisma.whatsappLabel.findMany({
       where: {
         deleted: false
@@ -429,25 +632,12 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
         name: true
       }
     }),
-    prisma.whatsappChat.findMany({
+    fetchPagedChats({
       where,
-      orderBy: [
-        {
-          lastMessageAt: {
-            sort: "desc",
-            nulls: "last"
-          }
-        },
-        {
-          updatedAt: "desc"
-        },
-        {
-          id: "desc"
-        }
-      ],
+      sort,
       skip,
-      take: limit,
-      include: chatListInclude
+      limit,
+      jidSets
     }),
     prisma.whatsappChat.count({
       where
@@ -467,13 +657,8 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
     }),
     prisma.whatsappChat.count({
       where: {
-        isGroup: false
-      }
-    }),
-    prisma.whatsappChat.count({
-      where: {
-        lastMessageAt: null,
-        isGroup: false
+        isGroup: false,
+        lastMessageAt: null
       }
     }),
     prisma.whatsappChat.count({
@@ -488,53 +673,119 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
         }
       }
     }),
+    jidSets.sentJids.length > 0
+      ? prisma.whatsappChat.count({
+          where: {
+            isGroup: false,
+            jid: {
+              in: jidSets.sentJids
+            }
+          }
+        })
+      : Promise.resolve(0),
+    jidSets.failedJids.length > 0
+      ? prisma.whatsappChat.count({
+          where: {
+            isGroup: false,
+            jid: {
+              in: jidSets.failedJids
+            }
+          }
+        })
+      : Promise.resolve(0),
     getWhatsappStatusPayload()
   ]);
 
   const chatJids = chats.map((chat) => chat.jid);
-  const contacts = chatJids.length > 0
-    ? await prisma.whatsappContact.findMany({
-        where: {
-          jid: {
-            in: chatJids
-          }
-        },
-        select: {
-          jid: true,
-          name: true,
-          pushName: true
+  const [contacts, lastSendByJid] = await Promise.all([
+    prisma.whatsappContact.findMany({
+      where: {
+        jid: {
+          in: chatJids
         }
-      })
-    : [];
+      },
+      select: {
+        jid: true,
+        name: true,
+        pushName: true
+      }
+    }),
+    getLastSendByJids(chatJids)
+  ]);
   const contactByJid = new Map<string, ContactSummary>(
     contacts.map((contact) => [contact.jid, contact])
   );
+  const neverSentCount =
+    jidSets.anyRecipientJids.length > 0
+      ? await prisma.whatsappChat.count({
+          where: {
+            isGroup: false,
+            jid: {
+              notIn: jidSets.anyRecipientJids
+            }
+          }
+        })
+      : totalX1Chats;
   const counts = {
     totalX1Chats,
     withMessageCount,
-    individualCount,
     withoutMessageCount,
     labeledCount
   };
   const totalPages = Math.max(1, Math.ceil(filteredCount / limit));
   const firstVisible = chats.length === 0 ? 0 : skip + 1;
   const lastVisible = Math.min(skip + chats.length, filteredCount);
+  const items: CatalogConversationItem[] = chats.map((chat) => {
+    const contact = contactByJid.get(chat.jid);
+    const name = getWhatsappDisplayName({
+      jid: chat.jid,
+      chatName: chat.name,
+      contactName: contact?.name,
+      contactPushName: contact?.pushName,
+      isGroup: chat.isGroup
+    });
+    const lastSend = lastSendByJid.get(chat.jid);
+    const sendState = lastSend?.status ?? "never_sent";
+    const sortDate = chat.lastMessageAt ?? chat.updatedAt;
+    const activeLabels = chat.labels.filter((item) => !item.label.deleted);
+
+    return {
+      id: chat.id,
+      href: `/conversas/${chat.id}`,
+      displayName: name,
+      identityLabel: getWhatsappIdentityLabel(chat.jid),
+      avatarText: getAvatarText(name),
+      jid: chat.jid,
+      isLid: chat.jid.endsWith("@lid"),
+      labels: activeLabels.map((item) => item.label.name),
+      preview: chat.lastMessageText ?? "",
+      hasMessage: Boolean(chat.lastMessageAt || chat.lastMessageText),
+      lastDirection: getLastDirection(chat),
+      unreadCount: chat.unreadCount,
+      sortDateLabel: formatDate(sortDate),
+      sortSource: chat.lastMessageAt ? "message" : "update",
+      sendStatus: sendState,
+      sendStatusLabel: getSendStatusLabel(sendState),
+      sentAtLabel: lastSend?.sentAt ? formatDate(lastSend.sentAt) : null,
+      campaignName: lastSend?.campaignName ?? null,
+      error: sendState === "failed" ? lastSend?.error ?? null : null
+    };
+  });
 
   return (
-    <AppShell title="Catalogo X1 WhatsApp">
+    <AppShell
+      title="Catálogo X1"
+      subtitle="Contatos individuais sincronizados do WhatsApp. Grupos, broadcasts e newsletters são ignorados."
+    >
       <section className="inbox-page">
         <div className="inbox-hero">
           <div>
             <p className="page-subtitle">
-              {filteredCount} conversas neste filtro, {withoutMessageCount} sem mensagem salva ainda
+              {filteredCount} contato(s) neste filtro, ordenados por {sortLabels[sort].toLowerCase()}.
             </p>
             <p className="muted">
-              Catalogo X1, nao inbox: a lista vem de WhatsappChat, mostra contatos individuais e
-              ignora grupos, broadcasts e newsletters.
-            </p>
-            <p className="muted">
-              Conexao: {whatsappSession.status}. Modo rapido ativo: mensagens recebidas nao sao salvas
-              como historico pesado. Alguns nomes dependem do que o WhatsApp entrega.
+              Conexão: {whatsappSession.status}. Alguns contatos sem mensagem são ordenados pela
+              última atualização disponível.
             </p>
           </div>
           <div className="inbox-actions">
@@ -544,30 +795,21 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
         </div>
 
         <div className="inbox-metrics">
-          <article className="metric-card">
-            <span>Contatos individuais</span>
-            <strong>{totalX1Chats}</strong>
-          </article>
-          <article className="metric-card">
-            <span>Com mensagem</span>
-            <strong>{withMessageCount}</strong>
-          </article>
-          <article className="metric-card">
-            <span>Sem mensagem</span>
-            <strong>{withoutMessageCount}</strong>
-          </article>
-          <article className="metric-card">
-            <span>Etiquetados</span>
-            <strong>{labeledCount}</strong>
-          </article>
+          <StatCard label="Contatos individuais" value={totalX1Chats} helper="Chats X1 no catálogo" />
+          <StatCard label="Com mensagem" value={withMessageCount} helper="Possuem lastMessageAt" />
+          <StatCard label="Sem mensagem" value={withoutMessageCount} helper="Ordenados por atualização" />
+          <StatCard label="Etiquetados" value={labeledCount} helper="Com ao menos uma etiqueta" />
+          <StatCard label="Já enviados" value={sentChatCount} helper="Via CampaignRecipient" tone="success" />
+          <StatCard label="Nunca enviados" value={neverSentCount} helper="Sem destinatário criado" />
+          <StatCard label="Com falha" value={failedChatCount} helper="Falha em campanha" tone="warning" />
         </div>
 
-        <div className="inbox-toolbar">
-          <nav className="segmented" aria-label="Filtros de conversas">
+        <div className="inbox-toolbar catalog-toolbar">
+          <nav className="segmented" aria-label="Filtros de mensagem">
             {(Object.keys(filterLabels) as ConversationFilter[]).map((filter) => (
               <Link
                 className={type === filter ? "active" : ""}
-                href={buildFilterHref(filter, query, labelId, limit)}
+                href={buildHref({ type: filter, query, labelId, sendStatus, sort, limit })}
                 key={filter}
               >
                 {filterLabels[filter]}
@@ -575,13 +817,12 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
               </Link>
             ))}
           </nav>
-          <form action="/conversas" className="inbox-search" method="get">
-            {type !== DEFAULT_FILTER ? <input name="type" type="hidden" value={type} /> : null}
+          <form action="/conversas" className="catalog-filter-form" method="get">
             <input
               className="input"
               defaultValue={query}
               name="q"
-              placeholder="Buscar por nome, telefone, JID ou ultima mensagem"
+              placeholder="Buscar por nome, telefone ou JID"
               type="search"
             />
             <select className="input" defaultValue={labelId} name="labelId">
@@ -592,97 +833,65 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
                 </option>
               ))}
             </select>
+            <select className="input" defaultValue={sendStatus} name="sendStatus">
+              {(Object.keys(sendStatusLabels) as SendStatusFilter[]).map((status) => (
+                <option key={status} value={status}>
+                  {sendStatusLabels[status]}
+                </option>
+              ))}
+            </select>
+            <select className="input" defaultValue={type} name="type">
+              {(Object.keys(filterLabels) as ConversationFilter[]).map((filter) => (
+                <option key={filter} value={filter}>
+                  {filterLabels[filter]}
+                </option>
+              ))}
+            </select>
+            <select className="input" defaultValue={sort} name="sort">
+              {(Object.keys(sortLabels) as ConversationSort[]).map((sortOption) => (
+                <option key={sortOption} value={sortOption}>
+                  {sortLabels[sortOption]}
+                </option>
+              ))}
+            </select>
             <select className="input" defaultValue={String(limit)} name="limit">
               {PAGE_SIZE_OPTIONS.map((pageSize) => (
                 <option key={pageSize} value={pageSize}>
-                  {pageSize} por pagina
+                  {pageSize} por página
                 </option>
               ))}
             </select>
             <button className="button" type="submit">
-              Buscar
+              Aplicar
             </button>
           </form>
         </div>
 
-        {type !== "without-message" && withoutMessageCount > 0 ? (
-          <div className="empty-hint">
-            Modo X1 ativo: grupos antigos no banco ficam fora da inbox e nao sao elegiveis para envio.
+        {withoutMessageCount > 0 ? (
+          <div className="message">
+            Alguns contatos sem mensagem são ordenados pela última atualização disponível porque o
+            modo rápido não salva histórico pesado.
           </div>
         ) : null}
 
         {chats.length === 0 ? (
           <div className="empty-state">
-            <strong>Nenhuma conversa encontrada.</strong>
-            <span>Altere o filtro, sincronize o historico ou inicie uma conversa por telefone.</span>
+            <strong>Nenhum contato encontrado.</strong>
+            <span>Altere filtros, sincronize o catálogo ou inicie uma conversa por telefone.</span>
           </div>
         ) : (
-          <div className="conversation-grid">
-            {chats.map((chat) => {
-              const contact = contactByJid.get(chat.jid);
-              const name = getWhatsappDisplayName({
-                jid: chat.jid,
-                chatName: chat.name,
-                contactName: contact?.name,
-                contactPushName: contact?.pushName,
-                isGroup: chat.isGroup
-              });
-              const hasMessageSummary = Boolean(chat.lastMessageText || chat.lastMessageAt);
-              const date = formatDate(chat.lastMessageAt ?? chat.updatedAt);
-              const lastDirection = getLastDirection(chat);
-              const activeLabels = chat.labels.filter((item) => !item.label.deleted);
-              const isLid = chat.jid.endsWith("@lid");
-
-              return (
-                <Link className="inbox-conversation-card" href={`/conversas/${chat.id}`} key={chat.id}>
-                  <span className={`conversation-avatar ${chat.isGroup ? "group" : ""}`}>
-                    {getAvatarText(name, chat.isGroup)}
-                  </span>
-                  <span className="conversation-card-body">
-                    <span className="conversation-card-top">
-                      <span className="conversation-title-block">
-                        <strong>{name}</strong>
-                        <span>{getWhatsappIdentityLabel(chat.jid)}</span>
-                      </span>
-                      {date ? <span className="conversation-time">{date}</span> : null}
-                    </span>
-                    <span className="conversation-card-meta">
-                      <span className={`badge ${chat.isGroup ? "info" : "success"}`}>
-                        {chat.isGroup ? "grupo" : "contato"}
-                      </span>
-                      {isLid ? <span className="badge warning">@lid</span> : null}
-                      {activeLabels.length > 0 ? (
-                        <span className="label-badge">
-                          {activeLabels.length} etiqueta{activeLabels.length === 1 ? "" : "s"}
-                        </span>
-                      ) : null}
-                      {!hasMessageSummary ? <span className="badge warning">sem mensagem</span> : null}
-                      {lastDirection ? <span>{lastDirection}</span> : null}
-                      {chat.unreadCount > 0 ? <span>{chat.unreadCount} nao lidas</span> : null}
-                    </span>
-                    {chat.lastMessageText ? (
-                      <span className="conversation-preview">{chat.lastMessageText}</span>
-                    ) : (
-                      <span className="conversation-preview empty">
-                        Contato no catalogo X1
-                      </span>
-                    )}
-                  </span>
-                </Link>
-              );
-            })}
-          </div>
+          <CatalogSelectionClient items={items} />
         )}
 
         <div className="button-row" style={{ justifyContent: "space-between" }}>
           <span className="muted">
-            Exibindo {firstVisible}-{lastVisible} de {filteredCount} conversas filtradas
+            Exibindo {firstVisible}-{lastVisible} de {filteredCount} contato(s)
           </span>
           <div className="button-row">
             {page > 1 ? (
               <Link
                 className="button secondary"
-                href={buildPageHref(page - 1, type, query, labelId, limit)}
+                href={buildHref({ type, query, labelId, sendStatus, sort, page: page - 1, limit })}
               >
                 Anterior
               </Link>
@@ -692,18 +901,18 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
               </span>
             )}
             <span className="muted">
-              Pagina {page} de {totalPages}
+              Página {page} de {totalPages}
             </span>
             {page < totalPages ? (
               <Link
                 className="button secondary"
-                href={buildPageHref(page + 1, type, query, labelId, limit)}
+                href={buildHref({ type, query, labelId, sendStatus, sort, page: page + 1, limit })}
               >
-                Proxima
+                Próxima
               </Link>
             ) : (
               <span className="button secondary" style={{ opacity: 0.55 }}>
-                Proxima
+                Próxima
               </span>
             )}
           </div>

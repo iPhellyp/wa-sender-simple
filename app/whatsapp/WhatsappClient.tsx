@@ -1,7 +1,9 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useState } from "react";
+import { ButtonLink } from "@/app/components/ui/ButtonLink";
+import { SectionCard } from "@/app/components/ui/SectionCard";
+import { StatusBadge, statusToneFromValue } from "@/app/components/ui/StatusBadge";
 
 type WhatsappSession = {
   id: string;
@@ -33,6 +35,10 @@ function isTransientReconnectStatus(session: WhatsappSession | null) {
     session?.status === "connecting" &&
     /reconectando apos queda transitoria/i.test(session.lastError ?? "")
   );
+}
+
+function formatDateTime(value: string | null | undefined) {
+  return value ? new Date(value).toLocaleString("pt-BR") : "Sem registro";
 }
 
 export function WhatsappClient() {
@@ -122,118 +128,81 @@ export function WhatsappClient() {
   const qrRecoveryMessage = getQrRecoveryMessage(session);
   const isTransientReconnect = isTransientReconnectStatus(session);
   const reconnectDisabled = busy || session?.status === "connecting" || session?.status === "qr";
+  const status = session?.status ?? "disconnected";
+  const statusTone = statusToneFromValue(status);
 
   return (
-    <section className="grid">
-      <div className="card grid">
-        <div className="button-row" style={{ justifyContent: "space-between" }}>
-          <div className="segmented" role="tablist" aria-label="Instancias WhatsApp">
-            <button className="active" type="button" role="tab" aria-selected="true">
-              Instancia principal
-            </button>
-            <button
-              disabled
-              type="button"
-              role="tab"
-              aria-selected="false"
-              title="Multi-instancia em preparacao"
-            >
-              Nova instancia
-            </button>
-          </div>
-          <span className="badge warning">em preparacao</span>
-        </div>
-        <div className="muted">
-          Multi-instancia requer isolamento por instanceId para sessao, filas, conversas, etiquetas
-          e envios. A conexao atual continua usando apenas a instancia principal.
-        </div>
-      </div>
+    <section className="whatsapp-page">
+      <div className="whatsapp-health-grid">
+        <SectionCard
+          title="Saúde da conexão"
+          description="Instância principal usada para catálogo, etiquetas e campanhas."
+        >
+          <div className="health-panel">
+            <div className="health-status">
+              <span className={`status-dot ${statusTone}`} aria-hidden="true" />
+              <StatusBadge tone={statusTone}>{status}</StatusBadge>
+              {isTransientReconnect ? (
+                <StatusBadge tone="info">reconectando com sessão atual</StatusBadge>
+              ) : null}
+            </div>
 
-      <div className="card">
-        <div className="button-row" style={{ justifyContent: "space-between" }}>
-          <div>
-            <div className="muted">Status</div>
-            <div className="stat-value">{session?.status ?? "disconnected"}</div>
-            {session?.connectedPhone ? <div className="muted">{session.connectedPhone}</div> : null}
-            {session?.updatedAt ? (
-              <div className="muted">
-                Atualizado em {new Date(session.updatedAt).toLocaleString("pt-BR")}
+            <div className="meta-list">
+              <div className="meta-row">
+                <span>Telefone conectado</span>
+                <span>{session?.connectedPhone ?? "Não conectado"}</span>
               </div>
-            ) : null}
-            {session?.latestMessageAt ? (
-              <div className="muted">
-                Ultima mensagem salva em{" "}
-                {new Date(session.latestMessageAt).toLocaleString("pt-BR")}
+              <div className="meta-row">
+                <span>Última atualização</span>
+                <span>{formatDateTime(session?.updatedAt)}</span>
               </div>
-            ) : null}
-          </div>
-          <div className="button-row">
-            <button
-              className="button"
-              disabled={reconnectDisabled}
-              type="button"
-              onClick={() => void postAction("/api/whatsapp/reconnect")}
-            >
-              Reconectar
-            </button>
-            <button
-              className="button secondary"
-              disabled={busy}
-              type="button"
-              onClick={() => void postAction("/api/whatsapp/disconnect")}
-            >
-              Desconectar
-            </button>
-            <button
-              className="button danger"
-              disabled={busy}
-              type="button"
-              onClick={() => void postAction("/api/whatsapp/reset-session")}
-            >
-              Resetar sessao
-            </button>
-          </div>
-        </div>
-      </div>
+              <div className="meta-row">
+                <span>Última mensagem salva</span>
+                <span>{formatDateTime(session?.latestMessageAt)}</span>
+              </div>
+              <div className="meta-row">
+                <span>QR disponível</span>
+                <span>{session?.hasQrCode ? "Sim" : "Não"}</span>
+              </div>
+            </div>
 
-      <div className="card grid">
-        <div className="button-row" style={{ justifyContent: "space-between" }}>
-          <div>
-            <strong>Modo X1 ativo</strong>
-            <div className="muted">
-              Grupos, broadcasts e newsletters sao ignorados para reduzir carga e focar envios
-              para contatos individuais.
+            <div className="whatsapp-actions">
+              <button
+                className="button"
+                disabled={reconnectDisabled}
+                type="button"
+                onClick={() => void postAction("/api/whatsapp/reconnect")}
+              >
+                Reconectar
+              </button>
+              <button
+                className="button secondary"
+                disabled={busy}
+                type="button"
+                onClick={() => void postAction("/api/whatsapp/disconnect")}
+              >
+                Desconectar
+              </button>
             </div>
           </div>
-          <div className="button-row">
-            <button className="button secondary" disabled type="button">
-              Grupos ignorados
-            </button>
-            <Link className="button" href="/conversas">
-              Abrir inbox
-            </Link>
+        </SectionCard>
+
+        <SectionCard
+          title="Modo X1 ativo"
+          description="O produto opera como catálogo e sender por etiquetas, não como inbox pesada."
+          actions={<ButtonLink href="/conversas">Abrir catálogo X1</ButtonLink>}
+        >
+          <div className="message">
+            Grupos, broadcasts e newsletters são ignorados para reduzir carga. Contatos individuais
+            @lid e @s.whatsapp.net continuam elegíveis para catálogo, etiquetas e campanhas.
           </div>
-        </div>
+        </SectionCard>
       </div>
 
-      <div className="message">
-        Use o reset de sessao se o QR nao aparecer ou se a sessao estiver corrompida. Depois
-        clique em Reconectar.
-      </div>
-
-      <div className="message">
-        A atualizacao automatica da inbox usa polling. Se novas mensagens nao aparecerem,
-        verifique os logs do worker.
-      </div>
-
-      <div className="card grid">
-        <div className="button-row" style={{ justifyContent: "space-between" }}>
-          <div>
-            <strong>Forçar resync de catálogo/app-state</strong>
-            <div className="muted">
-              Força resync de catálogo/app-state. Use se chats/nomes/etiquetas não carregarem.
-            </div>
-          </div>
+      <SectionCard
+        title="Sincronização de catálogo"
+        description="Força app-state quando chats, nomes ou etiquetas não carregarem."
+        actions={
           <button
             className="button"
             disabled={catalogBusy || session?.status === "qr"}
@@ -242,9 +211,14 @@ export function WhatsappClient() {
           >
             {catalogBusy ? "Enviando..." : "Forçar resync"}
           </button>
+        }
+      >
+        <div className="message">
+          Use quando chats, nomes ou etiquetas não carregarem. O resync não apaga dados nem
+          substitui o reset de sessão.
         </div>
         {catalogMessage ? <div className="message success">{catalogMessage}</div> : null}
-      </div>
+      </SectionCard>
 
       {error ? <div className="message error">{error}</div> : null}
       {qrRecoveryMessage ? <div className="message error">{qrRecoveryMessage}</div> : null}
@@ -254,12 +228,10 @@ export function WhatsappClient() {
 
       {isTransientReconnect ? (
         <div className="message">
-          Reconectando com a sessao atual. Nao e necessario resetar nem ler QR agora.
+          Reconectando com a sessão atual. Não é necessário resetar nem ler QR agora.
         </div>
       ) : session?.status === "connecting" ? (
-        <div className="message">
-          Aguardando QR Code. Isso pode levar alguns segundos.
-        </div>
+        <div className="message">Aguardando QR Code. Isso pode levar alguns segundos.</div>
       ) : null}
 
       {!qrRecoveryMessage && session?.status === "error" && session.lastError ? (
@@ -267,10 +239,36 @@ export function WhatsappClient() {
       ) : null}
 
       {session?.status === "qr" && session.qrCode ? (
-        <div className="card">
-          <img className="qr" src={session.qrCode} alt="QR Code do WhatsApp" />
-        </div>
+        <SectionCard
+          title="Leitura do QR Code"
+          description="Escaneie com o WhatsApp do aparelho responsável pela instância."
+        >
+          <div className="qr-card">
+            <img className="qr" src={session.qrCode} alt="QR Code do WhatsApp" />
+          </div>
+        </SectionCard>
       ) : null}
+
+      <SectionCard
+        title="Manutenção perigosa"
+        description="Use somente quando o QR não aparece, a sessão está corrompida ou a reconexão normal falhou."
+        tone="danger"
+      >
+        <div className="danger-note">
+          Resetar sessão remove a sessão local do Baileys e exige novo pareamento por QR. Não use
+          para quedas transitórias de conexão.
+        </div>
+        <div className="whatsapp-actions">
+          <button
+            className="button danger"
+            disabled={busy}
+            type="button"
+            onClick={() => void postAction("/api/whatsapp/reset-session")}
+          >
+            Resetar sessão
+          </button>
+        </div>
+      </SectionCard>
     </section>
   );
 }

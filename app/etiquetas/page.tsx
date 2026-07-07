@@ -3,7 +3,10 @@ import { LabelsClient } from "./LabelsClient";
 
 export default function LabelsPage() {
   return (
-    <AppShell title="Etiquetas WhatsApp">
+    <AppShell
+      title="Segmentos WhatsApp"
+      subtitle="Etiquetas sincronizadas, contatos X1 elegíveis e histórico de campanha por segmento."
+    >
       <LabelsClient />
     </AppShell>
   );

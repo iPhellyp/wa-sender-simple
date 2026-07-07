@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
 type ContactOption = {
@@ -31,6 +32,12 @@ type RecipientDetail = {
   contact: ContactOption;
 };
 
+type CampaignPrefillContext = {
+  labelId: string | null;
+  labelName: string | null;
+  chatIds: string[];
+};
+
 function statusClass(status: string) {
   if (["sent", "completed", "connected"].includes(status)) {
     return "success";
@@ -47,7 +54,11 @@ function statusClass(status: string) {
   return "warning";
 }
 
-export function CampaignsClient() {
+export function CampaignsClient({
+  prefillContext
+}: {
+  prefillContext?: CampaignPrefillContext;
+}) {
   const [contacts, setContacts] = useState<ContactOption[]>([]);
   const [campaigns, setCampaigns] = useState<CampaignSummary[]>([]);
   const [selectedContacts, setSelectedContacts] = useState<Set<string>>(new Set());
@@ -172,7 +183,27 @@ export function CampaignsClient() {
   }, []);
 
   return (
-    <section className="grid two-column">
+    <section className="grid">
+      {prefillContext?.labelId ? (
+        <div className="message">
+          Origem: segmento{" "}
+          <strong>{prefillContext.labelName ?? prefillContext.labelId}</strong>. Para criar campanha
+          por etiqueta com público X1 resolvido, use o fluxo dedicado da etiqueta.{" "}
+          <Link className="button secondary compact-button" href={`/etiquetas/${prefillContext.labelId}/enviar`}>
+            Abrir criação por etiqueta
+          </Link>
+        </div>
+      ) : null}
+
+      {prefillContext?.chatIds.length ? (
+        <div className="message">
+          Origem: {prefillContext.chatIds.length} contato(s) selecionado(s) do Catálogo X1. Esta
+          tela reconhece os IDs recebidos por query; a criação manual atual ainda usa contatos
+          importados da lista de contatos.
+        </div>
+      ) : null}
+
+      <section className="grid two-column">
       <div className="grid">
         <div className="card">
           <form className="form-grid" onSubmit={(event) => void handleCreate(event)}>
@@ -341,6 +372,7 @@ export function CampaignsClient() {
           <div className="muted">Selecione uma campanha.</div>
         )}
       </aside>
+      </section>
     </section>
   );
 }

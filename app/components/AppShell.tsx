@@ -1,38 +1,45 @@
 import Link from "next/link";
+import type { ReactNode } from "react";
+import { NavLink } from "./NavLink";
+import { PageHeader } from "./ui/PageHeader";
 
 type AppShellProps = {
   title: string;
-  children: React.ReactNode;
-  actions?: React.ReactNode;
+  subtitle?: string;
+  children: ReactNode;
+  actions?: ReactNode;
 };
 
-export function AppShell({ title, children, actions }: AppShellProps) {
+export function AppShell({ title, subtitle, children, actions }: AppShellProps) {
   return (
     <div className="shell">
       <header className="topbar">
-        <Link className="brand" href="/dashboard">
-          WA Sender Simple
-        </Link>
-        <nav className="nav" aria-label="Principal">
-          <Link href="/dashboard">Dashboard</Link>
-          <Link href="/whatsapp">WhatsApp</Link>
-          <Link href="/conversas">Conversas</Link>
-          <Link href="/etiquetas">Etiquetas</Link>
-          <Link href="/envios">Envios</Link>
-          <Link href="/contatos">Contatos</Link>
-          <Link href="/campanhas">Campanhas</Link>
-          <form action="/api/auth/logout" method="post">
-            <button className="link-button" type="submit">
-              Sair
-            </button>
-          </form>
-        </nav>
+        <div className="topbar-inner">
+          <Link className="brand" href="/dashboard">
+            <span className="brand-mark">WA</span>
+            <span>
+              <strong>WA Sender Simple</strong>
+              <small>Operação WhatsApp</small>
+            </span>
+          </Link>
+          <nav className="nav" aria-label="Principal">
+            <NavLink href="/dashboard">Dashboard</NavLink>
+            <NavLink href="/whatsapp">WhatsApp</NavLink>
+            <NavLink href="/conversas">Conversas</NavLink>
+            <NavLink href="/etiquetas">Etiquetas</NavLink>
+            <NavLink href="/envios">Envios</NavLink>
+            <NavLink href="/contatos">Contatos</NavLink>
+            <NavLink href="/campanhas">Campanhas</NavLink>
+            <form action="/api/auth/logout" method="post">
+              <button className="link-button" type="submit">
+                Sair
+              </button>
+            </form>
+          </nav>
+        </div>
       </header>
       <main className="page">
-        <div className="page-header">
-          <h1 className="page-title">{title}</h1>
-          {actions}
-        </div>
+        <PageHeader title={title} subtitle={subtitle} actions={actions} />
         {children}
       </main>
     </div>
