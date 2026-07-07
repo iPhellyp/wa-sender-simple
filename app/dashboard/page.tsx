@@ -1,4 +1,4 @@
-import { CampaignRecipientStatus } from "@prisma/client";
+﻿import { CampaignRecipientStatus } from "@prisma/client";
 import { AppShell } from "@/app/components/AppShell";
 import { ButtonLink } from "@/app/components/ui/ButtonLink";
 import { EmptyState } from "@/app/components/ui/EmptyState";
@@ -222,7 +222,7 @@ export default async function DashboardPage() {
       ? {
           tone: "danger" as const,
           title: "WhatsApp desconectado",
-          text: "Envios e sincronização dependem da instância conectada."
+          text: "Envios e sincronizaÃ§Ã£o dependem da instÃ¢ncia conectada."
         }
       : null,
     labeledContacts.length === 0
@@ -236,7 +236,7 @@ export default async function DashboardPage() {
       ? {
           tone: "warning" as const,
           title: "Campanhas com falhas recentes",
-          text: `${recentFailures} falha(s) registradas nas últimas 24 horas.`
+          text: `${recentFailures} falha(s) registradas nas Ãºltimas 24 horas.`
         }
       : null
   ].filter(
@@ -257,7 +257,7 @@ export default async function DashboardPage() {
       <section className="dashboard-page">
         <div className="dashboard-hero">
           <div>
-            <h2>Operação de envio por etiquetas</h2>
+            <h2>OperaÃ§Ã£o de envio por etiquetas</h2>
             <p>
               Acompanhe conexao, contatos individuais, etiquetas e desempenho recente de campanhas em
               uma tela de trabalho.
@@ -273,28 +273,28 @@ export default async function DashboardPage() {
           <StatCard
             label="WhatsApp status"
             value={whatsappStatus}
-            helper={whatsappSession?.connectedPhone ?? "Instância principal"}
+            helper={whatsappSession?.connectedPhone ?? "InstÃ¢ncia principal"}
             tone={statusToneFromValue(whatsappStatus)}
           />
           <StatCard label="Contatos WhatsApp" value={x1Chats} helper="Conversas individuais" />
-          <StatCard label="Etiquetas ativas" value={activeLabels} helper="Disponíveis para campanha" />
+          <StatCard label="Etiquetas ativas" value={activeLabels} helper="DisponÃ­veis para campanha" />
           <StatCard
             label="Contatos etiquetados"
             value={labeledContacts.length}
             helper="Contatos individuais com ao menos uma etiqueta"
           />
           <StatCard label="Campanhas totais" value={totalCampaigns} helper="Criadas no sistema" />
-          <StatCard label="Enviados hoje" value={sentToday} helper="Destinatários enviados" tone="success" />
+          <StatCard label="Enviados hoje" value={sentToday} helper="DestinatÃ¡rios enviados" tone="success" />
           <StatCard
             label="Falhas recentes"
             value={recentFailures}
-            helper="Últimas 24 horas"
+            helper="Ãšltimas 24 horas"
             tone={recentFailures > 0 ? "warning" : "neutral"}
           />
           <StatCard
-            label="Última sincronização"
+            label="Ãšltima sincronizaÃ§Ã£o"
             value={formatDateTime(latestCatalogUpdate)}
-            helper={`Última mensagem salva: ${formatDateTime(latestMessageAt)}`}
+            helper={`Ãšltima mensagem salva: ${formatDateTime(latestMessageAt)}`}
             tone="info"
           />
         </section>
@@ -317,7 +317,7 @@ export default async function DashboardPage() {
         </SectionCard>
 
         <div className="dashboard-panels">
-          <SectionCard title="Últimas campanhas">
+          <SectionCard title="Ãšltimas campanhas">
             {latestCampaigns.length > 0 ? (
               <div className="list-stack">
                 {latestCampaigns.map((campaign) => (
@@ -327,7 +327,7 @@ export default async function DashboardPage() {
                       <div className="row-meta">
                         <span>{campaign.targetMode === "label" ? "Por etiqueta" : "Manual"}</span>
                         {campaign.targetLabel ? <span>{campaign.targetLabel.name}</span> : null}
-                        <span>{campaign._count.recipients} destinatários</span>
+                        <span>{campaign._count.recipients} destinatÃ¡rios</span>
                         <span>{formatDateTime(campaign.updatedAt)}</span>
                       </div>
                     </div>
@@ -340,7 +340,7 @@ export default async function DashboardPage() {
             ) : (
               <EmptyState
                 title="Nenhuma campanha criada"
-                description="Crie uma campanha manual ou por etiqueta para começar."
+                description="Crie uma campanha manual ou por etiqueta para comeÃ§ar."
                 actions={<ButtonLink href="/campanhas">Criar campanha</ButtonLink>}
               />
             )}
@@ -358,14 +358,14 @@ export default async function DashboardPage() {
               </div>
             ) : (
               <div className="alert-item success">
-                <strong>Sem alertas críticos</strong>
-                <span>Conexão, etiquetas e campanhas não indicam bloqueios operacionais agora.</span>
+                <strong>Sem alertas crÃ­ticos</strong>
+                <span>ConexÃ£o, etiquetas e campanhas nÃ£o indicam bloqueios operacionais agora.</span>
               </div>
             )}
           </SectionCard>
         </div>
 
-        <SectionCard title="Últimos envios">
+        <SectionCard title="Ãšltimos envios">
           {latestRecipients.length > 0 ? (
             <div className="list-stack">
               {latestRecipients.map((recipient) => (
@@ -387,7 +387,7 @@ export default async function DashboardPage() {
           ) : (
             <EmptyState
               title="Nenhum envio recente"
-              description="Os envios aparecerão aqui quando campanhas começarem a rodar."
+              description="Os envios aparecerÃ£o aqui quando campanhas comeÃ§arem a rodar."
             />
           )}
         </SectionCard>
@@ -395,3 +395,4 @@ export default async function DashboardPage() {
     </AppShell>
   );
 }
+

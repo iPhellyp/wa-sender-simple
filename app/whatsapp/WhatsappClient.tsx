@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useState } from "react";
 import { ButtonLink } from "@/app/components/ui/ButtonLink";
@@ -143,26 +143,26 @@ export function WhatsappClient() {
               <span className={`status-dot ${statusTone}`} aria-hidden="true" />
               <StatusBadge tone={statusTone}>{status}</StatusBadge>
               {isTransientReconnect ? (
-                <StatusBadge tone="info">reconectando com sessão atual</StatusBadge>
+                <StatusBadge tone="info">reconectando com sessÃ£o atual</StatusBadge>
               ) : null}
             </div>
 
             <div className="meta-list">
               <div className="meta-row">
                 <span>Telefone conectado</span>
-                <span>{session?.connectedPhone ?? "Não conectado"}</span>
+                <span>{session?.connectedPhone ?? "NÃ£o conectado"}</span>
               </div>
               <div className="meta-row">
-                <span>Última atualização</span>
+                <span>Ãšltima atualizaÃ§Ã£o</span>
                 <span>{formatDateTime(session?.updatedAt)}</span>
               </div>
               <div className="meta-row">
-                <span>Última mensagem salva</span>
+                <span>Ãšltima mensagem salva</span>
                 <span>{formatDateTime(session?.latestMessageAt)}</span>
               </div>
               <div className="meta-row">
-                <span>QR disponível</span>
-                <span>{session?.hasQrCode ? "Sim" : "Não"}</span>
+                <span>QR disponÃ­vel</span>
+                <span>{session?.hasQrCode ? "Sim" : "NÃ£o"}</span>
               </div>
             </div>
 
@@ -193,7 +193,7 @@ export function WhatsappClient() {
           actions={<ButtonLink href="/conversas">Abrir conversas</ButtonLink>}
         >
           <div className="message">
-            Grupos, broadcasts e newsletters são ignorados para reduzir carga. Contatos individuais
+            Grupos, broadcasts e newsletters sÃ£o ignorados para reduzir carga. Contatos individuais
             @lid e @s.whatsapp.net continuam elegiveis para contatos, etiquetas e campanhas.
           </div>
         </SectionCard>
@@ -218,7 +218,7 @@ export function WhatsappClient() {
 
       {isTransientReconnect ? (
         <div className="message">
-          Reconectando com a sessão atual. Não é necessário resetar nem ler QR agora.
+          Reconectando com a sessÃ£o atual. NÃ£o Ã© necessÃ¡rio resetar nem ler QR agora.
         </div>
       ) : session?.status === "connecting" ? (
         <div className="message">Aguardando QR Code. Isso pode levar alguns segundos.</div>
@@ -231,7 +231,7 @@ export function WhatsappClient() {
       {session?.status === "qr" && session.qrCode ? (
         <SectionCard
           title="Leitura do QR Code"
-          description="Escaneie com o WhatsApp do aparelho responsável pela instância."
+          description="Escaneie com o WhatsApp do aparelho responsÃ¡vel pela instÃ¢ncia."
         >
           <div className="qr-card">
             <img className="qr" src={session.qrCode} alt="QR Code do WhatsApp" />
@@ -263,10 +263,11 @@ export function WhatsappClient() {
             type="button"
             onClick={() => void postAction("/api/whatsapp/reset-session")}
           >
-            Resetar sessão
+            Resetar sessÃ£o
           </button>
         </div>
       </SectionCard>
     </section>
   );
 }
+

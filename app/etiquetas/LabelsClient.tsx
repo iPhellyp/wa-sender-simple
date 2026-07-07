@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
@@ -172,7 +172,7 @@ export function LabelsClient() {
 
               {label.lastCampaign ? (
                 <div className="message">
-                  Último envio: <strong>{label.lastCampaign.name}</strong>{" "}
+                  Ãšltimo envio: <strong>{label.lastCampaign.name}</strong>{" "}
                   <span className={`badge ${statusClass(label.lastCampaign.status)}`}>
                     {label.lastCampaign.status}
                   </span>
@@ -190,7 +190,7 @@ export function LabelsClient() {
                 </Link>
                 {label.lastCampaign ? (
                   <Link className="button secondary" href={`/envios?campaign=${label.lastCampaign.id}`}>
-                    Ver histórico
+                    Ver histÃ³rico
                   </Link>
                 ) : (
                   <Link className="button secondary" href="/envios">
@@ -205,3 +205,4 @@ export function LabelsClient() {
     </section>
   );
 }
+

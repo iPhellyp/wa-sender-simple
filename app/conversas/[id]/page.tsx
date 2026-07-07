@@ -1,4 +1,4 @@
-import Link from "next/link";
+﻿import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AppShell } from "@/app/components/AppShell";
 import { prisma } from "@/src/lib/prisma/client";
@@ -150,3 +150,4 @@ export default async function ConversationDetailPage({ params }: ConversationDet
     </AppShell>
   );
 }
+

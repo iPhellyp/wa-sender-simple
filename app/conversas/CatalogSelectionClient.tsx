@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
@@ -80,7 +80,7 @@ export function CatalogSelectionClient({ items }: { items: CatalogConversationIt
             type="button"
             onClick={() => setSelectedIds(new Set(items.map((item) => item.id)))}
           >
-            Selecionar visíveis
+            Selecionar visÃ­veis
           </button>
           <button
             className="button secondary"
@@ -88,7 +88,7 @@ export function CatalogSelectionClient({ items }: { items: CatalogConversationIt
             type="button"
             onClick={() => setSelectedIds(new Set())}
           >
-            Limpar seleção
+            Limpar seleÃ§Ã£o
           </button>
         </div>
         <div className="button-row">
@@ -105,7 +105,7 @@ export function CatalogSelectionClient({ items }: { items: CatalogConversationIt
 
       {exceedsQueryLimit ? (
         <div className="message error">
-          Selecione até {MAX_QUERY_CHAT_IDS} contatos para enviar por query string com segurança.
+          Selecione atÃ© {MAX_QUERY_CHAT_IDS} contatos para enviar por query string com seguranÃ§a.
         </div>
       ) : null}
 
@@ -139,10 +139,10 @@ export function CatalogSelectionClient({ items }: { items: CatalogConversationIt
                 </span>
                 {item.isLid ? <span className="badge warning">@lid</span> : null}
                 <span className="future-tag">
-                  ordenado por {item.sortSource === "message" ? "mensagem" : "atualização"}
+                  ordenado por {item.sortSource === "message" ? "mensagem" : "atualizaÃ§Ã£o"}
                 </span>
                 {item.lastDirection ? <span>{item.lastDirection}</span> : null}
-                {item.unreadCount > 0 ? <span>{item.unreadCount} não lidas</span> : null}
+                {item.unreadCount > 0 ? <span>{item.unreadCount} nÃ£o lidas</span> : null}
               </span>
               <span className={item.preview ? "conversation-preview" : "conversation-preview empty"}>
                 {item.preview || "Contato nas conversas"}
@@ -176,3 +176,4 @@ export function CatalogSelectionClient({ items }: { items: CatalogConversationIt
     </div>
   );
 }
+

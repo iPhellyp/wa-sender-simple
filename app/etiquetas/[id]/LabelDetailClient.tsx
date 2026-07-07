@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
@@ -46,7 +46,7 @@ const MAX_QUERY_CHAT_IDS = 80;
 
 function sendStatusLabel(status: string) {
   if (status === "sent") {
-    return "já enviado";
+    return "jÃ¡ enviado";
   }
 
   if (status === "failed") {
@@ -174,7 +174,7 @@ export function LabelDetailClient({ labelId }: { labelId: string }) {
             <strong>{data?.metrics.groupCount ?? 0}</strong>
           </article>
           <article className="metric-card">
-            <span>Já enviados</span>
+            <span>JÃ¡ enviados</span>
             <strong>{data?.metrics.sentCount ?? 0}</strong>
           </article>
           <article className="metric-card">
@@ -206,7 +206,7 @@ export function LabelDetailClient({ labelId }: { labelId: string }) {
             type="button"
             onClick={() => setSelectedIds(new Set(conversations.map((item) => item.chatId)))}
           >
-            Selecionar visíveis
+            Selecionar visÃ­veis
           </button>
           <button
             className="button secondary"
@@ -214,7 +214,7 @@ export function LabelDetailClient({ labelId }: { labelId: string }) {
             type="button"
             onClick={() => setSelectedIds(new Set())}
           >
-            Limpar seleção
+            Limpar seleÃ§Ã£o
           </button>
           <span className="muted">{selected.length} selecionado(s)</span>
           <Link
@@ -228,7 +228,7 @@ export function LabelDetailClient({ labelId }: { labelId: string }) {
 
       {exceedsQueryLimit ? (
         <div className="message error">
-          Selecione até {MAX_QUERY_CHAT_IDS} contatos para enviar por query string.
+          Selecione atÃ© {MAX_QUERY_CHAT_IDS} contatos para enviar por query string.
         </div>
       ) : null}
 
@@ -237,7 +237,7 @@ export function LabelDetailClient({ labelId }: { labelId: string }) {
       {conversations.length === 0 ? (
         <div className="empty-state">
           <strong>Nenhum contato nesta etiqueta.</strong>
-          <span>Altere a busca ou force resync de catálogo/app-state na página WhatsApp.</span>
+          <span>Altere a busca ou force resync de catÃ¡logo/app-state na pÃ¡gina WhatsApp.</span>
         </div>
       ) : (
         <div className="conversation-grid">
@@ -307,7 +307,7 @@ export function LabelDetailClient({ labelId }: { labelId: string }) {
             Anterior
           </button>
           <span className="muted">
-            Página {data?.pagination.page ?? 1} de {data?.pagination.totalPages ?? 1}
+            PÃ¡gina {data?.pagination.page ?? 1} de {data?.pagination.totalPages ?? 1}
           </span>
           <button
             className="button secondary"
@@ -318,10 +318,11 @@ export function LabelDetailClient({ labelId }: { labelId: string }) {
               setPage((current) => current + 1);
             }}
           >
-            Próxima
+            PrÃ³xima
           </button>
         </div>
       </div>
     </section>
   );
 }
+
