@@ -15,6 +15,9 @@
 - Conexao de 1 WhatsApp via QR.
 - Inbox `/conversas`.
 - Detalhe `/conversas/[id]`.
+- API paginada de mensagens por conversa.
+- Polling simples na conversa para novas mensagens.
+- Filtro visual para ocultar grupos sem apagar dados.
 - Envio manual via fila `send-manual-message`.
 - History engine para `messaging-history.set`, chats, contatos e mensagens com persistencia idempotente.
 - Live sync de `messages.upsert` para mensagens novas e append.
@@ -28,6 +31,7 @@
 - Labels dependem dos eventos entregues pelo WhatsApp/Baileys.
 - Historico completo antigo nao e garantido; depende do que WhatsApp/Baileys entregar.
 - `fetchMessageHistory` exige cursor de mensagem antiga e nao deve ser disparado sem referencia segura.
+- A UI filtra eventos tecnicos do WhatsApp para nao poluir a conversa.
 - `SendLog` existe para auditoria de envios, mas logs por `accountId` ainda sao futuros.
 - Multi-numeros ainda nao foi implementado.
 

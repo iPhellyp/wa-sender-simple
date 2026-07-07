@@ -24,7 +24,7 @@ type ConversationsPageProps = {
 };
 
 type ConversationFilter = "recent" | "all" | "contacts" | "groups" | "empty";
-const DEFAULT_FILTER: ConversationFilter = "all";
+const DEFAULT_FILTER: ConversationFilter = "contacts";
 const DEFAULT_PAGE_SIZE = 50;
 const PAGE_SIZE_OPTIONS = [30, 50] as const;
 
@@ -573,6 +573,16 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
               </Link>
             ))}
           </nav>
+          <Link
+            className="button secondary"
+            href={
+              type === "contacts"
+                ? buildFilterHref("all", query, labelId, limit)
+                : buildFilterHref("contacts", query, labelId, limit)
+            }
+          >
+            {type === "contacts" ? "Mostrar grupos" : "Ocultar grupos"}
+          </Link>
 
           <form action="/conversas" className="inbox-search" method="get">
             {type !== DEFAULT_FILTER ? <input name="type" type="hidden" value={type} /> : null}
@@ -606,8 +616,8 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
 
         {type !== "empty" && emptyCount > 0 ? (
           <div className="empty-hint">
-            A inbox mostra todas as conversas salvas por padrao. Use Recentes para focar apenas em
-            conversas com mensagens salvas.
+            A inbox abre em Contatos para evitar ruido de grupos. Use Todas ou Grupos quando quiser
+            revisar conversas coletivas.
           </div>
         ) : null}
 

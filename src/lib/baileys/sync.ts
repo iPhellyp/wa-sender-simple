@@ -50,13 +50,53 @@ function safeLogMessageId(messageId: string) {
   return messageId.length > 12 ? `${messageId.slice(0, 8)}...` : messageId;
 }
 
-function isSystemOnlyMessage(messageType: string | null) {
-  return (
-    !messageType ||
-    messageType === "protocolMessage" ||
-    messageType === "senderKeyDistributionMessage" ||
-    messageType === "messageContextInfo"
-  );
+const hiddenMessageTypes = new Set([
+  "protocolMessage",
+  "senderKeyDistributionMessage",
+  "messageContextInfo"
+]);
+
+const mediaMessageLabels: Record<string, string> = {
+  imageMessage: "Imagem recebida",
+  videoMessage: "Video recebido",
+  audioMessage: "Audio recebido",
+  documentMessage: "Documento recebido",
+  stickerMessage: "Figurinha recebida",
+  contactMessage: "Contato recebido",
+  contactsArrayMessage: "Contatos recebidos",
+  locationMessage: "Localizacao recebida"
+};
+
+function getVisibleMessageText(text: string | null, messageType: string | null) {
+  if (text) {
+    return text;
+  }
+
+  if (!messageType) {
+    return null;
+  }
+
+  return mediaMessageLabels[messageType] ?? null;
+}
+
+function getMessageSkipReason(messageType: string | null, text: string | null) {
+  if (!messageType) {
+    return "empty-message";
+  }
+
+  if (hiddenMessageTypes.has(messageType)) {
+    return "technical-message";
+  }
+
+  if (messageType === "reactionMessage" && !text) {
+    return "empty-reaction";
+  }
+
+  if (!getVisibleMessageText(text, messageType)) {
+    return "empty-message";
+  }
+
+  return null;
 }
 
 function isIgnoredJid(jid: string | null | undefined) {
@@ -249,12 +289,8 @@ export function extractMessageType(message: WAMessage["message"] | null | undefi
   return entry?.[0] ?? null;
 }
 
-function previewText(text: string | null, messageType: string | null) {
-  return text ?? (messageType ? `[${messageType}]` : null);
-}
-
 function getMessageLogNamespace(options: MessageSyncOptions) {
-  return options.logScope === "history" ? "[history]" : "[baileys]";
+  return options.logScope === "history" ? "[history]" : "[sync]";
 }
 
 function toPrismaJson(value: unknown): Prisma.InputJsonValue | typeof Prisma.JsonNull {
@@ -472,7 +508,8 @@ export async function upsertMessageFromBaileys(
   if (!jid || !waMessageId) {
     if (options.log) {
       console.log(`${getMessageLogNamespace(options)} message skipped`, {
-        reason: "missing-jid-or-message-id"
+        reason: "missing-jid-or-message-id",
+        messageType: null
       });
     }
 
@@ -484,11 +521,13 @@ export async function upsertMessageFromBaileys(
   const timestamp = getMessageTimestamp(message.messageTimestamp);
   const messageType = extractMessageType(message.message);
   const text = extractMessageText(message.message);
+  const skipReason = getMessageSkipReason(messageType, text);
 
-  if (isSystemOnlyMessage(messageType)) {
+  if (skipReason) {
     if (options.log) {
       console.log(`${getMessageLogNamespace(options)} message skipped`, {
-        reason: "system-or-empty",
+        reason: skipReason,
+        messageType,
         messageId: safeLogMessageId(waMessageId)
       });
     }
@@ -496,7 +535,7 @@ export async function upsertMessageFromBaileys(
     return false;
   }
 
-  const lastMessageText = previewText(text, messageType);
+  const lastMessageText = getVisibleMessageText(text, messageType);
   const pushName = cleanDisplayName(message.pushName, jid);
   const rawJson = toPrismaJson(message);
   const existingChat = await prisma.whatsappChat.findUnique({
@@ -589,9 +628,10 @@ export async function upsertMessageFromBaileys(
 
   if (options.log) {
     console.log(`${getMessageLogNamespace(options)} message persisted`, {
-      chatId: chat.id,
+      jid,
       messageId: safeLogMessageId(waMessageId),
-      fromMe
+      fromMe,
+      messageType
     });
   }
 
@@ -711,9 +751,10 @@ export async function syncContactsUpdate(contacts: BaileysEventMap["contacts.upd
 }
 
 export async function syncMessagesUpsert(event: BaileysEventMap["messages.upsert"]) {
-  console.log("[history] messages.upsert received", {
+  console.log("[sync] messages.upsert received", {
+    count: event.messages.length,
     type: event.type,
-    count: event.messages.length
+    messages: event.messages.length
   });
 
   const result = await settleInBatches(event.messages, (message) =>

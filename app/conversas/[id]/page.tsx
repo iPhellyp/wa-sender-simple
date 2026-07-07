@@ -6,7 +6,8 @@ import {
   getWhatsappDisplayName,
   getWhatsappIdentityLabel
 } from "@/src/lib/whatsapp/display-name";
-import { SendMessageForm } from "./SendMessageForm";
+import { getWhatsappStatusPayload } from "@/src/lib/baileys/client";
+import { ConversationMessagesClient } from "./ConversationMessagesClient";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -15,12 +16,6 @@ type ConversationDetailPageProps = {
   params: Promise<{
     id: string;
   }>;
-};
-
-type ContactSummary = {
-  jid: string;
-  name: string | null;
-  pushName: string | null;
 };
 
 const dateFormatter = new Intl.DateTimeFormat("pt-BR", {
@@ -33,85 +28,48 @@ function formatDate(value: Date | null) {
   return value ? dateFormatter.format(value) : "-";
 }
 
-function messageText(message: {
-  text: string | null;
-  messageType: string | null;
-}) {
-  return message.text ?? (message.messageType ? `[${message.messageType}]` : "Sem texto");
-}
-
-function getContactDisplayName(jid: string | null, contactByJid: Map<string, ContactSummary>) {
-  if (!jid) {
-    return null;
-  }
-
-  const contact = contactByJid.get(jid);
-
-  return getWhatsappDisplayName({
-    jid,
-    contactName: contact?.name,
-    contactPushName: contact?.pushName
-  });
-}
-
 export default async function ConversationDetailPage({ params }: ConversationDetailPageProps) {
   const { id } = await params;
-  const chat = await prisma.whatsappChat.findUnique({
-    where: {
-      id
-    },
-    include: {
-      labels: {
-        include: {
-          label: {
-            select: {
-              id: true,
-              name: true,
-              deleted: true
+  const [chat, whatsappSession] = await Promise.all([
+    prisma.whatsappChat.findUnique({
+      where: {
+        id
+      },
+      include: {
+        labels: {
+          include: {
+            label: {
+              select: {
+                id: true,
+                name: true,
+                deleted: true
+              }
             }
           }
-        }
-      },
-      messages: {
-        orderBy: [
-          {
-            timestamp: "desc"
-          },
-          {
-            createdAt: "desc"
+        },
+        _count: {
+          select: {
+            messages: true
           }
-        ],
-        take: 100
+        }
       }
-    }
-  });
+    }),
+    getWhatsappStatusPayload()
+  ]);
 
   if (!chat) {
     notFound();
   }
 
-  const messages = [...chat.messages].reverse();
-  const contactJids = Array.from(
-    new Set([chat.jid, ...messages.map((message) => message.senderJid).filter((jid): jid is string => Boolean(jid))])
-  );
-  const contacts = contactJids.length > 0
-    ? await prisma.whatsappContact.findMany({
-        where: {
-          jid: {
-            in: contactJids
-          }
-        },
-        select: {
-          jid: true,
-          name: true,
-          pushName: true
-        }
-      })
-    : [];
-  const contactByJid = new Map<string, ContactSummary>(
-    contacts.map((contact) => [contact.jid, contact])
-  );
-  const chatContact = contactByJid.get(chat.jid);
+  const chatContact = await prisma.whatsappContact.findUnique({
+    where: {
+      jid: chat.jid
+    },
+    select: {
+      name: true,
+      pushName: true
+    }
+  });
   const title = getWhatsappDisplayName({
     jid: chat.jid,
     chatName: chat.name,
@@ -128,9 +86,11 @@ export default async function ConversationDetailPage({ params }: ConversationDet
           <Link className="button secondary" href="/conversas">
             Voltar
           </Link>
-          <Link className="button secondary" href={`/conversas/${chat.id}`}>
-            Atualizar
-          </Link>
+          {chat.isGroup ? (
+            <Link className="button secondary" href="/conversas">
+              Ocultar grupos
+            </Link>
+          ) : null}
         </div>
       }
     >
@@ -147,6 +107,11 @@ export default async function ConversationDetailPage({ params }: ConversationDet
               </span>
             </div>
             <div className="chat-subtitle">{getWhatsappIdentityLabel(chat.jid)}</div>
+            {chat.isGroup ? (
+              <div className="inline-note">
+                Esta conversa e um grupo. Use Ocultar grupos para voltar a lista de contatos.
+              </div>
+            ) : null}
             {chat.labels.filter((item) => !item.label.deleted).length > 0 ? (
               <div className="label-badges">
                 {chat.labels
@@ -160,43 +125,19 @@ export default async function ConversationDetailPage({ params }: ConversationDet
             ) : null}
             <div className="chat-meta-row">
               <span>Ultima mensagem: {formatDate(chat.lastMessageAt)}</span>
-              <span>{messages.length} exibidas</span>
+              <span>{chat._count.messages} salvas</span>
               <span>{chat.unreadCount} nao lidas</span>
+              <span>Conexao: {whatsappSession.status}</span>
             </div>
           </div>
         </header>
 
-        <div className="chat-thread">
-          {messages.length === 0 ? (
-            <div className="empty-state">
-              <strong>Nenhuma mensagem salva para esta conversa.</strong>
-              <span>Envie uma mensagem manual ou aguarde novos eventos do WhatsApp.</span>
-            </div>
-          ) : (
-            messages.map((message) => (
-              <article
-                className={`chat-message-row ${message.fromMe ? "outbound" : "inbound"}`}
-                key={message.id}
-              >
-                <div className="chat-bubble">
-                  {chat.isGroup && !message.fromMe && message.senderJid ? (
-                    <div className="chat-sender">
-                      {getContactDisplayName(message.senderJid, contactByJid)}
-                    </div>
-                  ) : null}
-                  <div className="chat-message-text">{messageText(message)}</div>
-                  <div className="chat-message-time">
-                    {message.fromMe ? "Eu" : "Contato"} | {formatDate(message.timestamp)}
-                  </div>
-                </div>
-              </article>
-            ))
-          )}
-        </div>
-
-        <footer className="chat-composer">
-          <SendMessageForm chatId={chat.id} isGroup={chat.isGroup} />
-        </footer>
+        <ConversationMessagesClient
+          chatId={chat.id}
+          isGroup={chat.isGroup}
+          totalMessages={chat._count.messages}
+          whatsappStatus={whatsappSession.status}
+        />
       </section>
     </AppShell>
   );

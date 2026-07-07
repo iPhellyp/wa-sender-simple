@@ -12,9 +12,10 @@ type SendMessageResponse = {
 type SendMessageFormProps = {
   chatId: string;
   isGroup: boolean;
+  onSent?: () => void;
 };
 
-export function SendMessageForm({ chatId, isGroup }: SendMessageFormProps) {
+export function SendMessageForm({ chatId, isGroup, onSent }: SendMessageFormProps) {
   const router = useRouter();
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
@@ -45,7 +46,11 @@ export function SendMessageForm({ chatId, isGroup }: SendMessageFormProps) {
 
       setText("");
       setMessage(data.message ?? "Mensagem enviada para fila");
-      setTimeout(() => router.refresh(), 1500);
+      if (onSent) {
+        onSent();
+      } else {
+        setTimeout(() => router.refresh(), 1500);
+      }
     } catch (sendError) {
       setError(sendError instanceof Error ? sendError.message : "Erro inesperado");
     } finally {

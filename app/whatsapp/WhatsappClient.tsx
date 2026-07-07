@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 
 type WhatsappSession = {
@@ -10,6 +11,7 @@ type WhatsappSession = {
   connectedPhone: string | null;
   lastError: string | null;
   updatedAt: string;
+  latestMessageAt?: string | null;
   message?: string;
   error?: string;
 };
@@ -31,6 +33,7 @@ export function WhatsappClient() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [hideGroups, setHideGroups] = useState(false);
 
   async function loadStatus() {
     try {
@@ -73,6 +76,7 @@ export function WhatsappClient() {
   }
 
   useEffect(() => {
+    setHideGroups(window.localStorage.getItem("wa-hide-groups") === "true");
     void loadStatus();
     const interval = window.setInterval(() => {
       void loadStatus();
@@ -80,6 +84,12 @@ export function WhatsappClient() {
 
     return () => window.clearInterval(interval);
   }, []);
+
+  function toggleHideGroups() {
+    const nextValue = !hideGroups;
+    setHideGroups(nextValue);
+    window.localStorage.setItem("wa-hide-groups", String(nextValue));
+  }
 
   if (loading) {
     return <div className="card">Carregando...</div>;
@@ -125,6 +135,12 @@ export function WhatsappClient() {
                 Atualizado em {new Date(session.updatedAt).toLocaleString("pt-BR")}
               </div>
             ) : null}
+            {session?.latestMessageAt ? (
+              <div className="muted">
+                Ultima mensagem salva em{" "}
+                {new Date(session.latestMessageAt).toLocaleString("pt-BR")}
+              </div>
+            ) : null}
           </div>
           <div className="button-row">
             <button
@@ -155,9 +171,33 @@ export function WhatsappClient() {
         </div>
       </div>
 
+      <div className="card grid">
+        <div className="button-row" style={{ justifyContent: "space-between" }}>
+          <div>
+            <strong>Grupos na inbox</strong>
+            <div className="muted">
+              Esconde grupos da inbox e evita selecionar grupos em envios, sem sair dos grupos.
+            </div>
+          </div>
+          <div className="button-row">
+            <button className="button secondary" type="button" onClick={toggleHideGroups}>
+              {hideGroups ? "Mostrar grupos" : "Ocultar grupos"}
+            </button>
+            <Link className="button" href={hideGroups ? "/conversas" : "/conversas?type=all"}>
+              Abrir inbox
+            </Link>
+          </div>
+        </div>
+      </div>
+
       <div className="message">
         Use o reset de sessao se o QR nao aparecer ou se a sessao estiver corrompida. Depois
         clique em Reconectar.
+      </div>
+
+      <div className="message">
+        A atualizacao automatica da inbox usa polling. Se novas mensagens nao aparecerem,
+        verifique os logs do worker.
       </div>
 
       {error ? <div className="message error">{error}</div> : null}

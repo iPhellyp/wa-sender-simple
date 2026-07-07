@@ -130,13 +130,13 @@ Historico:
 [history] chats persisted { count: X, skipped: Y, failed: Z }
 [history] contacts persisted { count: X, skipped: Y, failed: Z }
 [history] messages persisted { count: X, skipped: Y, failed: Z }
-[history] message skipped { reason: "system-or-empty" }
+[history] message skipped { reason: "technical-message", messageType: "protocolMessage" }
 ```
 
 Mensagens:
 
 ```text
-[history] messages.upsert received { type: "append", count: X }
+[sync] messages.upsert received { type: "append", count: X }
 [history] live messages persisted { type: "append", count: X, skipped: Y, failed: Z }
 [sync] messages upsert { type: "append", messages: X, processed: X, skipped: Y, failed: Z }
 ```
@@ -179,13 +179,25 @@ O filtro `Sem mensagem` concentra contatos sincronizados que ainda nao possuem m
 
 - cabecalho de conversa;
 - display name amigavel e telefone/JID abaixo;
+- area de mensagens com altura controlada e rolagem interna;
+- carregamento inicial paginado via `/api/conversas/[id]/messages`;
+- botao `Carregar anteriores`;
+- polling simples para atualizar novas mensagens;
 - bolhas inbound/outbound;
 - composer no rodape;
 - aviso ao enviar para grupo.
 
+Mensagens tecnicas como `protocolMessage`, `senderKeyDistributionMessage`, `messageContextInfo`,
+reacoes vazias e mensagens sem conteudo visivel ficam ocultas da UI. Midias sem legenda aparecem
+com fallback amigavel, como `Imagem recebida`, `Audio recebido` ou `Documento recebido`.
+
+Grupos nao sao apagados nem bloqueados. A inbox abre em `Contatos` por padrao e permite alternar para
+`Todas` ou `Grupos`. O painel `/whatsapp` tem uma preferencia local `Ocultar grupos` que direciona a
+operacao para a inbox filtrada.
+
 ## Limitacoes
 
-- Sem realtime na UI por WebSocket/SSE; o backend persiste eventos live recebidos pela Baileys.
+- Sem realtime na UI por WebSocket/SSE; a conversa usa polling e o backend persiste eventos live recebidos pela Baileys.
 - Sem multiplos numeros.
 - Sem status persistido de job manual.
 - Sem backfill automatico por `fetchMessageHistory` sem cursor de mensagem antiga.
