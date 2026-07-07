@@ -134,8 +134,8 @@ export function LabelSendClient({ labelId }: { labelId: string }) {
       </div>
 
       <div className="message">
-        Modo X1 ativo: grupos sao ignorados automaticamente. Envie apenas para contatos individuais
-        com relacionamento. Opt-out e sempre respeitado.
+        Fast Label Sender Mode: grupos sao ignorados automaticamente e o envio usa somente contatos
+        individuais elegiveis da etiqueta. Opt-out e sempre respeitado.
       </div>
 
       <form className="card grid" onSubmit={handlePreviewSubmit}>

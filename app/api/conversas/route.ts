@@ -161,7 +161,6 @@ export async function GET(request: NextRequest) {
         include: {
           _count: {
             select: {
-              messages: true,
               labels: true
             }
           }
@@ -251,7 +250,6 @@ export async function GET(request: NextRequest) {
         isLid: chat.jid.endsWith("@lid"),
         unreadCount: chat.unreadCount,
         labelCount: chat._count.labels,
-        messageCount: chat._count.messages,
         lastMessageText: chat.lastMessageText,
         lastMessageAt: chat.lastMessageAt?.toISOString() ?? null,
         updatedAt: chat.updatedAt.toISOString()

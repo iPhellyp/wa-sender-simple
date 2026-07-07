@@ -9,8 +9,10 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../prisma/client";
 import { cleanDisplayName, isBetterDisplayName } from "../whatsapp/display-name";
 import {
+  FAST_LABEL_SENDER_MODE,
   isBroadcastOrNewsletterJid,
   isGroupJid,
+  recordX1GroupSkips,
   shouldIgnoreJidForX1Only
 } from "../whatsapp/jid";
 import { extractMessageText as extractOptOutMessageText } from "./opt-out";
@@ -415,6 +417,9 @@ export async function upsertChatFromBaileys(chat: Partial<Chat>) {
   }
 
   if (shouldIgnoreJidForX1Only(jid)) {
+    if (isGroupJid(jid)) {
+      recordX1GroupSkips("chats");
+    }
     return false;
   }
 
@@ -468,6 +473,9 @@ export async function upsertContactFromBaileys(contact: Partial<Contact>) {
   }
 
   if (shouldIgnoreJidForX1Only(jid)) {
+    if (isGroupJid(jid)) {
+      recordX1GroupSkips("contacts");
+    }
     return false;
   }
 
@@ -569,10 +577,8 @@ export async function upsertMessageFromBaileys(
   }
 
   if (shouldIgnoreJidForX1Only(jid)) {
-    if (options.log) {
-      console.log("[x1-only] group message skipped", {
-        jid
-      });
+    if (isGroupJid(jid)) {
+      recordX1GroupSkips("messages");
     }
 
     return false;
@@ -580,6 +586,20 @@ export async function upsertMessageFromBaileys(
 
   const fromMe = message.key.fromMe === true;
   const senderJid = normalizeChatJid(message.key.participant ?? message.participant);
+  const pushName = cleanDisplayName(message.pushName, jid);
+
+  if (FAST_LABEL_SENDER_MODE) {
+    await upsertContactFromMessage({
+      chatJid: jid,
+      fromMe,
+      pushName: message.pushName,
+      senderJid
+    });
+    await ensureChatForJid(jid, fromMe ? null : pushName);
+
+    return false;
+  }
+
   const timestamp = getMessageTimestamp(message.messageTimestamp);
   const messageType = extractMessageType(message.message);
   const text = extractMessageText(message.message);
@@ -598,7 +618,6 @@ export async function upsertMessageFromBaileys(
   }
 
   const lastMessageText = getVisibleMessageText(text, messageType);
-  const pushName = cleanDisplayName(message.pushName, jid);
   const rawJson = toPrismaJson(message);
   const existingChat = await prisma.whatsappChat.findUnique({
     where: {
@@ -750,15 +769,11 @@ export async function syncMessagingHistorySet(event: BaileysEventMap["messaging-
   });
 
   if (x1Chats.groupSkipped > 0) {
-    console.log("[x1-only] group chats skipped", {
-      count: x1Chats.groupSkipped
-    });
+    recordX1GroupSkips("chats", x1Chats.groupSkipped);
   }
 
   if (x1Messages.groupSkipped > 0) {
-    console.log("[x1-only] group messages skipped", {
-      count: x1Messages.groupSkipped
-    });
+    recordX1GroupSkips("messages", x1Messages.groupSkipped);
   }
 
   const chatsResult = await settleInBatches(x1Chats.allowed, upsertChatFromBaileys);
@@ -802,9 +817,7 @@ export async function syncChatsUpsert(chats: BaileysEventMap["chats.upsert"]) {
   const x1Chats = splitX1Chats(chats);
 
   if (x1Chats.groupSkipped > 0) {
-    console.log("[x1-only] group chats skipped", {
-      count: x1Chats.groupSkipped
-    });
+    recordX1GroupSkips("chats", x1Chats.groupSkipped);
   }
 
   logSyncResult(
@@ -818,9 +831,7 @@ export async function syncChatsUpdate(chats: BaileysEventMap["chats.update"]) {
   const x1Chats = splitX1Chats(chats);
 
   if (x1Chats.groupSkipped > 0) {
-    console.log("[x1-only] group chats skipped", {
-      count: x1Chats.groupSkipped
-    });
+    recordX1GroupSkips("chats", x1Chats.groupSkipped);
   }
 
   logSyncResult(
@@ -856,18 +867,7 @@ export async function syncMessagesUpsert(event: BaileysEventMap["messages.upsert
   });
 
   if (x1Messages.groupSkipped > 0) {
-    console.log("[x1-only] group messages skipped", {
-      count: x1Messages.groupSkipped
-    });
-    for (const message of event.messages) {
-      const jid = getBaileysMessageJid(message);
-
-      if (isGroupJid(jid)) {
-        console.log("[x1-only] group message skipped", {
-          jid
-        });
-      }
-    }
+    recordX1GroupSkips("messages", x1Messages.groupSkipped);
   }
 
   const result = await settleInBatches(x1Messages.allowed, (message) =>
@@ -889,9 +889,7 @@ export async function syncMessagesUpdate(messages: BaileysEventMap["messages.upd
   const x1Messages = splitX1Messages(messages);
 
   if (x1Messages.groupSkipped > 0) {
-    console.log("[x1-only] group messages skipped", {
-      count: x1Messages.groupSkipped
-    });
+    recordX1GroupSkips("messages", x1Messages.groupSkipped);
   }
 
   logSyncResult(

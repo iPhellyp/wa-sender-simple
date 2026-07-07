@@ -34,11 +34,6 @@ const DEFAULT_PAGE_SIZE = 50;
 const PAGE_SIZE_OPTIONS = [30, 50] as const;
 
 const chatListInclude = {
-  _count: {
-    select: {
-      messages: true
-    }
-  },
   labels: {
     include: {
       label: {
@@ -419,8 +414,7 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
     individualCount,
     withoutMessageCount,
     labeledCount,
-    whatsappSession,
-    latestStoredMessage
+    whatsappSession
   ] =
     await Promise.all([
     prisma.whatsappLabel.findMany({
@@ -494,29 +488,7 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
         }
       }
     }),
-    getWhatsappStatusPayload(),
-    prisma.whatsappMessage.findFirst({
-      where: {
-        chat: {
-          isGroup: false
-        }
-      },
-      orderBy: [
-        {
-          timestamp: {
-            sort: "desc",
-            nulls: "last"
-          }
-        },
-        {
-          createdAt: "desc"
-        }
-      ],
-      select: {
-        timestamp: true,
-        createdAt: true
-      }
-    })
+    getWhatsappStatusPayload()
   ]);
 
   const chatJids = chats.map((chat) => chat.jid);
@@ -547,10 +519,9 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
   const totalPages = Math.max(1, Math.ceil(filteredCount / limit));
   const firstVisible = chats.length === 0 ? 0 : skip + 1;
   const lastVisible = Math.min(skip + chats.length, filteredCount);
-  const latestSyncAt = latestStoredMessage?.timestamp ?? latestStoredMessage?.createdAt ?? null;
 
   return (
-    <AppShell title="Inbox WhatsApp">
+    <AppShell title="Catalogo X1 WhatsApp">
       <section className="inbox-page">
         <div className="inbox-hero">
           <div>
@@ -558,12 +529,12 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
               {filteredCount} conversas neste filtro, {withoutMessageCount} sem mensagem salva ainda
             </p>
             <p className="muted">
-              Modo X1 ativo: a lista vem de WhatsappChat, mostra apenas contatos individuais e ignora
-              grupos, broadcasts e newsletters.
+              Catalogo X1, nao inbox: a lista vem de WhatsappChat, mostra contatos individuais e
+              ignora grupos, broadcasts e newsletters.
             </p>
             <p className="muted">
-              Conexao: {whatsappSession.status}. Ultimo evento salvo: {formatDate(latestSyncAt) ?? "nenhum"}.
-              Alguns nomes dependem do que o WhatsApp entrega; nomes da agenda exigem importador de contatos.
+              Conexao: {whatsappSession.status}. Modo rapido ativo: mensagens recebidas nao sao salvas
+              como historico pesado. Alguns nomes dependem do que o WhatsApp entrega.
             </p>
           </div>
           <div className="inbox-actions">
@@ -656,7 +627,7 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
                 contactPushName: contact?.pushName,
                 isGroup: chat.isGroup
               });
-              const hasMessages = chat._count.messages > 0 || Boolean(chat.lastMessageText);
+              const hasMessageSummary = Boolean(chat.lastMessageText || chat.lastMessageAt);
               const date = formatDate(chat.lastMessageAt ?? chat.updatedAt);
               const lastDirection = getLastDirection(chat);
               const activeLabels = chat.labels.filter((item) => !item.label.deleted);
@@ -685,16 +656,15 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
                           {activeLabels.length} etiqueta{activeLabels.length === 1 ? "" : "s"}
                         </span>
                       ) : null}
-                      {!hasMessages ? <span className="badge warning">sem mensagem</span> : null}
+                      {!hasMessageSummary ? <span className="badge warning">sem mensagem</span> : null}
                       {lastDirection ? <span>{lastDirection}</span> : null}
-                      {chat._count.messages > 0 ? <span>{chat._count.messages} mensagens</span> : null}
                       {chat.unreadCount > 0 ? <span>{chat.unreadCount} nao lidas</span> : null}
                     </span>
-                    {hasMessages ? (
-                      <span className="conversation-preview">{chat.lastMessageText ?? "Mensagem salva"}</span>
+                    {chat.lastMessageText ? (
+                      <span className="conversation-preview">{chat.lastMessageText}</span>
                     ) : (
                       <span className="conversation-preview empty">
-                        Sem mensagens salvas ainda
+                        Contato no catalogo X1
                       </span>
                     )}
                   </span>

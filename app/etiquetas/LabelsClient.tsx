@@ -91,8 +91,8 @@ export function LabelsClient() {
     <section className="grid">
       <p className="page-subtitle">Etiquetas sincronizadas do WhatsApp conectado</p>
       <div className="message">
-        Modo X1 ativo: etiquetas de grupos sao ignoradas automaticamente. Envie apenas para contatos
-        individuais com relacionamento e respeite opt-out.
+        Fast Label Sender Mode: etiquetas de grupos sao ignoradas automaticamente e o foco e enviar
+        para contatos individuais elegiveis, sem depender de historico de mensagens.
       </div>
 
       <div className="inbox-metrics">
