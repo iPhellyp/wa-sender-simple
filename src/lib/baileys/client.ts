@@ -1174,5 +1174,5 @@ export async function sendWhatsappMessageToJid(jid: string, text: string) {
 }
 
 export async function sendWhatsappMessage(phoneNormalized: string, message: string) {
-  await sendWhatsappMessageToJid(toWhatsappJid(phoneNormalized), message);
+  return sendWhatsappMessageToJid(toWhatsappJid(phoneNormalized), message);
 }

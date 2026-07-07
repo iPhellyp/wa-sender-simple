@@ -10,9 +10,7 @@ type SyncHistoryResponse = {
 };
 
 const SUCCESS_MESSAGE =
-  "Verificacao solicitada. O WhatsApp so envia historico completo durante eventos proprios ou novo pareamento.";
-const GUIDANCE_MESSAGE =
-  "Para tentar historico completo antigo, use WhatsApp > Resetar sessao > Reconectar.";
+  "Verificacao de historico enfileirada. Novas mensagens e eventos recebidos pelo WhatsApp serao salvos automaticamente.";
 
 export function SyncHistoryButton() {
   const [busy, setBusy] = useState(false);
@@ -35,14 +33,14 @@ export function SyncHistoryButton() {
       const data = (await response.json()) as SyncHistoryResponse;
 
       if (!response.ok) {
-        throw new Error(data.error ?? "Erro ao verificar historico");
+        throw new Error(data.error ?? data.message ?? "Erro ao verificar historico");
       }
 
       if (data.ok === false) {
         throw new Error(data.message ?? "WhatsApp nao esta conectado. Reconecte primeiro.");
       }
 
-      setMessage(`${SUCCESS_MESSAGE} ${GUIDANCE_MESSAGE}`);
+      setMessage(data.message ?? SUCCESS_MESSAGE);
     } catch (syncError) {
       setError(syncError instanceof Error ? syncError.message : "Erro inesperado");
     } finally {
@@ -53,7 +51,7 @@ export function SyncHistoryButton() {
   return (
     <div className="popover-action">
       <button className="button secondary" disabled={busy} type="button" onClick={() => void handleClick()}>
-        {busy ? "Verificando..." : "Verificar historico"}
+        {busy ? "Enfileirando..." : "Verificar historico"}
       </button>
       {message ? <div className="compact-note success">{message}</div> : null}
       {error ? <div className="compact-note error">{error}</div> : null}

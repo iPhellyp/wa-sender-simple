@@ -12,6 +12,7 @@ export const SYNC_WHATSAPP_HISTORY_JOB = "sync-whatsapp-history";
 const CONNECT_WHATSAPP_JOB_ID = "connect-whatsapp";
 const DISCONNECT_WHATSAPP_JOB_ID = "disconnect-whatsapp";
 const RESET_WHATSAPP_JOB_ID = "reset-whatsapp";
+const SYNC_WHATSAPP_HISTORY_JOB_ID = "sync-whatsapp-history";
 
 export type SendManualMessageJobData = {
   chatId: string;
@@ -115,7 +116,7 @@ export async function enqueueWhatsappHistorySync() {
     {},
     {
       attempts: 1,
-      jobId: buildJobId("sync-whatsapp-history", String(Date.now())),
+      jobId: SYNC_WHATSAPP_HISTORY_JOB_ID,
       removeOnComplete: true,
       removeOnFail: 100
     }

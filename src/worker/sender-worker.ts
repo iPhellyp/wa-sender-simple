@@ -23,11 +23,11 @@ import {
   sendWhatsappMessageToJid,
   startBaileysConnection
 } from "../lib/baileys/client";
-import { isGroupJid, normalizeChatJid } from "../lib/baileys/sync";
+import { ensureChatForJid, isGroupJid, normalizeChatJid } from "../lib/baileys/sync";
 import { completeCampaignIfDone } from "../lib/campaigns/progress";
 import { schedulePendingRecipients } from "../lib/campaigns/schedule";
 import { hashMessage } from "../lib/labels/audience";
-import { normalizeBrazilPhone } from "../lib/phone/normalize";
+import { normalizeBrazilPhone, toWhatsappJid } from "../lib/phone/normalize";
 
 const PAUSED_RECHECK_DELAY_MS = 60 * 1000;
 const finalRecipientStatuses: CampaignRecipientStatus[] = [
@@ -52,10 +52,72 @@ async function requeueRecipient(recipientId: string, delayMs = PAUSED_RECHECK_DE
   await enqueueRecipient(recipientId, delayMs);
 }
 
-function buildManualFallbackMessageId(jobId: string | undefined) {
-  return `manual-${jobId ?? Date.now()}`
+type SentWhatsappMessage = Awaited<ReturnType<typeof sendWhatsappMessageToJid>>;
+
+function buildFallbackMessageId(prefix: string, id: string | undefined) {
+  return `${prefix}-${id ?? Date.now()}`
     .replace(/[^a-zA-Z0-9_-]/g, "-")
     .slice(0, 180);
+}
+
+async function persistOutboundMessage(options: {
+  jid: string;
+  text: string;
+  sentAt: Date;
+  sentMessage: SentWhatsappMessage;
+  fallbackMessageId: string;
+}) {
+  const normalizedJid = normalizeChatJid(options.jid);
+
+  if (!normalizedJid) {
+    throw new Error("JID invalido para persistir mensagem enviada");
+  }
+
+  const chat = await ensureChatForJid(normalizedJid);
+  const waMessageId = options.sentMessage.waMessageId ?? options.fallbackMessageId;
+
+  await prisma.whatsappMessage.upsert({
+    where: {
+      jid_waMessageId: {
+        jid: normalizedJid,
+        waMessageId
+      }
+    },
+    update: {
+      chatId: chat.id,
+      fromMe: true,
+      senderJid: options.sentMessage.senderJid,
+      timestamp: options.sentAt,
+      messageType: "text",
+      text: options.text,
+      rawJson: options.sentMessage.rawJson
+    },
+    create: {
+      chatId: chat.id,
+      jid: normalizedJid,
+      waMessageId,
+      fromMe: true,
+      senderJid: options.sentMessage.senderJid,
+      timestamp: options.sentAt,
+      messageType: "text",
+      text: options.text,
+      rawJson: options.sentMessage.rawJson
+    }
+  });
+
+  await prisma.whatsappChat.update({
+    where: {
+      id: chat.id
+    },
+    data: {
+      isGroup: isGroupJid(normalizedJid),
+      lastMessageAt: options.sentAt,
+      lastMessageText: options.text,
+      lastOutboundAt: options.sentAt
+    }
+  });
+
+  return chat.id;
 }
 
 function getPhoneFromRecipientJid(jid: string | null | undefined) {
@@ -135,47 +197,12 @@ async function processManualMessage(
   try {
     const sentMessage = await sendWhatsappMessageToJid(normalizedJid, text);
     const sentAt = new Date();
-    const waMessageId = sentMessage.waMessageId ?? buildManualFallbackMessageId(jobId);
-
-    await prisma.whatsappMessage.upsert({
-      where: {
-        jid_waMessageId: {
-          jid: normalizedJid,
-          waMessageId
-        }
-      },
-      update: {
-        chatId,
-        fromMe: true,
-        senderJid: sentMessage.senderJid,
-        timestamp: sentAt,
-        messageType: "text",
-        text,
-        rawJson: sentMessage.rawJson
-      },
-      create: {
-        chatId,
-        jid: normalizedJid,
-        waMessageId,
-        fromMe: true,
-        senderJid: sentMessage.senderJid,
-        timestamp: sentAt,
-        messageType: "text",
-        text,
-        rawJson: sentMessage.rawJson
-      }
-    });
-
-    await prisma.whatsappChat.update({
-      where: {
-        id: chatId
-      },
-      data: {
-        isGroup: isGroupJid(normalizedJid),
-        lastMessageAt: sentAt,
-        lastMessageText: text,
-        lastOutboundAt: sentAt
-      }
+    await persistOutboundMessage({
+      jid: normalizedJid,
+      text,
+      sentAt,
+      sentMessage,
+      fallbackMessageId: buildFallbackMessageId("manual", jobId)
     });
 
     console.log("[worker] manual message sent", {
@@ -264,15 +291,27 @@ async function processRecipient(recipientId: string) {
   });
 
   try {
+    let sentMessage: SentWhatsappMessage;
+    let sentJid: string;
+
     if (recipient.jid) {
-      await sendWhatsappMessageToJid(recipient.jid, recipient.messageFinal);
+      sentJid = recipient.jid;
+      sentMessage = await sendWhatsappMessageToJid(recipient.jid, recipient.messageFinal);
     } else if (recipient.contact) {
-      await sendWhatsappMessage(recipient.contact.phoneNormalized, recipient.messageFinal);
+      sentJid = toWhatsappJid(recipient.contact.phoneNormalized);
+      sentMessage = await sendWhatsappMessage(recipient.contact.phoneNormalized, recipient.messageFinal);
     } else {
       throw new Error("Destinatario sem jid ou contato");
     }
 
     const sentAt = new Date();
+    const persistedChatId = await persistOutboundMessage({
+      jid: sentJid,
+      text: recipient.messageFinal,
+      sentAt,
+      sentMessage,
+      fallbackMessageId: buildFallbackMessageId("campaign", recipient.id)
+    });
 
     await prisma.campaignRecipient.update({
       where: {
@@ -281,6 +320,7 @@ async function processRecipient(recipientId: string) {
       data: {
         status: CampaignRecipientStatus.sent,
         sentAt,
+        chatId: recipient.chatId ?? persistedChatId,
         error: null
       }
     });
@@ -289,7 +329,7 @@ async function processRecipient(recipientId: string) {
       await prisma.sendLog.create({
         data: {
           jid: recipient.jid,
-          chatId: recipient.chatId,
+          chatId: recipient.chatId ?? persistedChatId,
           campaignId: recipient.campaignId,
           recipientId: recipient.id,
           messageHash: hashMessage(recipient.messageFinal),

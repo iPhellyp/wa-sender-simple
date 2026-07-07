@@ -41,6 +41,19 @@ function compactText(text: string | null | undefined) {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+function safeLogMessageId(messageId: string) {
+  return messageId.length > 12 ? `${messageId.slice(0, 8)}...` : messageId;
+}
+
+function isSystemOnlyMessage(messageType: string | null) {
+  return (
+    !messageType ||
+    messageType === "protocolMessage" ||
+    messageType === "senderKeyDistributionMessage" ||
+    messageType === "messageContextInfo"
+  );
+}
+
 export function normalizeChatJid(jid: string | null | undefined) {
   const trimmed = jid?.trim();
 
@@ -399,11 +412,70 @@ export async function upsertContactFromBaileys(contact: Partial<Contact>) {
   return true;
 }
 
-export async function upsertMessageFromBaileys(message: WAMessage) {
+async function upsertContactFromMessage(options: {
+  chatJid: string;
+  fromMe: boolean;
+  pushName?: string | null;
+  senderJid?: string | null;
+}) {
+  const contactJid = isGroupJid(options.chatJid)
+    ? normalizeChatJid(options.senderJid)
+    : options.chatJid;
+
+  if (!contactJid?.endsWith("@s.whatsapp.net")) {
+    return;
+  }
+
+  const candidateName = options.fromMe ? null : cleanDisplayName(options.pushName, contactJid);
+  const existingContact = await prisma.whatsappContact.findUnique({
+    where: {
+      jid: contactJid
+    },
+    select: {
+      name: true,
+      pushName: true
+    }
+  });
+  const shouldUpdateName = isBetterDisplayName(existingContact?.name, candidateName, contactJid);
+  const shouldUpdatePushName = isBetterDisplayName(
+    existingContact?.pushName,
+    candidateName,
+    contactJid
+  );
+
+  await prisma.whatsappContact.upsert({
+    where: {
+      jid: contactJid
+    },
+    update: {
+      phone: extractPhoneFromJid(contactJid),
+      ...(shouldUpdateName ? { name: candidateName } : {}),
+      ...(shouldUpdatePushName ? { pushName: candidateName } : {})
+    },
+    create: {
+      jid: contactJid,
+      phone: extractPhoneFromJid(contactJid),
+      name: candidateName,
+      pushName: candidateName,
+      isBusiness: false
+    }
+  });
+}
+
+export async function upsertMessageFromBaileys(
+  message: WAMessage,
+  options: { log?: boolean } = {}
+) {
   const jid = normalizeChatJid(message.key.remoteJid);
   const waMessageId = compactText(message.key.id);
 
   if (!jid || !waMessageId) {
+    if (options.log) {
+      console.log("[baileys] message skipped", {
+        reason: "missing-jid-or-message-id"
+      });
+    }
+
     return false;
   }
 
@@ -412,6 +484,18 @@ export async function upsertMessageFromBaileys(message: WAMessage) {
   const timestamp = getMessageTimestamp(message.messageTimestamp);
   const messageType = extractMessageType(message.message);
   const text = extractMessageText(message.message);
+
+  if (isSystemOnlyMessage(messageType)) {
+    if (options.log) {
+      console.log("[baileys] message skipped", {
+        reason: "system-or-empty",
+        messageId: safeLogMessageId(waMessageId)
+      });
+    }
+
+    return false;
+  }
+
   const lastMessageText = previewText(text, messageType);
   const pushName = cleanDisplayName(message.pushName, jid);
   const rawJson = toPrismaJson(message);
@@ -424,6 +508,13 @@ export async function upsertMessageFromBaileys(message: WAMessage) {
     }
   });
   const shouldUpdateName = !isGroupJid(jid) && isBetterDisplayName(existingChat?.name, pushName, jid);
+
+  await upsertContactFromMessage({
+    chatJid: jid,
+    fromMe,
+    pushName: message.pushName,
+    senderJid
+  });
 
   const chat = await prisma.whatsappChat.upsert({
     where: {
@@ -494,6 +585,14 @@ export async function upsertMessageFromBaileys(message: WAMessage) {
         }
       });
     }
+  }
+
+  if (options.log) {
+    console.log("[baileys] message persisted", {
+      chatId: chat.id,
+      messageId: safeLogMessageId(waMessageId),
+      fromMe
+    });
   }
 
   return true;
@@ -588,10 +687,17 @@ export async function syncContactsUpdate(contacts: BaileysEventMap["contacts.upd
 }
 
 export async function syncMessagesUpsert(event: BaileysEventMap["messages.upsert"]) {
+  console.log("[baileys] message upsert received", {
+    type: event.type,
+    count: event.messages.length
+  });
+
   logSyncResult(
     "messages upsert",
     { type: event.type, messages: event.messages.length },
-    await settleInBatches(event.messages, upsertMessageFromBaileys)
+    await settleInBatches(event.messages, (message) =>
+      upsertMessageFromBaileys(message, { log: true })
+    )
   );
 }
 

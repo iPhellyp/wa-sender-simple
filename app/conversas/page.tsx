@@ -17,10 +17,14 @@ type ConversationsPageProps = {
     q?: string | string[];
     type?: string | string[];
     labelId?: string | string[];
+    page?: string | string[];
+    limit?: string | string[];
   }>;
 };
 
 type ConversationFilter = "recent" | "all" | "contacts" | "groups" | "empty";
+const DEFAULT_PAGE_SIZE = 50;
+const PAGE_SIZE_OPTIONS = [30, 50] as const;
 
 const chatListInclude = {
   _count: {
@@ -41,10 +45,6 @@ const chatListInclude = {
     }
   }
 } satisfies Prisma.WhatsappChatInclude;
-
-type ChatListItem = Prisma.WhatsappChatGetPayload<{
-  include: typeof chatListInclude;
-}>;
 
 type ContactSummary = {
   jid: string;
@@ -115,10 +115,27 @@ function getLabelIdValue(searchParams: Awaited<ConversationsPageProps["searchPar
   return labelId?.trim() ?? "";
 }
 
+function getPageValue(searchParams: Awaited<ConversationsPageProps["searchParams"]>) {
+  const rawPage = searchParams?.page;
+  const page = Number(Array.isArray(rawPage) ? rawPage[0] : rawPage);
+
+  return Number.isInteger(page) && page > 0 ? page : 1;
+}
+
+function getLimitValue(searchParams: Awaited<ConversationsPageProps["searchParams"]>) {
+  const rawLimit = searchParams?.limit;
+  const limit = Number(Array.isArray(rawLimit) ? rawLimit[0] : rawLimit);
+
+  return PAGE_SIZE_OPTIONS.includes(limit as (typeof PAGE_SIZE_OPTIONS)[number])
+    ? limit
+    : DEFAULT_PAGE_SIZE;
+}
+
 function buildFilterHref(
   type: ConversationFilter,
   query: string,
-  labelId: string
+  labelId: string,
+  limit: number
 ) {
   const params = new URLSearchParams();
 
@@ -132,6 +149,43 @@ function buildFilterHref(
 
   if (labelId) {
     params.set("labelId", labelId);
+  }
+
+  if (limit !== DEFAULT_PAGE_SIZE) {
+    params.set("limit", String(limit));
+  }
+
+  const suffix = params.toString();
+  return suffix ? `/conversas?${suffix}` : "/conversas";
+}
+
+function buildPageHref(
+  page: number,
+  type: ConversationFilter,
+  query: string,
+  labelId: string,
+  limit: number
+) {
+  const params = new URLSearchParams();
+
+  if (type !== "recent") {
+    params.set("type", type);
+  }
+
+  if (query) {
+    params.set("q", query);
+  }
+
+  if (labelId) {
+    params.set("labelId", labelId);
+  }
+
+  if (page > 1) {
+    params.set("page", String(page));
+  }
+
+  if (limit !== DEFAULT_PAGE_SIZE) {
+    params.set("limit", String(limit));
   }
 
   const suffix = params.toString();
@@ -246,28 +300,6 @@ function getSearchWhere(query: string, matchedContactJids: string[]): Prisma.Wha
   };
 }
 
-function sortConversations(a: ChatListItem, b: ChatListItem) {
-  const aHasMessage = a._count.messages > 0 || Boolean(a.lastMessageAt);
-  const bHasMessage = b._count.messages > 0 || Boolean(b.lastMessageAt);
-
-  if (aHasMessage !== bHasMessage) {
-    return aHasMessage ? -1 : 1;
-  }
-
-  if (aHasMessage && bHasMessage) {
-    const lastA = a.lastMessageAt?.getTime() ?? a.updatedAt.getTime();
-    const lastB = b.lastMessageAt?.getTime() ?? b.updatedAt.getTime();
-
-    return lastB - lastA;
-  }
-
-  if (a.isGroup !== b.isGroup) {
-    return a.isGroup ? -1 : 1;
-  }
-
-  return b.updatedAt.getTime() - a.updatedAt.getTime();
-}
-
 async function findMatchingContactJids(query: string) {
   if (!query) {
     return [];
@@ -347,6 +379,9 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
   const query = getSearchValue(resolvedSearchParams);
   const type = getFilterValue(resolvedSearchParams);
   const labelId = getLabelIdValue(resolvedSearchParams);
+  const page = getPageValue(resolvedSearchParams);
+  const limit = getLimitValue(resolvedSearchParams);
+  const skip = (page - 1) * limit;
   const matchedContactJids = await findMatchingContactJids(query);
   const where = andWhere(
     getScopeWhere(type),
@@ -354,7 +389,16 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
     getLabelWhere(labelId)
   );
 
-  const [labels, chats, totalChats, withMessagesCount, individualCount, groupCount, emptyCount] =
+  const [
+    labels,
+    chats,
+    filteredCount,
+    totalChats,
+    withMessagesCount,
+    individualCount,
+    groupCount,
+    emptyCount
+  ] =
     await Promise.all([
     prisma.whatsappLabel.findMany({
       where: {
@@ -384,8 +428,12 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
           updatedAt: "desc"
         }
       ],
-      take: type === "empty" ? 120 : 150,
+      skip,
+      take: limit,
       include: chatListInclude
+    }),
+    prisma.whatsappChat.count({
+      where
     }),
     prisma.whatsappChat.count(),
     prisma.whatsappChat.count({
@@ -414,8 +462,7 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
     })
   ]);
 
-  const sortedChats = [...chats].sort(sortConversations);
-  const chatJids = sortedChats.map((chat) => chat.jid);
+  const chatJids = chats.map((chat) => chat.jid);
   const contacts = chatJids.length > 0
     ? await prisma.whatsappContact.findMany({
         where: {
@@ -440,6 +487,9 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
     groupCount,
     emptyCount
   };
+  const totalPages = Math.max(1, Math.ceil(filteredCount / limit));
+  const firstVisible = chats.length === 0 ? 0 : skip + 1;
+  const lastVisible = Math.min(skip + chats.length, filteredCount);
 
   return (
     <AppShell title="Inbox WhatsApp">
@@ -451,8 +501,7 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
             </p>
             <p className="muted">
               Alguns contatos podem aparecer sem nome ou mensagem porque o WhatsApp nem sempre envia todo
-              o historico para sessao ja pareada. Se o historico antigo nao vier, pode ser necessario
-              resetar/reconectar manualmente.
+              o historico para sessao ja pareada. Use a verificacao manual sem resetar a conexao atual.
             </p>
           </div>
           <div className="inbox-actions">
@@ -489,7 +538,7 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
             {(Object.keys(filterLabels) as ConversationFilter[]).map((filter) => (
               <Link
                 className={type === filter ? "active" : ""}
-                href={buildFilterHref(filter, query, labelId)}
+                href={buildFilterHref(filter, query, labelId, limit)}
                 key={filter}
               >
                 {filterLabels[filter]}
@@ -515,6 +564,13 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
                 </option>
               ))}
             </select>
+            <select className="input" defaultValue={String(limit)} name="limit">
+              {PAGE_SIZE_OPTIONS.map((pageSize) => (
+                <option key={pageSize} value={pageSize}>
+                  {pageSize} por pagina
+                </option>
+              ))}
+            </select>
             <button className="button" type="submit">
               Buscar
             </button>
@@ -528,14 +584,14 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
           </div>
         ) : null}
 
-        {sortedChats.length === 0 ? (
+        {chats.length === 0 ? (
           <div className="empty-state">
             <strong>Nenhuma conversa encontrada.</strong>
             <span>Altere o filtro, sincronize o historico ou inicie uma conversa por telefone.</span>
           </div>
         ) : (
           <div className="conversation-grid">
-            {sortedChats.map((chat) => {
+            {chats.map((chat) => {
               const contact = contactByJid.get(chat.jid);
               const name = getWhatsappDisplayName({
                 jid: chat.jid,
@@ -591,6 +647,41 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
             })}
           </div>
         )}
+
+        <div className="button-row" style={{ justifyContent: "space-between" }}>
+          <span className="muted">
+            Exibindo {firstVisible}-{lastVisible} de {filteredCount} conversas filtradas
+          </span>
+          <div className="button-row">
+            {page > 1 ? (
+              <Link
+                className="button secondary"
+                href={buildPageHref(page - 1, type, query, labelId, limit)}
+              >
+                Anterior
+              </Link>
+            ) : (
+              <span className="button secondary" style={{ opacity: 0.55 }}>
+                Anterior
+              </span>
+            )}
+            <span className="muted">
+              Pagina {page} de {totalPages}
+            </span>
+            {page < totalPages ? (
+              <Link
+                className="button secondary"
+                href={buildPageHref(page + 1, type, query, labelId, limit)}
+              >
+                Proxima
+              </Link>
+            ) : (
+              <span className="button secondary" style={{ opacity: 0.55 }}>
+                Proxima
+              </span>
+            )}
+          </div>
+        </div>
       </section>
     </AppShell>
   );
