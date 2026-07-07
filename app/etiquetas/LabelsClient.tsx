@@ -172,7 +172,7 @@ export function LabelsClient() {
 
               {label.lastCampaign ? (
                 <div className="message">
-                  Ãšltimo envio: <strong>{label.lastCampaign.name}</strong>{" "}
+                  ššltimo envio: <strong>{label.lastCampaign.name}</strong>{" "}
                   <span className={`badge ${statusClass(label.lastCampaign.status)}`}>
                     {label.lastCampaign.status}
                   </span>
@@ -205,5 +205,7 @@ export function LabelsClient() {
     </section>
   );
 }
+
+
 
 
