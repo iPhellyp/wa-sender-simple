@@ -20,6 +20,7 @@ type LabelsResponse = {
     activeLabels: number;
     labeledChats: number;
     contactLabels: number;
+    eligibleX1Contacts: number;
     groupLabels: number;
   };
   labels: LabelSummary[];
@@ -90,8 +91,8 @@ export function LabelsClient() {
     <section className="grid">
       <p className="page-subtitle">Etiquetas sincronizadas do WhatsApp conectado</p>
       <div className="message">
-        As etiquetas aparecem apos eventos do WhatsApp. Envie apenas para contatos com relacionamento
-        e respeite opt-out. Lotes grandes podem aumentar risco de bloqueio.
+        Modo X1 ativo: etiquetas de grupos sao ignoradas automaticamente. Envie apenas para contatos
+        individuais com relacionamento e respeite opt-out.
       </div>
 
       <div className="inbox-metrics">
@@ -104,15 +105,15 @@ export function LabelsClient() {
           <strong>{metrics?.activeLabels ?? 0}</strong>
         </article>
         <article className="metric-card">
-          <span>Conversas etiquetadas</span>
+          <span>Contatos etiquetados</span>
           <strong>{metrics?.labeledChats ?? 0}</strong>
         </article>
         <article className="metric-card">
-          <span>Contatos etiquetados</span>
-          <strong>{metrics?.contactLabels ?? 0}</strong>
+          <span>Contatos x1 elegiveis</span>
+          <strong>{metrics?.eligibleX1Contacts ?? metrics?.contactLabels ?? 0}</strong>
         </article>
         <article className="metric-card">
-          <span>Grupos etiquetados</span>
+          <span>Grupos ignorados</span>
           <strong>{metrics?.groupLabels ?? 0}</strong>
         </article>
       </div>
@@ -135,9 +136,8 @@ export function LabelsClient() {
               <span className="conversation-card-body">
                 <strong>{label.name}</strong>
                 <span className="conversation-card-meta">
-                  <span>{label.conversationCount} conversas</span>
                   <span>{label.contactCount} contatos</span>
-                  <span>{label.groupCount} grupos</span>
+                  <span>{label.groupCount} grupos ignorados</span>
                 </span>
                 <span className="muted">
                   Atualizada em {new Date(label.updatedAt).toLocaleString("pt-BR")}

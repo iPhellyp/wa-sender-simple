@@ -88,7 +88,7 @@ export default async function ConversationDetailPage({ params }: ConversationDet
           </Link>
           {chat.isGroup ? (
             <Link className="button secondary" href="/conversas">
-              Ocultar grupos
+              Voltar para X1
             </Link>
           ) : null}
         </div>
@@ -109,7 +109,8 @@ export default async function ConversationDetailPage({ params }: ConversationDet
             <div className="chat-subtitle">{getWhatsappIdentityLabel(chat.jid)}</div>
             {chat.isGroup ? (
               <div className="inline-note">
-                Esta conversa e um grupo. Use Ocultar grupos para voltar a lista de contatos.
+                Esta conversa e um grupo antigo. Modo X1 ativo: grupos nao recebem envios e ficam fora
+                da inbox principal.
               </div>
             ) : null}
             {chat.labels.filter((item) => !item.label.deleted).length > 0 ? (
@@ -132,12 +133,19 @@ export default async function ConversationDetailPage({ params }: ConversationDet
           </div>
         </header>
 
-        <ConversationMessagesClient
-          chatId={chat.id}
-          isGroup={chat.isGroup}
-          totalMessages={chat._count.messages}
-          whatsappStatus={whatsappSession.status}
-        />
+        {chat.isGroup ? (
+          <div className="empty-state">
+            <strong>Grupo ignorado pelo modo X1.</strong>
+            <span>Nenhum envio sera permitido para esta conversa.</span>
+          </div>
+        ) : (
+          <ConversationMessagesClient
+            chatId={chat.id}
+            isGroup={chat.isGroup}
+            totalMessages={chat._count.messages}
+            whatsappStatus={whatsappSession.status}
+          />
+        )}
       </section>
     </AppShell>
   );

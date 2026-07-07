@@ -28,7 +28,7 @@ type LabelDetailResponse = {
 };
 
 export function LabelDetailClient({ labelId }: { labelId: string }) {
-  const [type, setType] = useState<"all" | "contacts" | "groups">("all");
+  const [type, setType] = useState<"all" | "contacts">("contacts");
   const [search, setSearch] = useState("");
   const [data, setData] = useState<LabelDetailResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -90,7 +90,7 @@ export function LabelDetailClient({ labelId }: { labelId: string }) {
         <p className="muted">ID WhatsApp: {data?.label.waLabelId}</p>
         <div className="inbox-metrics">
           <article className="metric-card">
-            <span>Conversas</span>
+            <span>Contatos X1</span>
             <strong>{data?.metrics.conversationCount ?? 0}</strong>
           </article>
           <article className="metric-card">
@@ -98,7 +98,7 @@ export function LabelDetailClient({ labelId }: { labelId: string }) {
             <strong>{data?.metrics.contactCount ?? 0}</strong>
           </article>
           <article className="metric-card">
-            <span>Grupos</span>
+            <span>Grupos ignorados</span>
             <strong>{data?.metrics.groupCount ?? 0}</strong>
           </article>
         </div>
@@ -106,14 +106,14 @@ export function LabelDetailClient({ labelId }: { labelId: string }) {
 
       <div className="inbox-toolbar">
         <nav className="segmented" aria-label="Filtro da etiqueta">
-          {(["all", "contacts", "groups"] as const).map((filter) => (
+          {(["contacts", "all"] as const).map((filter) => (
             <button
               className={type === filter ? "active" : ""}
               key={filter}
               type="button"
               onClick={() => setType(filter)}
             >
-              {filter === "all" ? "Todas" : filter === "contacts" ? "Contatos" : "Grupos"}
+              {filter === "all" ? "Todos X1" : "Contatos"}
             </button>
           ))}
         </nav>

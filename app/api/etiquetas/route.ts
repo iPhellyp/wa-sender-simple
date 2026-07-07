@@ -30,13 +30,12 @@ export async function GET() {
     }
   });
 
-  const [activeLabels, labeledChats, contactLabels, groupLabels] = await Promise.all([
+  const [activeLabels, contactLabels, groupLabels] = await Promise.all([
     prisma.whatsappLabel.count({
       where: {
         deleted: false
       }
     }),
-    prisma.whatsappChatLabel.count(),
     prisma.whatsappChatLabel.count({
       where: {
         chat: {
@@ -57,8 +56,9 @@ export async function GET() {
     metrics: {
       totalLabels: labels.length,
       activeLabels,
-      labeledChats,
+      labeledChats: contactLabels,
       contactLabels,
+      eligibleX1Contacts: contactLabels,
       groupLabels
     },
     labels: labels.map((label) => {

@@ -1,6 +1,7 @@
 import type { BaileysEventMap } from "@whiskeysockets/baileys";
 import { prisma } from "../prisma/client";
 import { ensureChatForJid, isGroupJid, normalizeChatJid } from "./sync";
+import { shouldIgnoreJidForX1Only } from "../whatsapp/jid";
 
 const CHAT_LABEL_TYPE = "label_jid";
 
@@ -159,6 +160,14 @@ export async function syncLabelsAssociation(event: LabelAssociationEvent) {
 
     if (!jid || !waLabelId) {
       counters.skipped = 1;
+      return counters;
+    }
+
+    if (shouldIgnoreJidForX1Only(jid)) {
+      counters.skipped = 1;
+      console.log("[x1-only] group label association skipped", {
+        labelId: waLabelId
+      });
       return counters;
     }
 

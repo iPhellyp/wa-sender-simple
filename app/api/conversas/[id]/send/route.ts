@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { enqueueManualMessage } from "@/src/lib/queue/campaign-queue";
 import { prisma } from "@/src/lib/prisma/client";
+import { shouldIgnoreJidForX1Only } from "@/src/lib/whatsapp/jid";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -36,6 +37,13 @@ export async function POST(
 
   if (!chat) {
     return NextResponse.json({ error: "Conversa nao encontrada" }, { status: 404 });
+  }
+
+  if (shouldIgnoreJidForX1Only(chat.jid)) {
+    return NextResponse.json(
+      { error: "Envio para grupo ignorado pelo modo X1" },
+      { status: 400 }
+    );
   }
 
   let jobId: string | null = null;

@@ -2,6 +2,7 @@ import { createHash } from "crypto";
 import { prisma } from "../prisma/client";
 import { normalizeBrazilPhone } from "../phone/normalize";
 import { isGroupJid, normalizeChatJid } from "../baileys/sync";
+import { WHATSAPP_X1_ONLY_MODE } from "../whatsapp/jid";
 
 export type SkippedReason =
   | "group_excluded"
@@ -47,6 +48,7 @@ export type AudienceResult = {
   skipped: number;
   skippedReasons: Record<SkippedReason, number>;
   jidTypeCounts: Record<AudienceJidType, number>;
+  x1OnlyMode: boolean;
   recipientsPreview: AudiencePreviewItem[];
 };
 
@@ -323,7 +325,7 @@ export async function buildLabelAudience(options: {
     return null;
   }
 
-  const includeGroups = options.includeGroups ?? false;
+  const includeGroups = WHATSAPP_X1_ONLY_MODE ? false : options.includeGroups ?? false;
   const excludeOptOut = options.excludeOptOut ?? true;
   const excludeAlreadySentDays =
     options.excludeAlreadySentDays ?? DEFAULT_EXCLUDE_ALREADY_SENT_DAYS;
@@ -449,6 +451,7 @@ export async function buildLabelAudience(options: {
   console.log("[campaign] audience resolved", {
     valid: finalEligible.length,
     skippedGroups: skippedReasons.group_excluded,
+    x1OnlyMode: WHATSAPP_X1_ONLY_MODE,
     invalidJids: skippedReasons.invalid_jid,
     duplicates: skippedReasons.duplicate_in_campaign,
     unresolved: skippedReasons.unresolved_chat
@@ -467,6 +470,7 @@ export async function buildLabelAudience(options: {
     skipped,
     skippedReasons,
     jidTypeCounts,
+    x1OnlyMode: WHATSAPP_X1_ONLY_MODE,
     eligibleRecipients: finalEligible,
     recipientsPreview: finalEligible.slice(0, previewLimit)
   } satisfies AudienceResult & {

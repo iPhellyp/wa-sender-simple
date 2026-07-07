@@ -35,9 +35,8 @@ export async function POST(
   const name = String(payload.name ?? "").trim();
   const message = String(payload.message ?? "").trim();
   const intervalMinutes = Number(payload.intervalMinutes ?? 1);
-  const excludeGroups =
-    payload.excludeGroups === undefined ? payload.includeGroups !== true : payload.excludeGroups !== false;
-  const includeGroups = !excludeGroups;
+  const excludeGroups = true;
+  const includeGroups = false;
   const excludeAlreadySentDays = Number(
     payload.excludeAlreadySentDays ?? DEFAULT_EXCLUDE_ALREADY_SENT_DAYS
   );

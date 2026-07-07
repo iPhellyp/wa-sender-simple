@@ -8,6 +8,11 @@ import type {
 import { Prisma } from "@prisma/client";
 import { prisma } from "../prisma/client";
 import { cleanDisplayName, isBetterDisplayName } from "../whatsapp/display-name";
+import {
+  isBroadcastOrNewsletterJid,
+  isGroupJid,
+  shouldIgnoreJidForX1Only
+} from "../whatsapp/jid";
 import { extractMessageText as extractOptOutMessageText } from "./opt-out";
 
 const BATCH_SIZE = 25;
@@ -100,14 +105,7 @@ function getMessageSkipReason(messageType: string | null, text: string | null) {
 }
 
 function isIgnoredJid(jid: string | null | undefined) {
-  const normalized = jid?.trim().toLowerCase() ?? "";
-
-  return (
-    !normalized ||
-    normalized === "status@broadcast" ||
-    normalized.endsWith("@broadcast") ||
-    normalized.includes("newsletter")
-  );
+  return isBroadcastOrNewsletterJid(jid);
 }
 
 export function normalizeChatJid(jid: string | null | undefined) {
@@ -135,15 +133,17 @@ export function normalizeChatJid(jid: string | null | undefined) {
   return isIgnoredJid(normalizedJid) ? null : normalizedJid;
 }
 
-export function isGroupJid(jid: string | null | undefined) {
-  return Boolean(jid?.endsWith("@g.us"));
-}
+export { isGroupJid };
 
 export async function ensureChatForJid(jid: string, optionalName?: string | null) {
   const normalizedJid = normalizeChatJid(jid);
 
   if (!normalizedJid) {
     throw new Error("JID de conversa invalido");
+  }
+
+  if (shouldIgnoreJidForX1Only(normalizedJid)) {
+    throw new Error("JID ignorado pelo modo X1");
   }
 
   const name = cleanDisplayName(optionalName, normalizedJid);
@@ -363,10 +363,58 @@ function logSyncResult(
   });
 }
 
+function getBaileysChatJid(chat: Partial<Chat>) {
+  return normalizeChatJid(chat.id ?? chat.newJid ?? chat.oldJid);
+}
+
+function getBaileysMessageJid(message: WAMessage | WAMessageUpdate) {
+  return normalizeChatJid(message.key.remoteJid);
+}
+
+function splitX1Chats<T extends Partial<Chat>>(chats: T[]) {
+  const allowed: T[] = [];
+  let groupSkipped = 0;
+
+  for (const chat of chats) {
+    const jid = getBaileysChatJid(chat);
+
+    if (jid && shouldIgnoreJidForX1Only(jid)) {
+      groupSkipped += 1;
+      continue;
+    }
+
+    allowed.push(chat);
+  }
+
+  return { allowed, groupSkipped };
+}
+
+function splitX1Messages<T extends WAMessage | WAMessageUpdate>(messages: T[]) {
+  const allowed: T[] = [];
+  let groupSkipped = 0;
+
+  for (const message of messages) {
+    const jid = getBaileysMessageJid(message);
+
+    if (jid && shouldIgnoreJidForX1Only(jid)) {
+      groupSkipped += 1;
+      continue;
+    }
+
+    allowed.push(message);
+  }
+
+  return { allowed, groupSkipped };
+}
+
 export async function upsertChatFromBaileys(chat: Partial<Chat>) {
   const jid = normalizeChatJid(chat.id ?? chat.newJid ?? chat.oldJid);
 
   if (!jid) {
+    return false;
+  }
+
+  if (shouldIgnoreJidForX1Only(jid)) {
     return false;
   }
 
@@ -416,6 +464,10 @@ export async function upsertContactFromBaileys(contact: Partial<Contact>) {
   const jid = normalizeChatJid(contact.jid ?? contact.id ?? contact.lid);
 
   if (!jid) {
+    return false;
+  }
+
+  if (shouldIgnoreJidForX1Only(jid)) {
     return false;
   }
 
@@ -510,6 +562,16 @@ export async function upsertMessageFromBaileys(
       console.log(`${getMessageLogNamespace(options)} message skipped`, {
         reason: "missing-jid-or-message-id",
         messageType: null
+      });
+    }
+
+    return false;
+  }
+
+  if (shouldIgnoreJidForX1Only(jid)) {
+    if (options.log) {
+      console.log("[x1-only] group message skipped", {
+        jid
       });
     }
 
@@ -646,6 +708,10 @@ export async function updateMessageFromBaileys(messageUpdate: WAMessageUpdate) {
     return false;
   }
 
+  if (shouldIgnoreJidForX1Only(jid)) {
+    return false;
+  }
+
   const timestamp = getMessageTimestamp(messageUpdate.update.messageTimestamp);
   const messageType = extractMessageType(messageUpdate.update.message);
   const text = extractMessageText(messageUpdate.update.message);
@@ -672,6 +738,8 @@ export async function updateMessageFromBaileys(messageUpdate: WAMessageUpdate) {
 export async function syncMessagingHistorySet(event: BaileysEventMap["messaging-history.set"]) {
   const syncType = event.syncType ?? null;
   const progress = (event as { progress?: number | null }).progress ?? null;
+  const x1Chats = splitX1Chats(event.chats);
+  const x1Messages = splitX1Messages(event.messages);
 
   console.log("[history] messaging-history.set received", {
     syncType,
@@ -681,7 +749,19 @@ export async function syncMessagingHistorySet(event: BaileysEventMap["messaging-
     messages: event.messages.length
   });
 
-  const chatsResult = await settleInBatches(event.chats, upsertChatFromBaileys);
+  if (x1Chats.groupSkipped > 0) {
+    console.log("[x1-only] group chats skipped", {
+      count: x1Chats.groupSkipped
+    });
+  }
+
+  if (x1Messages.groupSkipped > 0) {
+    console.log("[x1-only] group messages skipped", {
+      count: x1Messages.groupSkipped
+    });
+  }
+
+  const chatsResult = await settleInBatches(x1Chats.allowed, upsertChatFromBaileys);
   console.log("[history] chats persisted", {
     syncType,
     count: chatsResult.processed,
@@ -699,7 +779,7 @@ export async function syncMessagingHistorySet(event: BaileysEventMap["messaging-
     ...(contactsResult.firstError ? { firstError: contactsResult.firstError } : {})
   });
 
-  const messagesResult = await settleInBatches(event.messages, (message) =>
+  const messagesResult = await settleInBatches(x1Messages.allowed, (message) =>
     upsertMessageFromBaileys(message, { log: true, logScope: "history" })
   );
   console.log("[history] messages persisted", {
@@ -719,18 +799,34 @@ export async function syncMessagingHistorySet(event: BaileysEventMap["messaging-
 }
 
 export async function syncChatsUpsert(chats: BaileysEventMap["chats.upsert"]) {
+  const x1Chats = splitX1Chats(chats);
+
+  if (x1Chats.groupSkipped > 0) {
+    console.log("[x1-only] group chats skipped", {
+      count: x1Chats.groupSkipped
+    });
+  }
+
   logSyncResult(
     "chats upsert",
     { chats: chats.length },
-    await settleInBatches(chats, upsertChatFromBaileys)
+    await settleInBatches(x1Chats.allowed, upsertChatFromBaileys)
   );
 }
 
 export async function syncChatsUpdate(chats: BaileysEventMap["chats.update"]) {
+  const x1Chats = splitX1Chats(chats);
+
+  if (x1Chats.groupSkipped > 0) {
+    console.log("[x1-only] group chats skipped", {
+      count: x1Chats.groupSkipped
+    });
+  }
+
   logSyncResult(
     "chats update",
     { chats: chats.length },
-    await settleInBatches(chats, upsertChatFromBaileys)
+    await settleInBatches(x1Chats.allowed, upsertChatFromBaileys)
   );
 }
 
@@ -751,13 +847,30 @@ export async function syncContactsUpdate(contacts: BaileysEventMap["contacts.upd
 }
 
 export async function syncMessagesUpsert(event: BaileysEventMap["messages.upsert"]) {
+  const x1Messages = splitX1Messages(event.messages);
+
   console.log("[sync] messages.upsert received", {
     count: event.messages.length,
     type: event.type,
     messages: event.messages.length
   });
 
-  const result = await settleInBatches(event.messages, (message) =>
+  if (x1Messages.groupSkipped > 0) {
+    console.log("[x1-only] group messages skipped", {
+      count: x1Messages.groupSkipped
+    });
+    for (const message of event.messages) {
+      const jid = getBaileysMessageJid(message);
+
+      if (isGroupJid(jid)) {
+        console.log("[x1-only] group message skipped", {
+          jid
+        });
+      }
+    }
+  }
+
+  const result = await settleInBatches(x1Messages.allowed, (message) =>
     upsertMessageFromBaileys(message, { log: true, logScope: "live" })
   );
 
@@ -773,9 +886,17 @@ export async function syncMessagesUpsert(event: BaileysEventMap["messages.upsert
 }
 
 export async function syncMessagesUpdate(messages: BaileysEventMap["messages.update"]) {
+  const x1Messages = splitX1Messages(messages);
+
+  if (x1Messages.groupSkipped > 0) {
+    console.log("[x1-only] group messages skipped", {
+      count: x1Messages.groupSkipped
+    });
+  }
+
   logSyncResult(
     "messages update",
     { messages: messages.length },
-    await settleInBatches(messages, updateMessageFromBaileys)
+    await settleInBatches(x1Messages.allowed, updateMessageFromBaileys)
   );
 }

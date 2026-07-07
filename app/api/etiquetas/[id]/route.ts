@@ -13,7 +13,6 @@ export async function GET(
 ) {
   const { id } = await context.params;
   const search = request.nextUrl.searchParams.get("search")?.trim() ?? "";
-  const type = request.nextUrl.searchParams.get("type") ?? "all";
 
   const label = await prisma.whatsappLabel.findFirst({
     where: {
@@ -29,12 +28,9 @@ export async function GET(
   const associations = await prisma.whatsappChatLabel.findMany({
     where: {
       labelId: label.id,
-      chat:
-        type === "contacts"
-          ? { isGroup: false }
-          : type === "groups"
-            ? { isGroup: true }
-            : undefined
+      chat: {
+        isGroup: false
+      }
     },
     include: {
       chat: true
@@ -89,8 +85,15 @@ export async function GET(
     })
     .filter((item): item is NonNullable<typeof item> => item !== null);
 
-  const contactCount = associations.filter((item) => !item.chat.isGroup).length;
-  const groupCount = associations.filter((item) => item.chat.isGroup).length;
+  const contactCount = associations.length;
+  const groupCount = await prisma.whatsappChatLabel.count({
+    where: {
+      labelId: label.id,
+      chat: {
+        isGroup: true
+      }
+    }
+  });
 
   return NextResponse.json({
     label: {
@@ -102,7 +105,7 @@ export async function GET(
       updatedAt: label.updatedAt
     },
     metrics: {
-      conversationCount: associations.length,
+      conversationCount: contactCount,
       contactCount,
       groupCount
     },

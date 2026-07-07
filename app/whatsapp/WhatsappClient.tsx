@@ -33,7 +33,6 @@ export function WhatsappClient() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [hideGroups, setHideGroups] = useState(false);
 
   async function loadStatus() {
     try {
@@ -76,7 +75,6 @@ export function WhatsappClient() {
   }
 
   useEffect(() => {
-    setHideGroups(window.localStorage.getItem("wa-hide-groups") === "true");
     void loadStatus();
     const interval = window.setInterval(() => {
       void loadStatus();
@@ -84,12 +82,6 @@ export function WhatsappClient() {
 
     return () => window.clearInterval(interval);
   }, []);
-
-  function toggleHideGroups() {
-    const nextValue = !hideGroups;
-    setHideGroups(nextValue);
-    window.localStorage.setItem("wa-hide-groups", String(nextValue));
-  }
 
   if (loading) {
     return <div className="card">Carregando...</div>;
@@ -174,16 +166,17 @@ export function WhatsappClient() {
       <div className="card grid">
         <div className="button-row" style={{ justifyContent: "space-between" }}>
           <div>
-            <strong>Grupos na inbox</strong>
+            <strong>Modo X1 ativo</strong>
             <div className="muted">
-              Esconde grupos da inbox e evita selecionar grupos em envios, sem sair dos grupos.
+              Grupos, broadcasts e newsletters sao ignorados para reduzir carga e focar envios
+              para contatos individuais.
             </div>
           </div>
           <div className="button-row">
-            <button className="button secondary" type="button" onClick={toggleHideGroups}>
-              {hideGroups ? "Mostrar grupos" : "Ocultar grupos"}
+            <button className="button secondary" disabled type="button">
+              Grupos ignorados
             </button>
-            <Link className="button" href={hideGroups ? "/conversas" : "/conversas?type=all"}>
+            <Link className="button" href="/conversas">
               Abrir inbox
             </Link>
           </div>

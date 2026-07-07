@@ -28,6 +28,7 @@ import { completeCampaignIfDone } from "../lib/campaigns/progress";
 import { schedulePendingRecipients } from "../lib/campaigns/schedule";
 import { hashMessage, resolveCampaignJid, type SkippedReason } from "../lib/labels/audience";
 import { normalizeBrazilPhone, toWhatsappJid } from "../lib/phone/normalize";
+import { shouldIgnoreJidForX1Only } from "../lib/whatsapp/jid";
 
 const PAUSED_RECHECK_DELAY_MS = 60 * 1000;
 const finalRecipientStatuses: CampaignRecipientStatus[] = [
@@ -71,6 +72,10 @@ async function persistOutboundMessage(options: {
 
   if (!normalizedJid) {
     throw new Error("JID invalido para persistir mensagem enviada");
+  }
+
+  if (shouldIgnoreJidForX1Only(normalizedJid)) {
+    throw new Error("JID ignorado pelo modo X1");
   }
 
   const chat = await ensureChatForJid(normalizedJid);
@@ -161,7 +166,7 @@ async function isRecipientOptedOut(
 
 function getSkippedRecipientError(reason: SkippedReason) {
   if (reason === "group_excluded") {
-    return "Grupo ignorado pela configuracao da campanha";
+    return "Grupo ignorado pelo modo X1";
   }
 
   if (reason === "unresolved_chat") {
@@ -213,6 +218,10 @@ async function processManualMessage(
 
   if (!normalizedJid) {
     throw new Error("JID invalido para envio manual");
+  }
+
+  if (shouldIgnoreJidForX1Only(normalizedJid)) {
+    throw new Error("Envio manual para grupo ignorado pelo modo X1");
   }
 
   if (!text) {
@@ -311,7 +320,7 @@ async function processRecipient(recipientId: string) {
     const skipReason =
       !resolvedJid.ok
         ? resolvedJid.reason
-        : resolvedJid.isGroup && recipient.campaign.excludeGroups
+        : resolvedJid.isGroup || shouldIgnoreJidForX1Only(resolvedJid.jid)
           ? "group_excluded"
           : null;
 

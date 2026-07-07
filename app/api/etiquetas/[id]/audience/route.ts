@@ -16,12 +16,7 @@ export async function GET(
   }
 ) {
   const { id } = await context.params;
-  const excludeGroupsParam = request.nextUrl.searchParams.get("excludeGroups");
-  const excludeGroups =
-    excludeGroupsParam === null
-      ? request.nextUrl.searchParams.get("includeGroups") !== "true"
-      : excludeGroupsParam !== "false";
-  const includeGroups = !excludeGroups;
+  const includeGroups = false;
   const excludeOptOut = request.nextUrl.searchParams.get("excludeOptOut") !== "false";
   const excludeAlreadySentDays = Number(
     request.nextUrl.searchParams.get("excludeAlreadySentDays") ??

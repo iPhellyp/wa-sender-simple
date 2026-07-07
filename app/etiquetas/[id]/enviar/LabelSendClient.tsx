@@ -10,6 +10,7 @@ type AudienceResponse = {
   skipped: number;
   skippedReasons: Record<string, number>;
   jidTypeCounts: Record<string, number>;
+  x1OnlyMode: boolean;
   recipientsPreview: Array<{
     chatId: string;
     jid: string;
@@ -24,7 +25,7 @@ type AudienceResponse = {
 export function LabelSendClient({ labelId }: { labelId: string }) {
   const [name, setName] = useState("");
   const [message, setMessage] = useState("");
-  const [excludeGroups, setExcludeGroups] = useState(true);
+  const excludeGroups = true;
   const [excludeAlreadySentDays, setExcludeAlreadySentDays] = useState(7);
   const [maxRecipients, setMaxRecipients] = useState(100);
   const [intervalMinutes, setIntervalMinutes] = useState(1);
@@ -133,8 +134,8 @@ export function LabelSendClient({ labelId }: { labelId: string }) {
       </div>
 
       <div className="message">
-        Envie apenas para contatos com relacionamento. Opt-out e sempre respeitado. Grupos ficam
-        excluidos por padrao. Intervalo minimo de 1 minuto entre destinatarios.
+        Modo X1 ativo: grupos sao ignorados automaticamente. Envie apenas para contatos individuais
+        com relacionamento. Opt-out e sempre respeitado.
       </div>
 
       <form className="card grid" onSubmit={handlePreviewSubmit}>
@@ -169,15 +170,11 @@ export function LabelSendClient({ labelId }: { labelId: string }) {
           />
         </label>
         <label className="checkbox-row">
-          <input
-            checked={excludeGroups}
-            type="checkbox"
-            onChange={(event) => setExcludeGroups(event.target.checked)}
-          />
+          <input checked disabled type="checkbox" readOnly />
           <span>
-            <strong>Ignorar grupos</strong>
+            <strong>Modo X1 ativo</strong>
             <span className="muted">
-              Envia somente para contatos individuais. Grupos vinculados a etiqueta serao ignorados.
+              Grupos vinculados a etiqueta serao ignorados e nunca entram no envio.
             </span>
           </span>
         </label>
@@ -219,7 +216,7 @@ export function LabelSendClient({ labelId }: { labelId: string }) {
               <strong>{audience.total}</strong>
             </article>
             <article className="metric-card">
-              <span>Elegiveis</span>
+              <span>Elegiveis x1</span>
               <strong>{audience.eligible}</strong>
             </article>
             <article className="metric-card">

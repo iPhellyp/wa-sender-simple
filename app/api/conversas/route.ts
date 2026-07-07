@@ -12,7 +12,6 @@ export const dynamic = "force-dynamic";
 type ConversationApiFilter =
   | "all"
   | "contacts"
-  | "groups"
   | "with-message"
   | "without-message";
 
@@ -26,7 +25,6 @@ function getType(request: NextRequest): ConversationApiFilter {
   if (
     type === "all" ||
     type === "contacts" ||
-    type === "groups" ||
     type === "with-message" ||
     type === "without-message"
   ) {
@@ -53,7 +51,7 @@ function getLimit(request: NextRequest) {
 }
 
 function getHideGroups(request: NextRequest) {
-  return request.nextUrl.searchParams.get("hideGroups") === "true";
+  return request.nextUrl.searchParams.get("hideGroups") !== "false";
 }
 
 function andWhere(...items: Prisma.WhatsappChatWhereInput[]): Prisma.WhatsappChatWhereInput {
@@ -63,45 +61,39 @@ function andWhere(...items: Prisma.WhatsappChatWhereInput[]): Prisma.WhatsappCha
 }
 
 function getScopeWhere(type: ConversationApiFilter, hideGroups: boolean): Prisma.WhatsappChatWhereInput {
-  if (type === "contacts") {
-    return {
-      isGroup: false
-    };
-  }
+  const x1Only: Prisma.WhatsappChatWhereInput = {
+    isGroup: false
+  };
 
-  if (type === "groups") {
-    return {
-      isGroup: true
-    };
+  if (type === "contacts" || type === "all") {
+    return x1Only;
   }
 
   if (type === "with-message") {
     return andWhere(
+      x1Only,
       {
         lastMessageAt: {
           not: null
         }
-      },
-      hideGroups ? { isGroup: false } : {}
+      }
     );
   }
 
   if (type === "without-message") {
     return andWhere(
+      x1Only,
       {
         lastMessageAt: null
-      },
-      hideGroups ? { isGroup: false } : {}
+      }
     );
   }
 
   if (hideGroups) {
-    return {
-      isGroup: false
-    };
+    return x1Only;
   }
 
-  return {};
+  return x1Only;
 }
 
 function getSearchWhere(search: string): Prisma.WhatsappChatWhereInput {
@@ -146,7 +138,7 @@ export async function GET(request: NextRequest) {
   const skip = (page - 1) * limit;
   const where = andWhere(getScopeWhere(type, hideGroups), getSearchWhere(search));
 
-  const [rows, filteredCount, totalChats, withMessageCount, withoutMessageCount, contactCount, groupCount] =
+  const [rows, filteredCount, totalChats, withMessageCount, withoutMessageCount, contactCount, groupIgnoredCount] =
     await Promise.all([
       prisma.whatsappChat.findMany({
         where,
@@ -176,9 +168,14 @@ export async function GET(request: NextRequest) {
         }
       }),
       prisma.whatsappChat.count({ where }),
-      prisma.whatsappChat.count(),
       prisma.whatsappChat.count({
         where: {
+          isGroup: false
+        }
+      }),
+      prisma.whatsappChat.count({
+        where: {
+          isGroup: false,
           lastMessageAt: {
             not: null
           }
@@ -186,6 +183,7 @@ export async function GET(request: NextRequest) {
       }),
       prisma.whatsappChat.count({
         where: {
+          isGroup: false,
           lastMessageAt: null
         }
       }),
@@ -231,7 +229,7 @@ export async function GET(request: NextRequest) {
     counts: {
       totalChats,
       contactCount,
-      groupCount,
+      groupIgnoredCount,
       withMessageCount,
       withoutMessageCount
     },
