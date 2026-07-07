@@ -2,6 +2,12 @@ import { AppShell } from "@/app/components/AppShell";
 import { prisma } from "@/src/lib/prisma/client";
 import { CampaignsClient } from "./CampaignsClient";
 
+type ChatPreview = {
+  id: string;
+  jid: string;
+  name: string | null;
+};
+
 type CampaignsPageProps = {
   searchParams?: Promise<{
     labelId?: string | string[];
@@ -32,6 +38,39 @@ export default async function CampaignsPage({ searchParams }: CampaignsPageProps
         }
       })
     : null;
+  const [labels, chatPreview] = await Promise.all([
+    prisma.whatsappLabel.findMany({
+      where: {
+        deleted: false
+      },
+      orderBy: {
+        name: "asc"
+      },
+      select: {
+        id: true,
+        name: true,
+        color: true
+      }
+    }),
+    chatIds.length
+      ? prisma.whatsappChat.findMany({
+          where: {
+            id: {
+              in: chatIds
+            },
+            isGroup: false
+          },
+          orderBy: {
+            name: "asc"
+          },
+          select: {
+            id: true,
+            jid: true,
+            name: true
+          }
+        })
+      : Promise.resolve([] as ChatPreview[])
+  ]);
 
   return (
     <AppShell title="Campanhas">
@@ -39,8 +78,10 @@ export default async function CampaignsPage({ searchParams }: CampaignsPageProps
         prefillContext={{
           labelId: label?.id ?? (labelId || null),
           labelName: label?.name ?? null,
-          chatIds
+          chatIds,
+          chatPreview
         }}
+        labels={labels}
       />
     </AppShell>
   );

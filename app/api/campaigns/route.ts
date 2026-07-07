@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { CampaignRecipientStatus } from "@prisma/client";
+import { CampaignRecipientStatus, CampaignStatus } from "@prisma/client";
+import { buildCampaignDedupeKey } from "@/src/lib/labels/audience";
 import { prisma } from "@/src/lib/prisma/client";
 
 export const runtime = "nodejs";
@@ -19,6 +20,13 @@ function countRecipientsByStatus(
 export async function GET() {
   const campaigns = await prisma.campaign.findMany({
     include: {
+      targetLabel: {
+        select: {
+          id: true,
+          name: true,
+          color: true
+        }
+      },
       recipients: {
         select: {
           status: true
@@ -45,12 +53,15 @@ export async function POST(request: NextRequest) {
     defaultMessage?: string | null;
     intervalMinutes?: number;
     contactIds?: string[];
+    chatIds?: string[];
   };
 
   const name = String(payload.name ?? "").trim();
   const defaultMessage = String(payload.defaultMessage ?? "").trim();
   const intervalMinutes = Number(payload.intervalMinutes ?? 0);
   const contactIds = Array.isArray(payload.contactIds) ? payload.contactIds : [];
+  const chatIds = Array.isArray(payload.chatIds) ? payload.chatIds : [];
+  const uniqueChatIds = Array.from(new Set(chatIds.map((id) => String(id).trim()).filter(Boolean)));
 
   if (!name) {
     return NextResponse.json({ error: "Nome da campanha obrigatorio" }, { status: 400 });
@@ -63,8 +74,71 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  if (contactIds.length === 0) {
+  if (contactIds.length === 0 && uniqueChatIds.length === 0) {
     return NextResponse.json({ error: "Selecione ao menos um contato" }, { status: 400 });
+  }
+
+  if (uniqueChatIds.length > 0) {
+    if (!defaultMessage) {
+      return NextResponse.json(
+        { error: "Mensagem obrigatoria para contatos do catalogo X1" },
+        { status: 400 }
+      );
+    }
+
+    if (defaultMessage.length > 4000) {
+      return NextResponse.json({ error: "Mensagem excede 4000 caracteres" }, { status: 400 });
+    }
+
+    const chats = await prisma.whatsappChat.findMany({
+      where: {
+        id: {
+          in: uniqueChatIds
+        },
+        isGroup: false
+      },
+      orderBy: {
+        name: "asc"
+      },
+      select: {
+        id: true,
+        jid: true
+      }
+    });
+
+    if (chats.length === 0) {
+      return NextResponse.json(
+        { error: "Nenhum contato X1 valido selecionado" },
+        { status: 400 }
+      );
+    }
+
+    const dedupeKey = `chatIds:${Date.now()}`;
+    const campaign = await prisma.campaign.create({
+      data: {
+        name,
+        defaultMessage,
+        intervalMinutes,
+        status: CampaignStatus.draft,
+        targetMode: "chatIds",
+        excludeGroups: true,
+        dedupeKey,
+        maxRecipients: chats.length,
+        recipients: {
+          create: chats.map((chat) => ({
+            chatId: chat.id,
+            jid: chat.jid,
+            messageFinal: defaultMessage,
+            dedupeKey: buildCampaignDedupeKey(dedupeKey, chat.jid)
+          }))
+        }
+      },
+      include: {
+        recipients: true
+      }
+    });
+
+    return NextResponse.json(campaign, { status: 201 });
   }
 
   const contacts = await prisma.contact.findMany({
