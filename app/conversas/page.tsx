@@ -45,7 +45,7 @@ const dateFormatter = new Intl.DateTimeFormat("pt-BR", {
 });
 
 const filterLabels: Record<ConversationFilter, string> = {
-  all: "Todos X1",
+  all: "Todos",
   contacts: "Contatos",
   "with-message": "Com mensagem",
   "without-message": "Sem mensagem",
@@ -54,7 +54,7 @@ const filterLabels: Record<ConversationFilter, string> = {
 
 const sendStatusLabels: Record<SendStatusFilter, string> = {
   all: "Todos envios",
-  sent: "JÃ¡ enviado",
+  sent: "Ja enviado",
   never_sent: "Nunca enviado",
   failed: "Com falha"
 };
@@ -64,7 +64,7 @@ const sortLabels: Record<ConversationSort, string> = {
   oldest: "Mais antigos primeiro",
   no_message: "Sem mensagem primeiro",
   tagged: "Etiquetados primeiro",
-  sent: "JÃ¡ enviados primeiro",
+  sent: "Ja enviados primeiro",
   never_sent: "Nunca enviados primeiro"
 };
 
@@ -573,7 +573,7 @@ function getFilterCount(type: ConversationFilter, counts: {
 
 function getSendStatusLabel(status: CatalogConversationItem["sendStatus"]) {
   if (status === "sent") {
-    return "jÃ¡ enviado";
+    return "ja enviado";
   }
 
   if (status === "failed") {
@@ -775,7 +775,7 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
   return (
     <AppShell
       title="Conversas"
-      subtitle="Contatos individuais sincronizados do WhatsApp. Grupos, broadcasts e newsletters sÃ£o ignorados."
+      subtitle="Contatos individuais sincronizados do WhatsApp. Grupos, broadcasts e newsletters sao ignorados."
     >
       <section className="inbox-page">
         <div className="inbox-hero">
@@ -784,8 +784,8 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
               {filteredCount} contato(s) neste filtro, ordenados por {sortLabels[sort].toLowerCase()}.
             </p>
             <p className="muted">
-              ConexÃ£o: {whatsappSession.status}. Alguns contatos sem mensagem sÃ£o ordenados pela
-              Ãºltima atualizaÃ§Ã£o disponÃ­vel.
+              Conexao: {whatsappSession.status}. Alguns contatos sem mensagem sao ordenados pela
+              ultima atualizacao disponÃ­vel.
             </p>
           </div>
           <div className="inbox-actions">
@@ -797,9 +797,9 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
         <div className="inbox-metrics">
           <StatCard label="Contatos individuais" value={totalX1Chats} helper="Conversas sincronizadas" />
           <StatCard label="Com mensagem" value={withMessageCount} helper="Possuem lastMessageAt" />
-          <StatCard label="Sem mensagem" value={withoutMessageCount} helper="Ordenados por atualizaÃ§Ã£o" />
+          <StatCard label="Sem mensagem" value={withoutMessageCount} helper="Ordenados por atualizacao" />
           <StatCard label="Etiquetados" value={labeledCount} helper="Com ao menos uma etiqueta" />
-          <StatCard label="JÃ¡ enviados" value={sentChatCount} helper="Via CampaignRecipient" tone="success" />
+          <StatCard label="Ja enviados" value={sentChatCount} helper="Via CampaignRecipient" tone="success" />
           <StatCard label="Nunca enviados" value={neverSentCount} helper="Sem destinatÃ¡rio criado" />
           <StatCard label="Com falha" value={failedChatCount} helper="Falha em campanha" tone="warning" />
         </div>
@@ -857,7 +857,7 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
             <select className="input" defaultValue={String(limit)} name="limit">
               {PAGE_SIZE_OPTIONS.map((pageSize) => (
                 <option key={pageSize} value={pageSize}>
-                  {pageSize} por pÃ¡gina
+                  {pageSize} por pagina
                 </option>
               ))}
             </select>
@@ -869,15 +869,15 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
 
         {withoutMessageCount > 0 ? (
           <div className="message">
-            Alguns contatos sem mensagem sÃ£o ordenados pela Ãºltima atualizaÃ§Ã£o disponÃ­vel porque o
-            modo rÃ¡pido nÃ£o salva histÃ³rico pesado.
+            Alguns contatos sem mensagem sao ordenados pela ultima atualizacao disponÃ­vel porque o
+            modo rÃ¡pido nao salva historico pesado.
           </div>
         ) : null}
 
         {chats.length === 0 ? (
           <div className="empty-state">
             <strong>Nenhum contato encontrado.</strong>
-            <span>Altere filtros, sincronize o catÃ¡logo ou inicie uma conversa por telefone.</span>
+            <span>Altere filtros, sincronize o catalogo ou inicie uma conversa por telefone.</span>
           </div>
         ) : (
           <CatalogSelectionClient items={items} />
@@ -901,18 +901,18 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
               </span>
             )}
             <span className="muted">
-              PÃ¡gina {page} de {totalPages}
+              Pagina {page} de {totalPages}
             </span>
             {page < totalPages ? (
               <Link
                 className="button secondary"
                 href={buildHref({ type, query, labelId, sendStatus, sort, page: page + 1, limit })}
               >
-                PrÃ³xima
+                Proxima
               </Link>
             ) : (
               <span className="button secondary" style={{ opacity: 0.55 }}>
-                PrÃ³xima
+                Proxima
               </span>
             )}
           </div>
@@ -921,4 +921,5 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
     </AppShell>
   );
 }
+
 

@@ -1,4 +1,4 @@
-import Link from "next/link";
+﻿import Link from "next/link";
 import type { ReactNode } from "react";
 
 type ButtonLinkProps = {
@@ -16,3 +16,4 @@ export function ButtonLink({ href, children, variant = "primary" }: ButtonLinkPr
     </Link>
   );
 }
+

@@ -190,7 +190,7 @@ export function LabelsClient() {
                 </Link>
                 {label.lastCampaign ? (
                   <Link className="button secondary" href={`/envios?campaign=${label.lastCampaign.id}`}>
-                    Ver histÃ³rico
+                    Ver historico
                   </Link>
                 ) : (
                   <Link className="button secondary" href="/envios">
@@ -205,4 +205,5 @@ export function LabelsClient() {
     </section>
   );
 }
+
 

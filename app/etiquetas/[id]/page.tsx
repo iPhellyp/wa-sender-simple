@@ -1,4 +1,4 @@
-import { AppShell } from "@/app/components/AppShell";
+﻿import { AppShell } from "@/app/components/AppShell";
 import { LabelDetailClient } from "./LabelDetailClient";
 
 type LabelDetailPageProps = {
@@ -16,3 +16,4 @@ export default async function LabelDetailPage({ params }: LabelDetailPageProps) 
     </AppShell>
   );
 }
+

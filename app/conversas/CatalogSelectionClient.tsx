@@ -139,10 +139,10 @@ export function CatalogSelectionClient({ items }: { items: CatalogConversationIt
                 </span>
                 {item.isLid ? <span className="badge warning">@lid</span> : null}
                 <span className="future-tag">
-                  ordenado por {item.sortSource === "message" ? "mensagem" : "atualizaÃ§Ã£o"}
+                  ordenado por {item.sortSource === "message" ? "mensagem" : "atualizacao"}
                 </span>
                 {item.lastDirection ? <span>{item.lastDirection}</span> : null}
-                {item.unreadCount > 0 ? <span>{item.unreadCount} nÃ£o lidas</span> : null}
+                {item.unreadCount > 0 ? <span>{item.unreadCount} nao lidas</span> : null}
               </span>
               <span className={item.preview ? "conversation-preview" : "conversation-preview empty"}>
                 {item.preview || "Contato nas conversas"}
@@ -176,4 +176,5 @@ export function CatalogSelectionClient({ items }: { items: CatalogConversationIt
     </div>
   );
 }
+
 

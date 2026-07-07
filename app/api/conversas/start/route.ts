@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+﻿import { NextRequest, NextResponse } from "next/server";
 import { ensureChatForJid } from "@/src/lib/baileys/sync";
 import { normalizeBrazilPhone, toWhatsappJid } from "@/src/lib/phone/normalize";
 
@@ -33,3 +33,4 @@ export async function POST(request: NextRequest) {
     );
   }
 }
+

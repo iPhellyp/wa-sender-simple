@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+﻿import { NextRequest, NextResponse } from "next/server";
 import { enqueueManualMessage } from "@/src/lib/queue/campaign-queue";
 import { prisma } from "@/src/lib/prisma/client";
 import { shouldIgnoreJidForX1Only } from "@/src/lib/whatsapp/jid";
@@ -67,3 +67,4 @@ export async function POST(
     message: "Mensagem enviada para fila"
   });
 }
+

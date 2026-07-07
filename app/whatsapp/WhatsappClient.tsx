@@ -143,26 +143,26 @@ export function WhatsappClient() {
               <span className={`status-dot ${statusTone}`} aria-hidden="true" />
               <StatusBadge tone={statusTone}>{status}</StatusBadge>
               {isTransientReconnect ? (
-                <StatusBadge tone="info">reconectando com sessÃ£o atual</StatusBadge>
+                <StatusBadge tone="info">reconectando com sessao atual</StatusBadge>
               ) : null}
             </div>
 
             <div className="meta-list">
               <div className="meta-row">
                 <span>Telefone conectado</span>
-                <span>{session?.connectedPhone ?? "NÃ£o conectado"}</span>
+                <span>{session?.connectedPhone ?? "Nao conectado"}</span>
               </div>
               <div className="meta-row">
-                <span>Ãšltima atualizaÃ§Ã£o</span>
+                <span>Ultima atualizacao</span>
                 <span>{formatDateTime(session?.updatedAt)}</span>
               </div>
               <div className="meta-row">
-                <span>Ãšltima mensagem salva</span>
+                <span>Ultima mensagem salva</span>
                 <span>{formatDateTime(session?.latestMessageAt)}</span>
               </div>
               <div className="meta-row">
                 <span>QR disponÃ­vel</span>
-                <span>{session?.hasQrCode ? "Sim" : "NÃ£o"}</span>
+                <span>{session?.hasQrCode ? "Sim" : "Nao"}</span>
               </div>
             </div>
 
@@ -193,7 +193,7 @@ export function WhatsappClient() {
           actions={<ButtonLink href="/conversas">Abrir conversas</ButtonLink>}
         >
           <div className="message">
-            Grupos, broadcasts e newsletters sÃ£o ignorados para reduzir carga. Contatos individuais
+            Grupos, broadcasts e newsletters sao ignorados para reduzir carga. Contatos individuais
             @lid e @s.whatsapp.net continuam elegiveis para contatos, etiquetas e campanhas.
           </div>
         </SectionCard>
@@ -218,7 +218,7 @@ export function WhatsappClient() {
 
       {isTransientReconnect ? (
         <div className="message">
-          Reconectando com a sessÃ£o atual. NÃ£o Ã© necessÃ¡rio resetar nem ler QR agora.
+          Reconectando com a sessao atual. Nao Ã© necessÃ¡rio resetar nem ler QR agora.
         </div>
       ) : session?.status === "connecting" ? (
         <div className="message">Aguardando QR Code. Isso pode levar alguns segundos.</div>
@@ -231,7 +231,7 @@ export function WhatsappClient() {
       {session?.status === "qr" && session.qrCode ? (
         <SectionCard
           title="Leitura do QR Code"
-          description="Escaneie com o WhatsApp do aparelho responsÃ¡vel pela instÃ¢ncia."
+          description="Escaneie com o WhatsApp do aparelho responsÃ¡vel pela instancia."
         >
           <div className="qr-card">
             <img className="qr" src={session.qrCode} alt="QR Code do WhatsApp" />
@@ -263,11 +263,12 @@ export function WhatsappClient() {
             type="button"
             onClick={() => void postAction("/api/whatsapp/reset-session")}
           >
-            Resetar sessÃ£o
+            Resetar sessao
           </button>
         </div>
       </SectionCard>
     </section>
   );
 }
+
 

@@ -1,4 +1,4 @@
-import { CampaignRecipientStatus } from "@prisma/client";
+﻿import { CampaignRecipientStatus } from "@prisma/client";
 import { NextResponse } from "next/server";
 import { prisma } from "@/src/lib/prisma/client";
 
@@ -180,3 +180,4 @@ export async function GET() {
     })
   });
 }
+

@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+﻿import { NextRequest, NextResponse } from "next/server";
 import {
   ABSOLUTE_MAX_RECIPIENTS,
   buildLabelAudience,
@@ -55,3 +55,4 @@ export async function GET(
 
   return NextResponse.json(audience);
 }
+

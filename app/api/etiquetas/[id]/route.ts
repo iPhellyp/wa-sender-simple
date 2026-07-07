@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+﻿import { NextRequest, NextResponse } from "next/server";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/src/lib/prisma/client";
 import { getWhatsappDisplayName } from "@/src/lib/whatsapp/display-name";
@@ -194,3 +194,4 @@ export async function GET(
     })
   });
 }
+

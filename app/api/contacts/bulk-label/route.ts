@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+﻿import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "crypto";
 import { prisma } from "@/src/lib/prisma/client";
 import { enqueueApplyWhatsappLabels } from "@/src/lib/queue/campaign-queue";
@@ -70,3 +70,4 @@ export async function PATCH(request: NextRequest) {
         : "Etiqueta local aplicada; nenhum contato correspondente foi encontrado no WhatsApp."
   });
 }
+

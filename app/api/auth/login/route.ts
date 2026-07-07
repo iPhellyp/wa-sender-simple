@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+﻿import { NextRequest, NextResponse } from "next/server";
 import {
   ADMIN_SESSION_COOKIE,
   createAdminSessionToken,
@@ -40,3 +40,4 @@ export async function POST(request: NextRequest) {
 
   return response;
 }
+

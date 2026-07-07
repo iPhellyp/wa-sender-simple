@@ -1,4 +1,4 @@
-import Link from "next/link";
+﻿import Link from "next/link";
 import type { ReactNode } from "react";
 import { NavLink } from "./NavLink";
 import { PageHeader } from "./ui/PageHeader";
@@ -19,7 +19,7 @@ export function AppShell({ title, subtitle, children, actions }: AppShellProps) 
             <span className="brand-mark">WA</span>
             <span>
               <strong>WA Sender Simple</strong>
-              <small>Operação WhatsApp</small>
+              <small>Operacao WhatsApp</small>
             </span>
           </Link>
           <nav className="nav" aria-label="Principal">
@@ -45,3 +45,4 @@ export function AppShell({ title, subtitle, children, actions }: AppShellProps) 
     </div>
   );
 }
+

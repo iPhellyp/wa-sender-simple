@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+﻿import type { ReactNode } from "react";
 import type { StatusTone } from "./StatusBadge";
 
 type StatCardProps = {
@@ -17,3 +17,4 @@ export function StatCard({ label, value, helper, tone = "neutral" }: StatCardPro
     </article>
   );
 }
+

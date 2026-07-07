@@ -1,4 +1,4 @@
-type LoginPageProps = {
+﻿type LoginPageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 };
 
@@ -39,3 +39,4 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
     </main>
   );
 }
+

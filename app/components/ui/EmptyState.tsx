@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+﻿import type { ReactNode } from "react";
 
 type EmptyStateProps = {
   title: string;
@@ -15,3 +15,4 @@ export function EmptyState({ title, description, actions }: EmptyStateProps) {
     </div>
   );
 }
+

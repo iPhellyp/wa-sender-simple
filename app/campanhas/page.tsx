@@ -1,4 +1,4 @@
-import { AppShell } from "@/app/components/AppShell";
+﻿import { AppShell } from "@/app/components/AppShell";
 import { prisma } from "@/src/lib/prisma/client";
 import { CampaignsClient } from "./CampaignsClient";
 
@@ -122,3 +122,4 @@ export default async function CampaignsPage({ searchParams }: CampaignsPageProps
     </AppShell>
   );
 }
+

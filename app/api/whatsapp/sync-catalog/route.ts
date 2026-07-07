@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+﻿import { NextResponse } from "next/server";
 import { enqueueWhatsappCatalogSync } from "@/src/lib/queue/campaign-queue";
 import { getWhatsappStatusPayload } from "@/src/lib/baileys/client";
 
@@ -31,3 +31,4 @@ export async function POST() {
       "Resync de catalogo/app-state enviado. Aguarde 1 a 3 minutos e recarregue conversas/etiquetas."
   });
 }
+

@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+﻿import { NextRequest, NextResponse } from "next/server";
 import { ADMIN_SESSION_COOKIE, getRequestBaseUrl } from "@/src/lib/auth/session";
 
 export const runtime = "nodejs";
@@ -18,3 +18,4 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   return logout(request);
 }
+

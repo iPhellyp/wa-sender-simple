@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+﻿import type { ReactNode } from "react";
 
 type PageHeaderProps = {
   title: string;
@@ -17,3 +17,4 @@ export function PageHeader({ title, subtitle, actions }: PageHeaderProps) {
     </div>
   );
 }
+

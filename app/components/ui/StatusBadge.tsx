@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+﻿import type { ReactNode } from "react";
 
 export type StatusTone = "success" | "warning" | "danger" | "info" | "neutral";
 
@@ -30,3 +30,4 @@ export function statusToneFromValue(status: string | null | undefined): StatusTo
 
   return "neutral";
 }
+

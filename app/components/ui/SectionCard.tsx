@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+﻿import type { ReactNode } from "react";
 
 type SectionCardProps = {
   title?: string;
@@ -30,3 +30,4 @@ export function SectionCard({
     </section>
   );
 }
+

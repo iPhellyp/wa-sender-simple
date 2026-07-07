@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+﻿import { NextResponse } from "next/server";
 import { prisma } from "@/src/lib/prisma/client";
 
 export const runtime = "nodejs";
@@ -48,3 +48,4 @@ export async function GET(
 
   return NextResponse.json({ campaign });
 }
+

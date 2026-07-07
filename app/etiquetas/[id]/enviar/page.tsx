@@ -1,4 +1,4 @@
-import { AppShell } from "@/app/components/AppShell";
+﻿import { AppShell } from "@/app/components/AppShell";
 import { LabelSendClient } from "./LabelSendClient";
 
 type LabelSendPageProps = {
@@ -16,3 +16,4 @@ export default async function LabelSendPage({ params }: LabelSendPageProps) {
     </AppShell>
   );
 }
+

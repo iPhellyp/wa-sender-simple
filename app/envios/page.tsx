@@ -1,4 +1,4 @@
-import { AppShell } from "@/app/components/AppShell";
+﻿import { AppShell } from "@/app/components/AppShell";
 import { EnviosClient } from "./EnviosClient";
 
 type EnviosPageProps = {
@@ -18,3 +18,4 @@ export default async function EnviosPage({ searchParams }: EnviosPageProps) {
     </AppShell>
   );
 }
+

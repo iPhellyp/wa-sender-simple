@@ -1,4 +1,4 @@
-import { AppShell } from "@/app/components/AppShell";
+﻿import { AppShell } from "@/app/components/AppShell";
 import { LabelsClient } from "./LabelsClient";
 
 export default function LabelsPage() {
@@ -11,3 +11,4 @@ export default function LabelsPage() {
     </AppShell>
   );
 }
+

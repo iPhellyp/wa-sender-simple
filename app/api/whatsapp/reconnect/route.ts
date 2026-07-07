@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+﻿import { NextResponse } from "next/server";
 import {
   getWhatsappStatusPayload,
   markWhatsappConnecting,
@@ -43,3 +43,4 @@ export async function POST() {
     );
   }
 }
+

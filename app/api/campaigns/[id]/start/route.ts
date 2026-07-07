@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+﻿import { NextResponse } from "next/server";
 import { CampaignStatus } from "@prisma/client";
 import { prisma } from "@/src/lib/prisma/client";
 import { schedulePendingRecipients } from "@/src/lib/campaigns/schedule";
@@ -48,3 +48,4 @@ export async function POST(
 
   return NextResponse.json({ ok: true });
 }
+

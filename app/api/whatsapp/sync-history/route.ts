@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+﻿import { NextResponse } from "next/server";
 import { getWhatsappStatusPayload } from "@/src/lib/baileys/client";
 import { enqueueWhatsappHistorySync } from "@/src/lib/queue/campaign-queue";
 
@@ -35,3 +35,4 @@ export async function POST() {
     );
   }
 }
+

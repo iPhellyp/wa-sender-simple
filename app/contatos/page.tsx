@@ -1,4 +1,4 @@
-import { AppShell } from "@/app/components/AppShell";
+﻿import { AppShell } from "@/app/components/AppShell";
 import { ContactsClient } from "./ContactsClient";
 
 export default function ContactsPage() {
@@ -8,3 +8,4 @@ export default function ContactsPage() {
     </AppShell>
   );
 }
+

@@ -46,7 +46,7 @@ const MAX_QUERY_CHAT_IDS = 80;
 
 function sendStatusLabel(status: string) {
   if (status === "sent") {
-    return "jÃ¡ enviado";
+    return "ja enviado";
   }
 
   if (status === "failed") {
@@ -174,7 +174,7 @@ export function LabelDetailClient({ labelId }: { labelId: string }) {
             <strong>{data?.metrics.groupCount ?? 0}</strong>
           </article>
           <article className="metric-card">
-            <span>JÃ¡ enviados</span>
+            <span>Ja enviados</span>
             <strong>{data?.metrics.sentCount ?? 0}</strong>
           </article>
           <article className="metric-card">
@@ -237,7 +237,7 @@ export function LabelDetailClient({ labelId }: { labelId: string }) {
       {conversations.length === 0 ? (
         <div className="empty-state">
           <strong>Nenhum contato nesta etiqueta.</strong>
-          <span>Altere a busca ou force resync de catÃ¡logo/app-state na pÃ¡gina WhatsApp.</span>
+          <span>Altere a busca ou force resync de catalogo/app-state na pagina WhatsApp.</span>
         </div>
       ) : (
         <div className="conversation-grid">
@@ -307,7 +307,7 @@ export function LabelDetailClient({ labelId }: { labelId: string }) {
             Anterior
           </button>
           <span className="muted">
-            PÃ¡gina {data?.pagination.page ?? 1} de {data?.pagination.totalPages ?? 1}
+            Pagina {data?.pagination.page ?? 1} de {data?.pagination.totalPages ?? 1}
           </span>
           <button
             className="button secondary"
@@ -318,11 +318,12 @@ export function LabelDetailClient({ labelId }: { labelId: string }) {
               setPage((current) => current + 1);
             }}
           >
-            PrÃ³xima
+            Proxima
           </button>
         </div>
       </div>
     </section>
   );
 }
+
 

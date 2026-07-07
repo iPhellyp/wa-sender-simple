@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+﻿import { NextRequest, NextResponse } from "next/server";
 import type { Prisma } from "@prisma/client";
 import { getSendStatsByContact } from "@/src/lib/server/contact-stats";
 import { prisma } from "@/src/lib/prisma/client";
@@ -133,3 +133,4 @@ export async function GET(request: NextRequest) {
     origins: origins.map((origin) => origin.source)
   });
 }
+
