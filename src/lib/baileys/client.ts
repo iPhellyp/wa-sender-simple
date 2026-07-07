@@ -35,6 +35,7 @@ let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let qrTimeoutTimer: ReturnType<typeof setTimeout> | null = null;
 let manualDisconnectRequested = false;
 let hasReceivedQr = false;
+let pairingPending = false;
 let connectRetryCount = 0;
 let socketGeneration = 0;
 let status515RestartCount = 0;
@@ -149,6 +150,10 @@ function resetCleanPairingProfiles(options: { log?: boolean } = {}) {
   if (options.log) {
     console.log("[baileys] qr safe profiles reset");
   }
+}
+
+function isPairingPendingSession(session: { status: WhatsappStatus; connectedPhone?: string | null }) {
+  return session.status === WhatsappStatus.qr && !session.connectedPhone;
 }
 
 function isTerminalSessionStatusCode(statusCode: number | undefined) {
@@ -395,11 +400,15 @@ async function handleIncomingMessages(event: BaileysEventMap["messages.upsert"])
   }
 }
 
-async function createSocket(options: { sessionFileCount: number }) {
+async function createSocket(options: {
+  sessionFileCount: number;
+  shouldUseQrSafeMode: boolean;
+  hasStoredPairingQr: boolean;
+}) {
   invalidateSocketHandlers();
   const localGeneration = socketGeneration;
-  const { sessionFileCount } = options;
-  const isCleanPairing = sessionFileCount === 0;
+  const { sessionFileCount, shouldUseQrSafeMode, hasStoredPairingQr } = options;
+  const isCleanPairing = shouldUseQrSafeMode;
 
   if (socket) {
     socket.end(new Error("Replacing existing socket"));
@@ -414,12 +423,22 @@ async function createSocket(options: { sessionFileCount: number }) {
 
   await mkdir(sessionDir, { recursive: true });
   await assertSessionDirWritable(sessionDir);
-  await saveWhatsappSession({
-    status: WhatsappStatus.connecting,
-    qrCode: null,
-    connectedPhone: null,
-    lastError: null
-  });
+  if (shouldUseQrSafeMode && hasStoredPairingQr) {
+    pairingPending = true;
+    await saveWhatsappSession({
+      status: WhatsappStatus.qr,
+      connectedPhone: null,
+      lastError: null
+    });
+    console.log("[baileys] preserving qr while restarting pairing socket");
+  } else {
+    await saveWhatsappSession({
+      status: WhatsappStatus.connecting,
+      qrCode: null,
+      connectedPhone: null,
+      lastError: null
+    });
+  }
 
   const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
   const cleanPairingProfile = isCleanPairing ? getCleanPairingProfile() : null;
@@ -535,14 +554,17 @@ async function createSocket(options: { sessionFileCount: number }) {
       if (update.qr) {
         clearQrTimeoutTimer();
         hasReceivedQr = true;
+        pairingPending = true;
         resetReconnectCounters();
         const qrCode = await QRCode.toDataURL(update.qr);
         await saveWhatsappSession({
           status: WhatsappStatus.qr,
           qrCode,
+          connectedPhone: null,
           lastError: null
         });
         console.log("[baileys] qr received and saved");
+        console.log("[baileys] pairing pending after qr saved");
         if (cleanPairingProfile) {
           console.log("[baileys] qr generated with safe profile", {
             profileId: cleanPairingProfile.id
@@ -556,6 +578,7 @@ async function createSocket(options: { sessionFileCount: number }) {
         resetCleanPairingProfiles();
         lastTerminalErrorAt = null;
         manualDisconnectRequested = false;
+        pairingPending = false;
         const connectedPhone = sock.user?.id?.split(":")[0]?.split("@")[0] ?? null;
         await saveWhatsappSession({
           status: WhatsappStatus.connected,
@@ -586,7 +609,26 @@ async function createSocket(options: { sessionFileCount: number }) {
           return;
         }
 
+        const currentSession = await getWhatsappStatus();
+        const isDbPairingPendingNow = isPairingPendingSession(currentSession);
+        const hasStoredPairingQr = Boolean(currentSession.qrCode) && !currentSession.connectedPhone;
+        const shouldPreserveQrDuringPairing =
+          (pairingPending || isDbPairingPendingNow) && hasStoredPairingQr;
+        const shouldRestartInPairingMode =
+          isCleanPairing || pairingPending || isDbPairingPendingNow;
+
         if (statusCode === 428 || isTerminalSessionStatusCode(statusCode)) {
+          if (statusCode === 428 && shouldPreserveQrDuringPairing) {
+            clearReconnectTimer();
+            await saveWhatsappSession({
+              status: WhatsappStatus.qr,
+              connectedPhone: null,
+              lastError: "Conexao fechou durante o pareamento; QR preservado."
+            });
+            console.log("[baileys] 428 during pairing; preserving qr state");
+            return;
+          }
+
           clearReconnectTimer();
           lastTerminalErrorAt = Date.now();
           const isCleanPairing428 = statusCode === 428 && isCleanPairing;
@@ -624,17 +666,37 @@ async function createSocket(options: { sessionFileCount: number }) {
             const nextProfile = advanceCleanPairingProfile();
 
             if (nextProfile) {
-              await saveWhatsappSession({
-                status: WhatsappStatus.disconnected,
-                qrCode: null,
-                connectedPhone: null,
-                lastError
-              });
+              if (shouldPreserveQrDuringPairing) {
+                await saveWhatsappSession({
+                  status: WhatsappStatus.qr,
+                  connectedPhone: null,
+                  lastError: null
+                });
+              } else {
+                await saveWhatsappSession({
+                  status: WhatsappStatus.disconnected,
+                  qrCode: null,
+                  connectedPhone: null,
+                  lastError
+                });
+              }
               console.warn("[baileys] status 405 before qr; trying next qr safe profile", {
                 currentProfile: cleanPairingProfile?.id ?? null,
                 nextProfile: nextProfile.id
               });
               scheduleReconnect(1500, "status-405-next-qr-safe-profile");
+              return;
+            }
+
+            if (shouldPreserveQrDuringPairing) {
+              clearReconnectTimer();
+              resetCleanPairingProfiles();
+              await saveWhatsappSession({
+                status: WhatsappStatus.qr,
+                connectedPhone: null,
+                lastError: "Perfil seguro falhou apos QR salvo; QR preservado."
+              });
+              console.warn("[baileys] status 405 during pairing; preserving qr state");
               return;
             }
 
@@ -680,6 +742,37 @@ async function createSocket(options: { sessionFileCount: number }) {
 
         if (statusCode === DisconnectReason.restartRequired) {
           const lastError = lastDisconnectError ?? "Restart necessario";
+
+          if (shouldRestartInPairingMode) {
+            pairingPending = true;
+
+            if (status515RestartCount < 1) {
+              status515RestartCount += 1;
+              await saveWhatsappSession({
+                status: shouldPreserveQrDuringPairing
+                  ? WhatsappStatus.qr
+                  : WhatsappStatus.connecting,
+                connectedPhone: null,
+                lastError: null
+              });
+              console.warn("[baileys] status 515 during pairing; restarting in qr safe mode", {
+                retry: status515RestartCount
+              });
+              scheduleReconnect(3000, "status-515-pairing-restart");
+              return;
+            }
+
+            if (shouldPreserveQrDuringPairing) {
+              clearReconnectTimer();
+              await saveWhatsappSession({
+                status: WhatsappStatus.qr,
+                connectedPhone: null,
+                lastError: "Restart repetido durante pareamento; QR preservado."
+              });
+              console.log("[baileys] repeated 515 during pairing; preserving qr state");
+              return;
+            }
+          }
 
           if (status515RestartCount < 1) {
             status515RestartCount += 1;
@@ -785,11 +878,29 @@ export async function startBaileysConnection(options: { resetRetry?: boolean } =
 
   const sessionFileCount = await countSessionFiles();
   console.log("[baileys] session files before start", { files: sessionFileCount });
+  const dbSession = await getWhatsappStatus();
+  const hasConnectedPhone = Boolean(dbSession.connectedPhone);
+  const isDbPairingPending = isPairingPendingSession(dbSession);
+  const hasStoredPairingQr = Boolean(dbSession.qrCode) && !dbSession.connectedPhone;
+  const isCleanSession = sessionFileCount === 0;
+  const shouldUseQrSafeMode = isCleanSession || isDbPairingPending || pairingPending;
+
+  console.log("[baileys] pairing mode decision", {
+    sessionFiles: sessionFileCount,
+    dbStatus: dbSession.status,
+    hasConnectedPhone,
+    hasStoredPairingQr,
+    isCleanSession,
+    isDbPairingPending,
+    internalPairingPending: pairingPending,
+    shouldUseQrSafeMode
+  });
 
   if (
     lastResetSucceededAt !== null &&
     Date.now() - lastResetSucceededAt < 60_000 &&
-    sessionFileCount > 0
+    sessionFileCount > 0 &&
+    !shouldUseQrSafeMode
   ) {
     const lastError = "Sessao nao foi limpa corretamente apos reset.";
     console.log("[baileys] start failed with terminal status", { lastError, sessionFileCount });
@@ -808,11 +919,24 @@ export async function startBaileysConnection(options: { resetRetry?: boolean } =
 
   manualDisconnectRequested = false;
 
-  startPromise = createSocket({ sessionFileCount })
+  startPromise = createSocket({
+    sessionFileCount,
+    shouldUseQrSafeMode,
+    hasStoredPairingQr
+  })
     .catch(async (error) => {
       startPromise = null;
       const lastError = sanitizeErrorMessage(error) || "Erro ao iniciar Baileys";
       console.log("[baileys] start failed with terminal status", { lastError });
+      if (shouldUseQrSafeMode && hasStoredPairingQr) {
+        await saveWhatsappSession({
+          status: WhatsappStatus.qr,
+          connectedPhone: null,
+          lastError: "Falha ao reiniciar pareamento; QR preservado."
+        });
+        throw error;
+      }
+
       await saveWhatsappSession({
         status: WhatsappStatus.error,
         qrCode: null,
@@ -895,6 +1019,7 @@ export async function disconnectBaileys() {
   clearReconnectTimer();
   clearQrTimeoutTimer();
   resetReconnectCounters();
+  pairingPending = false;
   startPromise = null;
 
   if (socket) {
@@ -928,6 +1053,7 @@ export async function resetBaileysSession() {
     resetReconnectCounters();
     resetCleanPairingProfiles({ log: true });
     hasReceivedQr = false;
+    pairingPending = false;
     startPromise = null;
     lastTerminalErrorAt = null;
 
