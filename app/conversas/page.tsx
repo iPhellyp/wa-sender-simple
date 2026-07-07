@@ -23,7 +23,13 @@ type ConversationsPageProps = {
   }>;
 };
 
-type ConversationFilter = "recent" | "all" | "contacts" | "groups" | "empty";
+type ConversationFilter =
+  | "all"
+  | "contacts"
+  | "groups"
+  | "with-message"
+  | "without-message"
+  | "labeled";
 const DEFAULT_FILTER: ConversationFilter = "contacts";
 const DEFAULT_PAGE_SIZE = 50;
 const PAGE_SIZE_OPTIONS = [30, 50] as const;
@@ -61,11 +67,12 @@ const dateFormatter = new Intl.DateTimeFormat("pt-BR", {
 });
 
 const filterLabels: Record<ConversationFilter, string> = {
-  recent: "Recentes",
-  all: "Todas",
+  all: "Todos",
   contacts: "Contatos",
   groups: "Grupos",
-  empty: "Sem mensagem"
+  "with-message": "Com mensagem",
+  "without-message": "Sem mensagem",
+  labeled: "Etiquetados"
 };
 
 function formatDate(value: Date | null) {
@@ -98,12 +105,21 @@ function getFilterValue(searchParams: Awaited<ConversationsPageProps["searchPara
   const rawType = searchParams?.type;
   const type = Array.isArray(rawType) ? rawType[0] : rawType;
 
+  if (type === "recent") {
+    return "with-message";
+  }
+
+  if (type === "empty") {
+    return "without-message";
+  }
+
   if (
     type === "all" ||
     type === "contacts" ||
     type === "groups" ||
-    type === "empty" ||
-    type === "recent"
+    type === "with-message" ||
+    type === "without-message" ||
+    type === "labeled"
   ) {
     return type;
   }
@@ -244,18 +260,28 @@ function getScopeWhere(type: ConversationFilter): Prisma.WhatsappChatWhereInput 
     };
   }
 
-  if (type === "empty") {
+  if (type === "without-message") {
     return {
-      messages: {
-        none: {}
+      lastMessageAt: null
+    };
+  }
+
+  if (type === "with-message") {
+    return {
+      lastMessageAt: {
+        not: null
       }
     };
   }
 
-  if (type === "recent") {
+  if (type === "labeled") {
     return {
-      messages: {
-        some: {}
+      labels: {
+        some: {
+          label: {
+            deleted: false
+          }
+        }
       }
     };
   }
@@ -352,10 +378,11 @@ async function findMatchingContactJids(query: string) {
 
 function getFilterCount(type: ConversationFilter, counts: {
   totalChats: number;
-  withMessagesCount: number;
+  withMessageCount: number;
   individualCount: number;
   groupCount: number;
-  emptyCount: number;
+  withoutMessageCount: number;
+  labeledCount: number;
 }) {
   if (type === "all") {
     return counts.totalChats;
@@ -369,11 +396,15 @@ function getFilterCount(type: ConversationFilter, counts: {
     return counts.groupCount;
   }
 
-  if (type === "empty") {
-    return counts.emptyCount;
+  if (type === "without-message") {
+    return counts.withoutMessageCount;
   }
 
-  return counts.withMessagesCount;
+  if (type === "labeled") {
+    return counts.labeledCount;
+  }
+
+  return counts.withMessageCount;
 }
 
 export default async function ConversationsPage({ searchParams }: ConversationsPageProps) {
@@ -396,10 +427,11 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
     chats,
     filteredCount,
     totalChats,
-    withMessagesCount,
+    withMessageCount,
     individualCount,
     groupCount,
-    emptyCount,
+    withoutMessageCount,
+    labeledCount,
     whatsappSession,
     latestStoredMessage
   ] =
@@ -426,10 +458,10 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
           }
         },
         {
-          isGroup: "desc"
+          updatedAt: "desc"
         },
         {
-          updatedAt: "desc"
+          id: "desc"
         }
       ],
       skip,
@@ -442,8 +474,8 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
     prisma.whatsappChat.count(),
     prisma.whatsappChat.count({
       where: {
-        messages: {
-          some: {}
+        lastMessageAt: {
+          not: null
         }
       }
     }),
@@ -459,8 +491,17 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
     }),
     prisma.whatsappChat.count({
       where: {
-        messages: {
-          none: {}
+        lastMessageAt: null
+      }
+    }),
+    prisma.whatsappChat.count({
+      where: {
+        labels: {
+          some: {
+            label: {
+              deleted: false
+            }
+          }
         }
       }
     }),
@@ -504,10 +545,11 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
   );
   const counts = {
     totalChats,
-    withMessagesCount,
+    withMessageCount,
     individualCount,
     groupCount,
-    emptyCount
+    withoutMessageCount,
+    labeledCount
   };
   const totalPages = Math.max(1, Math.ceil(filteredCount / limit));
   const firstVisible = chats.length === 0 ? 0 : skip + 1;
@@ -520,11 +562,11 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
         <div className="inbox-hero">
           <div>
             <p className="page-subtitle">
-              {withMessagesCount} conversas com mensagens, {emptyCount} contatos sem mensagem salva
+              {filteredCount} conversas neste filtro, {withoutMessageCount} sem mensagem salva ainda
             </p>
             <p className="muted">
-              Alguns contatos podem aparecer sem nome ou mensagem porque o WhatsApp nem sempre envia todo
-              o historico para sessao ja pareada. Use a verificacao manual sem resetar a conexao atual.
+              Modo Catalogo: a lista vem de WhatsappChat e tambem mostra conversas sem lastMessageAt.
+              Grupos ficam ocultos por padrao no filtro Contatos.
             </p>
             <p className="muted">
               Conexao: {whatsappSession.status}. Ultimo evento salvo: {formatDate(latestSyncAt) ?? "nenhum"}.
@@ -544,7 +586,7 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
           </article>
           <article className="metric-card">
             <span>Com mensagem</span>
-            <strong>{withMessagesCount}</strong>
+            <strong>{withMessageCount}</strong>
           </article>
           <article className="metric-card">
             <span>Contatos individuais</span>
@@ -556,7 +598,11 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
           </article>
           <article className="metric-card">
             <span>Sem mensagem</span>
-            <strong>{emptyCount}</strong>
+            <strong>{withoutMessageCount}</strong>
+          </article>
+          <article className="metric-card">
+            <span>Etiquetados</span>
+            <strong>{labeledCount}</strong>
           </article>
         </div>
 
@@ -614,10 +660,10 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
           </form>
         </div>
 
-        {type !== "empty" && emptyCount > 0 ? (
+        {type !== "without-message" && withoutMessageCount > 0 ? (
           <div className="empty-hint">
-            A inbox abre em Contatos para evitar ruido de grupos. Use Todas ou Grupos quando quiser
-            revisar conversas coletivas.
+            A inbox abre em Contatos para evitar ruido de grupos. Use Todos, Grupos ou Sem mensagem
+            para revisar todo o catalogo salvo.
           </div>
         ) : null}
 
@@ -638,8 +684,10 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
                 isGroup: chat.isGroup
               });
               const hasMessages = chat._count.messages > 0 || Boolean(chat.lastMessageText);
-              const date = formatDate(chat.lastMessageAt);
+              const date = formatDate(chat.lastMessageAt ?? chat.updatedAt);
               const lastDirection = getLastDirection(chat);
+              const activeLabels = chat.labels.filter((item) => !item.label.deleted);
+              const isLid = chat.jid.endsWith("@lid");
 
               return (
                 <Link className="inbox-conversation-card" href={`/conversas/${chat.id}`} key={chat.id}>
@@ -658,14 +706,12 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
                       <span className={`badge ${chat.isGroup ? "info" : "success"}`}>
                         {chat.isGroup ? "grupo" : "contato"}
                       </span>
-                      {chat.labels
-                        .filter((item) => !item.label.deleted)
-                        .slice(0, 3)
-                        .map((item) => (
-                          <span className="label-badge" key={item.id}>
-                            {item.label.name}
-                          </span>
-                        ))}
+                      {isLid ? <span className="badge warning">@lid</span> : null}
+                      {activeLabels.length > 0 ? (
+                        <span className="label-badge">
+                          {activeLabels.length} etiqueta{activeLabels.length === 1 ? "" : "s"}
+                        </span>
+                      ) : null}
                       {!hasMessages ? <span className="badge warning">sem mensagem</span> : null}
                       {lastDirection ? <span>{lastDirection}</span> : null}
                       {chat._count.messages > 0 ? <span>{chat._count.messages} mensagens</span> : null}
@@ -675,7 +721,7 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
                       <span className="conversation-preview">{chat.lastMessageText ?? "Mensagem salva"}</span>
                     ) : (
                       <span className="conversation-preview empty">
-                        Contato sincronizado, sem mensagens salvas
+                        Sem mensagens salvas ainda
                       </span>
                     )}
                   </span>

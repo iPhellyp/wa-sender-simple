@@ -235,7 +235,7 @@ export function ConversationMessagesClient({
           <div className="empty-state">Carregando mensagens...</div>
         ) : messages.length === 0 ? (
           <div className="empty-state">
-            <strong>Nenhuma mensagem visivel salva para esta conversa.</strong>
+            <strong>Conversa encontrada no WhatsApp, mas sem mensagens salvas ainda.</strong>
             <span>Eventos tecnicos do WhatsApp ficam ocultos por padrao.</span>
           </div>
         ) : (
