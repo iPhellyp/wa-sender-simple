@@ -83,6 +83,34 @@ session files = 0 + 428 antes de QR = problema de config/version/browser, nao de
 
 Se isso acontecer, nao clique repetidamente em `Reconectar`. Registre os logs, confirme que o sistema nao entrou em loop e ajuste config/version/browser em hotfix separado.
 
+## QR Safe Mode com fallback
+
+Status 405 antes do QR pode indicar incompatibilidade de browser/version no pareamento limpo.
+
+Quando isso acontece com `session files = 0`, o sistema tenta poucos perfis seguros de QR. Cada perfil muda apenas browser/version e mantem:
+
+- `syncFullHistory: false`;
+- `shouldSyncHistoryMessage: () => false`;
+- sem `fetchMessageHistory`;
+- sem `getMessage` antes do QR.
+
+Perfis podem usar versao local default ou latest version, mas latest so e usado no perfil especifico. O sistema nunca repete o mesmo perfil indefinidamente.
+
+Logs esperados durante fallback:
+
+```text
+[baileys] qr safe profile selected { profileId: "...", versionMode: "...", browserLabel: "..." }
+[baileys] status 405 before qr; trying next qr safe profile { currentProfile: "...", nextProfile: "..." }
+```
+
+Se todos os perfis retornarem 405, o sistema para, nao entra em loop e salva `lastError` claro:
+
+```text
+[baileys] clean pairing failed; all qr safe profiles exhausted
+```
+
+A proxima tentativa manual apos `Resetar sessao` comeca novamente no primeiro perfil.
+
 ## Logs uteis
 
 Logs de fila:
@@ -100,6 +128,7 @@ Logs de Baileys:
 [baileys] session files before start { files: 0 }
 [baileys] creating socket
 [baileys] session dir: /app/data/baileys-session
+[baileys] qr safe profile selected
 [baileys] latest version skipped for qr safe mode
 [baileys] qr safe mode enabled { sessionFiles: 0, syncFullHistory: false, versionSource: "local-default" }
 [baileys] normal socket mode enabled

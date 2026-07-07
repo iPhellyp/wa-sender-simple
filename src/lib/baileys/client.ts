@@ -42,6 +42,7 @@ let generalReconnectCount = 0;
 let lastTerminalErrorAt: number | null = null;
 let lastResetSucceededAt: number | null = null;
 let resetInProgress = false;
+let cleanPairingProfileIndex = 0;
 
 const MAX_GENERAL_RECONNECT_ATTEMPTS = 5;
 const TERMINAL_COOLDOWN_MS = 15_000;
@@ -49,6 +50,42 @@ const TERMINAL_SESSION_MESSAGE =
   "Conexao WhatsApp encerrada ou removida no celular. Use Resetar sessao e Reconectar para gerar novo QR.";
 const QR_SAFE_428_MESSAGE =
   "Falha ao gerar QR mesmo em modo seguro. Tente Resetar sessao e Reconectar novamente.";
+const QR_SAFE_405_EXHAUSTED_MESSAGE =
+  "Falha ao gerar QR: todos os perfis seguros de pareamento retornaram erro 405. Tente novamente em alguns minutos ou revise a versao/browser Baileys.";
+
+type CleanPairingProfile = {
+  id: string;
+  browserLabel: string;
+  versionMode: "local-default" | "latest";
+  browser: () => ReturnType<typeof Browsers.ubuntu>;
+};
+
+const CLEAN_PAIRING_PROFILES: CleanPairingProfile[] = [
+  {
+    id: "ubuntu-chrome-local-default",
+    browserLabel: "ubuntu-chrome",
+    versionMode: "local-default",
+    browser: () => Browsers.ubuntu("Chrome")
+  },
+  {
+    id: "ubuntu-chrome-latest",
+    browserLabel: "ubuntu-chrome",
+    versionMode: "latest",
+    browser: () => Browsers.ubuntu("Chrome")
+  },
+  {
+    id: "macos-desktop-local-default",
+    browserLabel: "macos-desktop",
+    versionMode: "local-default",
+    browser: () => Browsers.macOS("Desktop")
+  },
+  {
+    id: "macos-desktop-latest",
+    browserLabel: "macos-desktop",
+    versionMode: "latest",
+    browser: () => Browsers.macOS("Desktop")
+  }
+];
 
 export class BaileysStartSkippedError extends Error {
   constructor(message: string) {
@@ -91,6 +128,27 @@ function resetReconnectCounters() {
   connectRetryCount = 0;
   status515RestartCount = 0;
   generalReconnectCount = 0;
+}
+
+function getCleanPairingProfile() {
+  return CLEAN_PAIRING_PROFILES[cleanPairingProfileIndex] ?? CLEAN_PAIRING_PROFILES[0];
+}
+
+function advanceCleanPairingProfile() {
+  if (cleanPairingProfileIndex + 1 >= CLEAN_PAIRING_PROFILES.length) {
+    return null;
+  }
+
+  cleanPairingProfileIndex += 1;
+  return getCleanPairingProfile();
+}
+
+function resetCleanPairingProfiles(options: { log?: boolean } = {}) {
+  cleanPairingProfileIndex = 0;
+
+  if (options.log) {
+    console.log("[baileys] qr safe profiles reset");
+  }
 }
 
 function isTerminalSessionStatusCode(statusCode: number | undefined) {
@@ -364,14 +422,36 @@ async function createSocket(options: { sessionFileCount: number }) {
   });
 
   const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
-  let normalModeSocketOptions: Partial<Parameters<typeof makeWASocket>[0]> = {};
+  const cleanPairingProfile = isCleanPairing ? getCleanPairingProfile() : null;
+  let socketModeOptions: Partial<Parameters<typeof makeWASocket>[0]> = {};
 
-  if (isCleanPairing) {
-    console.log("[baileys] latest version skipped for qr safe mode");
+  if (cleanPairingProfile) {
+    console.log("[baileys] qr safe profile selected", {
+      profileId: cleanPairingProfile.id,
+      versionMode: cleanPairingProfile.versionMode,
+      browserLabel: cleanPairingProfile.browserLabel
+    });
+
+    if (cleanPairingProfile.versionMode === "latest") {
+      const { version, isLatest, error: versionError } = await fetchLatestBaileysVersion();
+
+      console.log("[baileys] fetched latest version", {
+        version: version.join("."),
+        isLatest,
+        error: versionError ? sanitizeErrorMessage(versionError) : null
+      });
+
+      socketModeOptions = {
+        version
+      };
+    } else {
+      console.log("[baileys] latest version skipped for qr safe mode");
+    }
+
     console.log("[baileys] qr safe mode enabled", {
       sessionFiles: sessionFileCount,
       syncFullHistory: false,
-      versionSource: "local-default"
+      versionSource: cleanPairingProfile.versionMode
     });
   } else {
     console.log("[baileys] normal socket mode enabled", { sessionFiles: sessionFileCount });
@@ -383,7 +463,7 @@ async function createSocket(options: { sessionFileCount: number }) {
       error: versionError ? sanitizeErrorMessage(versionError) : null
     });
 
-    normalModeSocketOptions = {
+    socketModeOptions = {
       version,
       getMessage: getStoredMessage
     };
@@ -393,11 +473,11 @@ async function createSocket(options: { sessionFileCount: number }) {
     auth: state,
     printQRInTerminal: false,
     logger: P({ level: process.env.BAILEYS_LOG_LEVEL ?? "silent" }),
-    browser: isCleanPairing ? Browsers.ubuntu("Chrome") : Browsers.macOS("Desktop"),
+    browser: cleanPairingProfile ? cleanPairingProfile.browser() : Browsers.macOS("Desktop"),
     syncFullHistory: !isCleanPairing,
     shouldSyncHistoryMessage: () => !isCleanPairing,
     markOnlineOnConnect: false,
-    ...normalModeSocketOptions
+    ...socketModeOptions
   });
 
   socket = sock;
@@ -463,11 +543,17 @@ async function createSocket(options: { sessionFileCount: number }) {
           lastError: null
         });
         console.log("[baileys] qr received and saved");
+        if (cleanPairingProfile) {
+          console.log("[baileys] qr generated with safe profile", {
+            profileId: cleanPairingProfile.id
+          });
+        }
       }
 
       if (update.connection === "open") {
         clearQrTimeoutTimer();
         resetReconnectCounters();
+        resetCleanPairingProfiles();
         lastTerminalErrorAt = null;
         manualDisconnectRequested = false;
         const connectedPhone = sock.user?.id?.split(":")[0]?.split("@")[0] ?? null;
@@ -532,6 +618,38 @@ async function createSocket(options: { sessionFileCount: number }) {
         if (isStatus405BeforeQr) {
           const lastError =
             "Baileys fechou com status 405 antes de gerar QR. Possivel sessao corrompida ou versao WhatsApp Web incompativel.";
+
+          if (isCleanPairing) {
+            invalidateSocketHandlers();
+            const nextProfile = advanceCleanPairingProfile();
+
+            if (nextProfile) {
+              await saveWhatsappSession({
+                status: WhatsappStatus.disconnected,
+                qrCode: null,
+                connectedPhone: null,
+                lastError
+              });
+              console.warn("[baileys] status 405 before qr; trying next qr safe profile", {
+                currentProfile: cleanPairingProfile?.id ?? null,
+                nextProfile: nextProfile.id
+              });
+              scheduleReconnect(1500, "status-405-next-qr-safe-profile");
+              return;
+            }
+
+            clearReconnectTimer();
+            lastTerminalErrorAt = Date.now();
+            resetCleanPairingProfiles();
+            await saveWhatsappSession({
+              status: WhatsappStatus.error,
+              qrCode: null,
+              connectedPhone: null,
+              lastError: QR_SAFE_405_EXHAUSTED_MESSAGE
+            });
+            console.log("[baileys] clean pairing failed; all qr safe profiles exhausted");
+            return;
+          }
 
           if (connectRetryCount < 1) {
             connectRetryCount += 1;
@@ -808,6 +926,7 @@ export async function resetBaileysSession() {
     clearReconnectTimer();
     clearQrTimeoutTimer();
     resetReconnectCounters();
+    resetCleanPairingProfiles({ log: true });
     hasReceivedQr = false;
     startPromise = null;
     lastTerminalErrorAt = null;
