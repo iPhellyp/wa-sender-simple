@@ -8,6 +8,12 @@ Dominio final:
 https://wa2.supereducarbrasil.com.br
 ```
 
+## Documentacao relacionada
+
+- Inbox e historico: `docs/INBOX_HISTORY_SYNC_AND_UI.md`
+- QR e conexao: `docs/WHATSAPP_QR_DEBUG.md`
+- Etiquetas e envio por etiqueta: `docs/WHATSAPP_LABELS_AND_BULK_SEND.md`
+
 ## Variaveis
 
 Crie `.env` na VPS a partir de `.env.example` e troque as senhas:

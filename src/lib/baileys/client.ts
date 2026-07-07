@@ -25,6 +25,7 @@ import {
   syncMessagingHistorySet,
   normalizeChatJid
 } from "./sync";
+import { syncLabelsAssociation, syncLabelsEdit } from "./labels-sync";
 
 const SESSION_ID = "default";
 
@@ -38,10 +39,25 @@ let connectRetryCount = 0;
 let socketGeneration = 0;
 let status515RestartCount = 0;
 let generalReconnectCount = 0;
+let lastTerminalErrorAt: number | null = null;
+let lastResetSucceededAt: number | null = null;
+let resetInProgress = false;
 
 const MAX_GENERAL_RECONNECT_ATTEMPTS = 5;
+const TERMINAL_COOLDOWN_MS = 15_000;
 const TERMINAL_SESSION_MESSAGE =
   "Conexao WhatsApp encerrada ou removida no celular. Use Resetar sessao e Reconectar para gerar novo QR.";
+
+export class BaileysStartSkippedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "BaileysStartSkippedError";
+  }
+}
+
+export function isBaileysStartSkippedError(error: unknown) {
+  return error instanceof BaileysStartSkippedError;
+}
 
 function getSessionDir() {
   return process.env.BAILEYS_SESSION_DIR ?? "./data/baileys-session";
@@ -201,6 +217,30 @@ function getSafeSessionDir() {
   return sessionDir;
 }
 
+async function countSessionFiles() {
+  const sessionDir = getSafeSessionDir();
+  await mkdir(sessionDir, { recursive: true });
+
+  async function countInDir(dir: string): Promise<number> {
+    const entries = await readdir(dir, { withFileTypes: true });
+    let count = 0;
+
+    for (const entry of entries) {
+      const fullPath = join(dir, entry.name);
+
+      if (entry.isDirectory()) {
+        count += await countInDir(fullPath);
+      } else if (entry.isFile()) {
+        count += 1;
+      }
+    }
+
+    return count;
+  }
+
+  return countInDir(sessionDir);
+}
+
 async function clearSessionDir() {
   const sessionDir = getSafeSessionDir();
   await mkdir(sessionDir, { recursive: true });
@@ -213,10 +253,12 @@ async function clearSessionDir() {
       force: true
     });
   }
+
+  await mkdir(sessionDir, { recursive: true });
 }
 
 function scheduleReconnect(delayMs: number, reason: string) {
-  if (manualDisconnectRequested) {
+  if (manualDisconnectRequested || resetInProgress) {
     console.log("[baileys] reconnect skipped after manual disconnect", { reason });
     return;
   }
@@ -224,7 +266,13 @@ function scheduleReconnect(delayMs: number, reason: string) {
   clearReconnectTimer();
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
-    void startBaileysConnection({ resetRetry: false });
+    void startBaileysConnection({ resetRetry: false }).catch((error) => {
+      if (!isBaileysStartSkippedError(error)) {
+        console.warn("[baileys] scheduled reconnect failed", {
+          error: sanitizeErrorMessage(error)
+        });
+      }
+    });
   }, delayMs);
 }
 
@@ -358,6 +406,12 @@ async function createSocket() {
   sock.ev.on("messages.update", (event) => {
     void syncMessagesUpdate(event).catch((error) => logAsyncHandlerError("sync messages update", error));
   });
+  sock.ev.on("labels.edit", (label) => {
+    void syncLabelsEdit(label).catch((error) => logAsyncHandlerError("sync labels edit", error));
+  });
+  sock.ev.on("labels.association", (event) => {
+    void syncLabelsAssociation(event).catch((error) => logAsyncHandlerError("sync labels association", error));
+  });
 
   sock.ev.on("connection.update", (update) => {
     void (async () => {
@@ -394,6 +448,8 @@ async function createSocket() {
       if (update.connection === "open") {
         clearQrTimeoutTimer();
         resetReconnectCounters();
+        lastTerminalErrorAt = null;
+        manualDisconnectRequested = false;
         const connectedPhone = sock.user?.id?.split(":")[0]?.split("@")[0] ?? null;
         await saveWhatsappSession({
           status: WhatsappStatus.connected,
@@ -426,6 +482,7 @@ async function createSocket() {
 
         if (statusCode === 428 || isTerminalSessionStatusCode(statusCode)) {
           clearReconnectTimer();
+          lastTerminalErrorAt = Date.now();
           const lastError =
             statusCode === 428
               ? TERMINAL_SESSION_MESSAGE
@@ -467,6 +524,7 @@ async function createSocket() {
           }
 
           clearReconnectTimer();
+          lastTerminalErrorAt = Date.now();
           await saveWhatsappSession({
             status: WhatsappStatus.error,
             qrCode: null,
@@ -496,6 +554,7 @@ async function createSocket() {
           }
 
           clearReconnectTimer();
+          lastTerminalErrorAt = Date.now();
           await saveWhatsappSession({
             status: WhatsappStatus.error,
             qrCode: null,
@@ -521,11 +580,12 @@ async function createSocket() {
 
         if (generalReconnectCount >= MAX_GENERAL_RECONNECT_ATTEMPTS) {
           clearReconnectTimer();
+          lastTerminalErrorAt = Date.now();
           await saveWhatsappSession({
             status: WhatsappStatus.error,
             qrCode: null,
             connectedPhone: null,
-            lastError: `Limite de reconnect atingido (${MAX_GENERAL_RECONNECT_ATTEMPTS}). Use Resetar sessao e Reconectar.`
+            lastError: "Limite de reconexao automatico atingido."
           });
           console.log("[baileys] connection terminated; reconnect disabled", {
             statusCode,
@@ -535,7 +595,8 @@ async function createSocket() {
         }
 
         generalReconnectCount += 1;
-        scheduleReconnect(5000, "connection-close");
+        const backoffMs = Math.min(5000 * generalReconnectCount, 30_000);
+        scheduleReconnect(backoffMs, "connection-close");
       }
     })();
   });
@@ -545,18 +606,28 @@ async function createSocket() {
 
 export async function startBaileysConnection(options: { resetRetry?: boolean } = {}) {
   const shouldResetRetry = options.resetRetry ?? true;
-  manualDisconnectRequested = false;
 
-  if (shouldResetRetry) {
-    resetReconnectCounters();
+  if (resetInProgress) {
+    console.log("[baileys] start skipped; reset in progress");
+    throw new BaileysStartSkippedError("Reset em andamento");
+  }
+
+  if (
+    lastTerminalErrorAt !== null &&
+    Date.now() - lastTerminalErrorAt < TERMINAL_COOLDOWN_MS
+  ) {
+    console.log("[baileys] start skipped; terminal failure cooldown active");
+    throw new BaileysStartSkippedError(
+      "Aguarde alguns segundos apos erro terminal antes de reconectar"
+    );
   }
 
   if (reconnectTimer) {
-    console.log("[baileys] start skipped; reconnect pending");
+    console.log("[baileys] start skipped; reconnect already scheduled");
     if (startPromise) {
       return startPromise;
     }
-    throw new Error("Aguardando reconnect agendado");
+    throw new BaileysStartSkippedError("Reconnect ja agendado");
   }
 
   if (startPromise) {
@@ -568,6 +639,31 @@ export async function startBaileysConnection(options: { resetRetry?: boolean } =
     console.log("[baileys] start skipped; socket already exists");
     return socket;
   }
+
+  const sessionFileCount = await countSessionFiles();
+  console.log("[baileys] session files before start", { files: sessionFileCount });
+
+  if (
+    lastResetSucceededAt !== null &&
+    Date.now() - lastResetSucceededAt < 60_000 &&
+    sessionFileCount > 0
+  ) {
+    const lastError = "Sessao nao foi limpa corretamente apos reset.";
+    console.log("[baileys] start failed with terminal status", { lastError, sessionFileCount });
+    await saveWhatsappSession({
+      status: WhatsappStatus.error,
+      qrCode: null,
+      connectedPhone: null,
+      lastError
+    });
+    throw new Error(lastError);
+  }
+
+  if (shouldResetRetry) {
+    resetReconnectCounters();
+  }
+
+  manualDisconnectRequested = false;
 
   startPromise = createSocket()
     .catch(async (error) => {
@@ -660,6 +756,7 @@ export async function disconnectBaileys() {
 
   if (socket) {
     await socket.logout().catch(() => undefined);
+    socket.end(new Error("Disconnect manual"));
     socket = null;
   }
 
@@ -672,27 +769,55 @@ export async function disconnectBaileys() {
 }
 
 export async function resetBaileysSession() {
-  manualDisconnectRequested = true;
-  invalidateSocketHandlers();
-  clearReconnectTimer();
-  clearQrTimeoutTimer();
-  resetReconnectCounters();
-  hasReceivedQr = false;
-  startPromise = null;
-
-  if (socket) {
-    socket.end(new Error("Reset manual da sessao Baileys"));
-    socket = null;
+  if (resetInProgress) {
+    console.log("[baileys] reset skipped; already in progress");
+    return;
   }
 
-  await clearSessionDir();
+  resetInProgress = true;
+  console.log("[baileys] reset session requested");
 
-  await saveWhatsappSession({
-    status: WhatsappStatus.disconnected,
-    qrCode: null,
-    connectedPhone: null,
-    lastError: null
-  });
+  try {
+    manualDisconnectRequested = true;
+    invalidateSocketHandlers();
+    clearReconnectTimer();
+    clearQrTimeoutTimer();
+    resetReconnectCounters();
+    hasReceivedQr = false;
+    startPromise = null;
+    lastTerminalErrorAt = null;
+
+    if (socket) {
+      socket.end(new Error("Reset manual da sessao Baileys"));
+      socket = null;
+    }
+
+    await clearSessionDir();
+    const remainingFiles = await countSessionFiles();
+    console.log("[baileys] session files removed", { remainingFiles });
+
+    if (remainingFiles > 0) {
+      lastResetSucceededAt = null;
+      await saveWhatsappSession({
+        status: WhatsappStatus.error,
+        qrCode: null,
+        connectedPhone: null,
+        lastError: "Falha ao limpar arquivos da sessao Baileys."
+      });
+      return;
+    }
+
+    lastResetSucceededAt = Date.now();
+    await saveWhatsappSession({
+      status: WhatsappStatus.disconnected,
+      qrCode: null,
+      connectedPhone: null,
+      lastError: null
+    });
+  } finally {
+    resetInProgress = false;
+    manualDisconnectRequested = false;
+  }
 }
 
 export async function requestWhatsappHistorySync() {
@@ -720,7 +845,7 @@ export async function requestWhatsappHistorySync() {
     ok: true,
     mode: "event-driven" as const,
     message:
-      "O historico depende dos eventos enviados pelo WhatsApp. Para tentar historico completo, resetar e parear novamente."
+      "O WhatsApp envia historico por eventos proprios. Para tentar historico completo, use Resetar sessao e Reconectar."
   };
 }
 

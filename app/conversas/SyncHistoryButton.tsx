@@ -12,7 +12,7 @@ type SyncHistoryResponse = {
 const SUCCESS_MESSAGE =
   "Verificacao solicitada. O WhatsApp so envia historico completo durante eventos proprios ou novo pareamento.";
 const GUIDANCE_MESSAGE =
-  "Se conversas antigas nao aparecerem, va em WhatsApp > Resetar sessao > Reconectar e escaneie o QR novamente.";
+  "Para tentar historico completo antigo, use WhatsApp > Resetar sessao > Reconectar.";
 
 export function SyncHistoryButton() {
   const [busy, setBusy] = useState(false);

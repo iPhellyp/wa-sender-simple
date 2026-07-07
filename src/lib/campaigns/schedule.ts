@@ -46,14 +46,19 @@ export async function schedulePendingRecipients(campaignId: string, delayMs = 0)
   }
 
   for (const recipient of campaign.recipients) {
-    if (recipient.contact.optedOut) {
+    const optedOut = recipient.contact
+      ? recipient.contact.optedOut
+      : false;
+
+    if (optedOut) {
       await prisma.campaignRecipient.update({
         where: {
           id: recipient.id
         },
         data: {
           status: CampaignRecipientStatus.canceled,
-          error: "Contato opt-out"
+          error: "Contato opt-out",
+          skippedReason: "opt_out"
         }
       });
       continue;

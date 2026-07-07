@@ -15,6 +15,7 @@ import {
 import { getRedisConnectionOptions } from "../lib/queue/connection";
 import {
   disconnectBaileys,
+  isBaileysStartSkippedError,
   markWhatsappError,
   requestWhatsappHistorySync,
   resetBaileysSession,
@@ -25,6 +26,8 @@ import {
 import { isGroupJid, normalizeChatJid } from "../lib/baileys/sync";
 import { completeCampaignIfDone } from "../lib/campaigns/progress";
 import { schedulePendingRecipients } from "../lib/campaigns/schedule";
+import { hashMessage } from "../lib/labels/audience";
+import { normalizeBrazilPhone } from "../lib/phone/normalize";
 
 const PAUSED_RECHECK_DELAY_MS = 60 * 1000;
 const finalRecipientStatuses: CampaignRecipientStatus[] = [
@@ -53,6 +56,42 @@ function buildManualFallbackMessageId(jobId: string | undefined) {
   return `manual-${jobId ?? Date.now()}`
     .replace(/[^a-zA-Z0-9_-]/g, "-")
     .slice(0, 180);
+}
+
+function getPhoneFromRecipientJid(jid: string | null | undefined) {
+  if (!jid?.endsWith("@s.whatsapp.net")) {
+    return null;
+  }
+
+  const phone = jid.split("@")[0]?.split(":")[0] ?? "";
+  const normalized = normalizeBrazilPhone(phone);
+  return normalized.ok ? normalized.normalized : null;
+}
+
+async function isRecipientOptedOut(recipient: {
+  jid: string | null;
+  contact: { optedOut: boolean; phoneNormalized: string } | null;
+}) {
+  if (recipient.contact?.optedOut) {
+    return true;
+  }
+
+  const phone = getPhoneFromRecipientJid(recipient.jid);
+
+  if (!phone) {
+    return false;
+  }
+
+  const contact = await prisma.contact.findUnique({
+    where: {
+      phoneNormalized: phone
+    },
+    select: {
+      optedOut: true
+    }
+  });
+
+  return Boolean(contact?.optedOut);
 }
 
 async function processManualMessage(
@@ -195,14 +234,15 @@ async function processRecipient(recipientId: string) {
     return;
   }
 
-  if (recipient.contact.optedOut) {
+  if (await isRecipientOptedOut(recipient)) {
     await prisma.campaignRecipient.update({
       where: {
         id: recipient.id
       },
       data: {
         status: CampaignRecipientStatus.canceled,
-        error: "Contato opt-out"
+        error: "Contato opt-out",
+        skippedReason: "opt_out"
       }
     });
     await schedulePendingRecipients(recipient.campaignId);
@@ -215,12 +255,24 @@ async function processRecipient(recipientId: string) {
     },
     data: {
       status: CampaignRecipientStatus.sending,
-      error: null
+      error: null,
+      attemptCount: {
+        increment: 1
+      },
+      lastAttemptAt: new Date()
     }
   });
 
   try {
-    await sendWhatsappMessage(recipient.contact.phoneNormalized, recipient.messageFinal);
+    if (recipient.jid) {
+      await sendWhatsappMessageToJid(recipient.jid, recipient.messageFinal);
+    } else if (recipient.contact) {
+      await sendWhatsappMessage(recipient.contact.phoneNormalized, recipient.messageFinal);
+    } else {
+      throw new Error("Destinatario sem jid ou contato");
+    }
+
+    const sentAt = new Date();
 
     await prisma.campaignRecipient.update({
       where: {
@@ -228,19 +280,65 @@ async function processRecipient(recipientId: string) {
       },
       data: {
         status: CampaignRecipientStatus.sent,
-        sentAt: new Date(),
+        sentAt,
         error: null
       }
     });
+
+    if (recipient.jid) {
+      await prisma.sendLog.create({
+        data: {
+          jid: recipient.jid,
+          chatId: recipient.chatId,
+          campaignId: recipient.campaignId,
+          recipientId: recipient.id,
+          messageHash: hashMessage(recipient.messageFinal),
+          status: "sent",
+          sentAt
+        }
+      });
+    }
+
+    console.log("[worker] campaign message sent", {
+      recipientId: recipient.id,
+      campaignId: recipient.campaignId,
+      jidType: recipient.jid
+        ? isGroupJid(recipient.jid)
+          ? "group"
+          : "contact"
+        : "contact-sheet"
+    });
   } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : "Erro ao enviar mensagem";
+
     await prisma.campaignRecipient.update({
       where: {
         id: recipient.id
       },
       data: {
         status: CampaignRecipientStatus.failed,
-        error: error instanceof Error ? error.message : "Erro ao enviar mensagem"
+        error: errorMessage
       }
+    });
+
+    if (recipient.jid) {
+      await prisma.sendLog.create({
+        data: {
+          jid: recipient.jid,
+          chatId: recipient.chatId,
+          campaignId: recipient.campaignId,
+          recipientId: recipient.id,
+          messageHash: hashMessage(recipient.messageFinal),
+          status: "failed",
+          error: errorMessage
+        }
+      }).catch(() => undefined);
+    }
+
+    console.error("[worker] campaign message failed", {
+      recipientId: recipient.id,
+      campaignId: recipient.campaignId,
+      error: errorMessage
     });
   }
 
@@ -264,8 +362,15 @@ const worker = new Worker(
 
       try {
         await startBaileysConnection();
-        console.log("[worker] connect-whatsapp started");
+        console.log("[worker] connect-whatsapp finished");
       } catch (error) {
+        if (isBaileysStartSkippedError(error)) {
+          console.log("[worker] connect-whatsapp skipped", {
+            reason: getErrorMessage(error)
+          });
+          return;
+        }
+
         const lastError = `Falha ao iniciar conexao WhatsApp no worker: ${getErrorMessage(error)}`;
         console.error("[worker] connect-whatsapp failed", { error: lastError });
         await markWhatsappError(lastError);

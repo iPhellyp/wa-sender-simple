@@ -61,6 +61,17 @@ export default async function ConversationDetailPage({ params }: ConversationDet
       id
     },
     include: {
+      labels: {
+        include: {
+          label: {
+            select: {
+              id: true,
+              name: true,
+              deleted: true
+            }
+          }
+        }
+      },
       messages: {
         orderBy: [
           {
@@ -136,6 +147,17 @@ export default async function ConversationDetailPage({ params }: ConversationDet
               </span>
             </div>
             <div className="chat-subtitle">{getWhatsappIdentityLabel(chat.jid)}</div>
+            {chat.labels.filter((item) => !item.label.deleted).length > 0 ? (
+              <div className="label-badges">
+                {chat.labels
+                  .filter((item) => !item.label.deleted)
+                  .map((item) => (
+                    <Link className="label-badge" href={`/etiquetas/${item.label.id}`} key={item.id}>
+                      {item.label.name}
+                    </Link>
+                  ))}
+              </div>
+            ) : null}
             <div className="chat-meta-row">
               <span>Ultima mensagem: {formatDate(chat.lastMessageAt)}</span>
               <span>{messages.length} exibidas</span>

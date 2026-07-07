@@ -16,6 +16,7 @@ type ConversationsPageProps = {
   searchParams?: Promise<{
     q?: string | string[];
     type?: string | string[];
+    labelId?: string | string[];
   }>;
 };
 
@@ -25,6 +26,18 @@ const chatListInclude = {
   _count: {
     select: {
       messages: true
+    }
+  },
+  labels: {
+    include: {
+      label: {
+        select: {
+          id: true,
+          name: true,
+          color: true,
+          deleted: true
+        }
+      }
     }
   }
 } satisfies Prisma.WhatsappChatInclude;
@@ -96,7 +109,17 @@ function getFilterValue(searchParams: Awaited<ConversationsPageProps["searchPara
   return "recent";
 }
 
-function buildFilterHref(type: ConversationFilter, query: string) {
+function getLabelIdValue(searchParams: Awaited<ConversationsPageProps["searchParams"]>) {
+  const rawLabelId = searchParams?.labelId;
+  const labelId = Array.isArray(rawLabelId) ? rawLabelId[0] : rawLabelId;
+  return labelId?.trim() ?? "";
+}
+
+function buildFilterHref(
+  type: ConversationFilter,
+  query: string,
+  labelId: string
+) {
   const params = new URLSearchParams();
 
   if (type !== "recent") {
@@ -105,6 +128,10 @@ function buildFilterHref(type: ConversationFilter, query: string) {
 
   if (query) {
     params.set("q", query);
+  }
+
+  if (labelId) {
+    params.set("labelId", labelId);
   }
 
   const suffix = params.toString();
@@ -129,6 +156,23 @@ function andWhere(...items: Prisma.WhatsappChatWhereInput[]): Prisma.WhatsappCha
   return {
     AND: filters
   } satisfies Prisma.WhatsappChatWhereInput;
+}
+
+function getLabelWhere(labelId: string): Prisma.WhatsappChatWhereInput {
+  if (!labelId) {
+    return {};
+  }
+
+  return {
+    labels: {
+      some: {
+        labelId,
+        label: {
+          deleted: false
+        }
+      }
+    }
+  };
 }
 
 function getScopeWhere(type: ConversationFilter): Prisma.WhatsappChatWhereInput {
@@ -302,17 +346,28 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
   const resolvedSearchParams = await searchParams;
   const query = getSearchValue(resolvedSearchParams);
   const type = getFilterValue(resolvedSearchParams);
+  const labelId = getLabelIdValue(resolvedSearchParams);
   const matchedContactJids = await findMatchingContactJids(query);
-  const where = andWhere(getScopeWhere(type), getSearchWhere(query, matchedContactJids));
+  const where = andWhere(
+    getScopeWhere(type),
+    getSearchWhere(query, matchedContactJids),
+    getLabelWhere(labelId)
+  );
 
-  const [
-    chats,
-    totalChats,
-    withMessagesCount,
-    individualCount,
-    groupCount,
-    emptyCount
-  ] = await Promise.all([
+  const [labels, chats, totalChats, withMessagesCount, individualCount, groupCount, emptyCount] =
+    await Promise.all([
+    prisma.whatsappLabel.findMany({
+      where: {
+        deleted: false
+      },
+      orderBy: {
+        name: "asc"
+      },
+      select: {
+        id: true,
+        name: true
+      }
+    }),
     prisma.whatsappChat.findMany({
       where,
       orderBy: [
@@ -434,7 +489,7 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
             {(Object.keys(filterLabels) as ConversationFilter[]).map((filter) => (
               <Link
                 className={type === filter ? "active" : ""}
-                href={buildFilterHref(filter, query)}
+                href={buildFilterHref(filter, query, labelId)}
                 key={filter}
               >
                 {filterLabels[filter]}
@@ -452,6 +507,14 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
               placeholder="Buscar por nome, telefone, JID ou ultima mensagem"
               type="search"
             />
+            <select className="input" defaultValue={labelId} name="labelId">
+              <option value="">Todas etiquetas</option>
+              {labels.map((label) => (
+                <option key={label.id} value={label.id}>
+                  {label.name}
+                </option>
+              ))}
+            </select>
             <button className="button" type="submit">
               Buscar
             </button>
@@ -502,6 +565,14 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
                       <span className={`badge ${chat.isGroup ? "info" : "success"}`}>
                         {chat.isGroup ? "grupo" : "contato"}
                       </span>
+                      {chat.labels
+                        .filter((item) => !item.label.deleted)
+                        .slice(0, 3)
+                        .map((item) => (
+                          <span className="label-badge" key={item.id}>
+                            {item.label.name}
+                          </span>
+                        ))}
                       {!hasMessages ? <span className="badge warning">sem mensagem</span> : null}
                       {lastDirection ? <span>{lastDirection}</span> : null}
                       {chat._count.messages > 0 ? <span>{chat._count.messages} mensagens</span> : null}

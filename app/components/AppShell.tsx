@@ -17,6 +17,8 @@ export function AppShell({ title, children, actions }: AppShellProps) {
           <Link href="/dashboard">Dashboard</Link>
           <Link href="/whatsapp">WhatsApp</Link>
           <Link href="/conversas">Conversas</Link>
+          <Link href="/etiquetas">Etiquetas</Link>
+          <Link href="/envios">Envios</Link>
           <Link href="/contatos">Contatos</Link>
           <Link href="/campanhas">Campanhas</Link>
           <form action="/api/auth/logout" method="post">

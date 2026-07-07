@@ -72,6 +72,17 @@ Para gerar QR novo apos remover o dispositivo no celular:
 
 Nao clique repetidamente em `Verificar historico`. O botao apenas confirma status e orienta; nao forca historico antigo.
 
+## Jobs administrativos singleton
+
+Connect, reset, disconnect e sync-history usam `jobId` fixo no Redis/BullMQ:
+
+- `connect-whatsapp-singleton`
+- `reset-whatsapp-singleton`
+- `disconnect-whatsapp-singleton`
+- `sync-whatsapp-history-singleton`
+
+Isso impede rajada de jobs quando o usuario clica varias vezes. Reset remove jobs pendentes de connect/disconnect/sync antes de enfileirar.
+
 ## Quando usar reset/reconnect manual
 
 Use reconnect manual se o worker nao estiver conectado ou se nao houver eventos novos.
@@ -170,3 +181,4 @@ O filtro `Sem mensagem` concentra contatos sincronizados que ainda nao possuem m
 - Sem status persistido de job manual.
 - Historico completo depende do que o WhatsApp reenviar para a sessao.
 - `fetchLatestBaileysVersion` segue ativo porque a conexao esta estavel, mas a propria Baileys recomenda cautela com mudancas de versao.
+- Etiquetas e envio por etiqueta: ver `docs/WHATSAPP_LABELS_AND_BULK_SEND.md`.

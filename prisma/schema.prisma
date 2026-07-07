@@ -69,18 +69,19 @@ model WhatsappSession {
 }
 
 model WhatsappChat {
-  id              String            @id @default(cuid())
-  jid             String            @unique
+  id              String              @id @default(cuid())
+  jid             String              @unique
   name            String?
-  isGroup         Boolean           @default(false)
-  unreadCount     Int               @default(0)
+  isGroup         Boolean             @default(false)
+  unreadCount     Int                 @default(0)
   lastMessageAt   DateTime?
-  lastMessageText String?           @db.Text
+  lastMessageText String?             @db.Text
   lastInboundAt   DateTime?
   lastOutboundAt  DateTime?
-  createdAt       DateTime          @default(now())
-  updatedAt       DateTime          @updatedAt
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
   messages        WhatsappMessage[]
+  labels          WhatsappChatLabel[]
 
   @@index([lastMessageAt])
   @@index([isGroup])
@@ -100,18 +101,18 @@ model WhatsappContact {
 }
 
 model WhatsappMessage {
-  id          String        @id @default(cuid())
+  id          String       @id @default(cuid())
   chatId      String
   waMessageId String
   jid         String
-  fromMe      Boolean       @default(false)
+  fromMe      Boolean      @default(false)
   senderJid   String?
   timestamp   DateTime?
   messageType String?
-  text        String?       @db.Text
+  text        String?      @db.Text
   rawJson     Json?
-  createdAt   DateTime      @default(now())
-  chat        WhatsappChat  @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  createdAt   DateTime     @default(now())
+  chat        WhatsappChat @relation(fields: [chatId], references: [id], onDelete: Cascade)
 
   @@unique([jid, waMessageId])
   @@index([chatId, timestamp])
@@ -119,36 +120,109 @@ model WhatsappMessage {
   @@index([jid])
 }
 
+model WhatsappLabel {
+  id         String              @id @default(cuid())
+  waLabelId  String              @unique
+  name       String
+  color      String?
+  predefined Boolean             @default(false)
+  deleted    Boolean             @default(false)
+  rawJson    Json?
+  createdAt  DateTime            @default(now())
+  updatedAt  DateTime            @updatedAt
+  chats      WhatsappChatLabel[]
+  campaigns  Campaign[]
+
+  @@index([deleted])
+}
+
+model WhatsappChatLabel {
+  id        String        @id @default(cuid())
+  chatId    String
+  labelId   String
+  jid       String
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  chat      WhatsappChat  @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  label     WhatsappLabel @relation(fields: [labelId], references: [id], onDelete: Cascade)
+
+  @@unique([chatId, labelId])
+  @@index([jid])
+  @@index([labelId])
+}
+
 model Campaign {
-  id              String              @id @default(cuid())
-  name            String
-  defaultMessage  String?             @db.Text
-  intervalMinutes Int
-  status          CampaignStatus      @default(draft)
-  createdAt       DateTime            @default(now())
-  updatedAt       DateTime            @updatedAt
-  startedAt       DateTime?
-  completedAt     DateTime?
-  recipients      CampaignRecipient[]
+  id                     String              @id @default(cuid())
+  name                   String
+  defaultMessage         String?             @db.Text
+  intervalMinutes        Int
+  status                 CampaignStatus      @default(draft)
+  targetMode             String              @default("manual")
+  targetLabelId          String?
+  excludeGroups          Boolean             @default(true)
+  excludeAlreadySentDays Int?
+  dedupeKey              String?
+  maxRecipients          Int?
+  sendWindowStart        String?
+  sendWindowEnd          String?
+  createdAt              DateTime            @default(now())
+  updatedAt              DateTime            @updatedAt
+  startedAt              DateTime?
+  completedAt            DateTime?
+  recipients             CampaignRecipient[]
+  sendLogs               SendLog[]
+  targetLabel            WhatsappLabel?      @relation(fields: [targetLabelId], references: [id], onDelete: SetNull)
 
   @@index([status])
+  @@index([targetMode])
+  @@index([targetLabelId])
 }
 
 model CampaignRecipient {
   id           String                  @id @default(cuid())
   campaignId   String
-  contactId    String
+  contactId    String?
+  chatId       String?
+  jid          String?
   messageFinal String                  @db.Text
   status       CampaignRecipientStatus @default(pending)
+  dedupeKey    String?
+  skippedReason String?                @db.Text
+  attemptCount Int                     @default(0)
+  lastAttemptAt DateTime?
   scheduledAt  DateTime?
   sentAt       DateTime?
   error        String?                 @db.Text
   createdAt    DateTime                @default(now())
   updatedAt    DateTime                @updatedAt
   campaign     Campaign                @relation(fields: [campaignId], references: [id], onDelete: Cascade)
-  contact      Contact                 @relation(fields: [contactId], references: [id], onDelete: Restrict)
+  contact      Contact?                @relation(fields: [contactId], references: [id], onDelete: Restrict)
+  sendLogs     SendLog[]
 
   @@unique([campaignId, contactId])
+  @@unique([campaignId, jid])
   @@index([campaignId, status])
   @@index([contactId])
+  @@index([jid])
+  @@index([dedupeKey])
+}
+
+model SendLog {
+  id          String             @id @default(cuid())
+  jid         String
+  chatId      String?
+  campaignId  String?
+  recipientId String?
+  messageHash String?
+  status      String
+  error       String?            @db.Text
+  sentAt      DateTime?
+  createdAt   DateTime           @default(now())
+  campaign    Campaign?          @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  recipient   CampaignRecipient? @relation(fields: [recipientId], references: [id], onDelete: SetNull)
+
+  @@index([jid, sentAt])
+  @@index([campaignId])
+  @@index([recipientId])
+  @@index([messageHash])
 }
