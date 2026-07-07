@@ -3,6 +3,7 @@ import { CampaignRecipientStatus, CampaignStatus } from "@prisma/client";
 import { prisma } from "../lib/prisma/client";
 import {
   CAMPAIGN_QUEUE_NAME,
+  APPLY_WHATSAPP_LABELS_JOB,
   CONNECT_WHATSAPP_JOB,
   DISCONNECT_WHATSAPP_JOB,
   RESET_WHATSAPP_JOB,
@@ -11,6 +12,7 @@ import {
   SYNC_WHATSAPP_CATALOG_JOB,
   SYNC_WHATSAPP_HISTORY_JOB,
   enqueueRecipient,
+  type ApplyWhatsappLabelsJobData,
   type SendManualMessageJobData,
   type SyncWhatsappCatalogJobData
 } from "../lib/queue/campaign-queue";
@@ -22,6 +24,7 @@ import {
   requestWhatsappCatalogSync,
   requestWhatsappHistorySync,
   resetBaileysSession,
+  applyWhatsappLabelToJids,
   sendWhatsappMessage,
   sendWhatsappMessageToJid,
   startBaileysConnection
@@ -563,6 +566,37 @@ const worker = new Worker(
       console.log("[worker] sync-whatsapp-catalog finished", {
         ok: result.ok,
         mode: result.mode
+      });
+
+      return;
+    }
+
+    if (job.name === APPLY_WHATSAPP_LABELS_JOB) {
+      const data = job.data as Partial<ApplyWhatsappLabelsJobData>;
+      const jids = Array.isArray(data.jids) ? data.jids : [];
+      const waLabelId = String(data.waLabelId ?? "").trim();
+
+      console.log("[contacts-labels] apply requested", {
+        count: jids.length
+      });
+
+      if (!waLabelId || jids.length === 0) {
+        console.log("[contacts-labels] skipped no chat", {
+          count: jids.length
+        });
+        return;
+      }
+
+      const result = await applyWhatsappLabelToJids({
+        waLabelId,
+        jids
+      });
+
+      console.log("[contacts-labels] apply finished", {
+        ok: result.ok,
+        applied: result.applied,
+        skipped: result.skipped,
+        failed: result.failed
       });
 
       return;

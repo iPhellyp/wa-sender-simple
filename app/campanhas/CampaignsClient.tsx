@@ -91,7 +91,7 @@ function statusClass(status: string) {
 
 function audienceLabel(mode: AudienceMode) {
   if (mode === "label") return "Etiqueta";
-  if (mode === "catalog") return "Contatos selecionados do Catalogo X1";
+  if (mode === "catalog") return "Contatos selecionados do WhatsApp";
   return "Contatos importados";
 }
 
@@ -284,7 +284,7 @@ export function CampaignsClient({
       <div className="page-header">
         <div>
           <span className="eyebrow">Campanhas WhatsApp</span>
-          <h1>Crie envios por etiqueta, catalogo X1 ou contatos importados</h1>
+          <h1>Crie envios por etiqueta, contatos WhatsApp ou contatos importados</h1>
           <p>
             Fluxo simples: escolha o publico, revise a mensagem e crie a campanha em rascunho
             antes de iniciar.
@@ -390,7 +390,7 @@ export function CampaignsClient({
                   type="button"
                   onClick={() => setAudienceMode("catalog")}
                 >
-                  Catalogo X1
+                  Contatos WhatsApp
                 </button>
                 <button
                   className={`button ${audienceMode === "contacts" ? "" : "secondary"}`}
@@ -435,7 +435,7 @@ export function CampaignsClient({
               {audienceMode === "catalog" ? (
                 <ul className="list-plain">
                   {catalogChats.length === 0 ? (
-                    <li>Nenhum contato veio selecionado do Catalogo X1.</li>
+                    <li>Nenhum contato veio selecionado das conversas.</li>
                   ) : (
                     catalogChats.slice(0, 8).map((chat) => (
                       <li key={chat.id}>

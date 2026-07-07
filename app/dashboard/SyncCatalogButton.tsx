@@ -19,7 +19,7 @@ export function SyncCatalogButton() {
       const data = (await response.json()) as { message?: string; error?: string };
 
       if (!response.ok || data.error) {
-        throw new Error(data.error ?? "Falha ao sincronizar catalogo");
+        throw new Error(data.error ?? "Falha ao sincronizar contatos");
       }
 
       setMessage(data.message ?? "Resync enviado.");
@@ -33,7 +33,7 @@ export function SyncCatalogButton() {
   return (
     <div className="sync-inline">
       <button className="button" disabled={busy} type="button" onClick={() => void syncCatalog()}>
-        {busy ? "Enviando..." : "Sincronizar catálogo"}
+        {busy ? "Enviando..." : "Sincronizacao manual"}
       </button>
       {message ? <div className="message success">{message}</div> : null}
       {error ? <div className="message error">{error}</div> : null}

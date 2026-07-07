@@ -117,8 +117,8 @@ export function LabelsClient() {
   return (
     <section className="grid">
       <div className="message">
-        Segmentos vindos das etiquetas do WhatsApp. Grupos são contados como ignorados e os
-        contatos X1 continuam elegíveis para campanha.
+        Segmentos vindos das etiquetas do WhatsApp. Grupos sao contados como ignorados e os
+        contatos individuais continuam elegiveis para campanha.
       </div>
 
       <div className="inbox-metrics">
@@ -135,7 +135,7 @@ export function LabelsClient() {
           <strong>{metrics?.labeledChats ?? 0}</strong>
         </article>
         <article className="metric-card">
-          <span>Contatos X1 elegíveis</span>
+          <span>Contatos individuais</span>
           <strong>{metrics?.eligibleX1Contacts ?? 0}</strong>
         </article>
         <article className="metric-card">
@@ -147,7 +147,7 @@ export function LabelsClient() {
       {data?.labels.length === 0 ? (
         <div className="empty-state">
           <strong>Nenhuma etiqueta sincronizada ainda.</strong>
-          <span>Conecte o WhatsApp, force resync de catálogo/app-state e aguarde labels.</span>
+          <span>Conecte o WhatsApp e aguarde a sincronizacao automatica das etiquetas.</span>
         </div>
       ) : (
         <div className="label-segment-grid">
@@ -164,7 +164,7 @@ export function LabelsClient() {
               </div>
 
               <div className="row-meta">
-                <span>{label.contactCount} contatos X1</span>
+                <span>{label.contactCount} contatos individuais</span>
                 <span>{label.groupCount} grupos ignorados</span>
                 <span>{label.sendStats.sent} enviados</span>
                 {label.sendStats.failed > 0 ? <span>{label.sendStats.failed} falhas</span> : null}

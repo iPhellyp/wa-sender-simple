@@ -109,7 +109,7 @@ export default async function ConversationDetailPage({ params }: ConversationDet
             <div className="chat-subtitle">{getWhatsappIdentityLabel(chat.jid)}</div>
             {chat.isGroup ? (
               <div className="inline-note">
-                Esta conversa e um grupo antigo. Modo X1 ativo: grupos nao recebem envios e ficam fora
+                Esta conversa e um grupo antigo. Grupos nao recebem envios e ficam fora
                 da inbox principal.
               </div>
             ) : null}
@@ -135,7 +135,7 @@ export default async function ConversationDetailPage({ params }: ConversationDet
 
         {chat.isGroup ? (
           <div className="empty-state">
-            <strong>Grupo ignorado pelo modo X1.</strong>
+            <strong>Grupo ignorado.</strong>
             <span>Nenhum envio sera permitido para esta conversa.</span>
           </div>
         ) : (

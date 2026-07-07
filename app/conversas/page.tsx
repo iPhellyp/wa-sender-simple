@@ -774,7 +774,7 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
 
   return (
     <AppShell
-      title="Catálogo X1"
+      title="Conversas"
       subtitle="Contatos individuais sincronizados do WhatsApp. Grupos, broadcasts e newsletters são ignorados."
     >
       <section className="inbox-page">
@@ -795,7 +795,7 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
         </div>
 
         <div className="inbox-metrics">
-          <StatCard label="Contatos individuais" value={totalX1Chats} helper="Chats X1 no catálogo" />
+          <StatCard label="Contatos individuais" value={totalX1Chats} helper="Conversas sincronizadas" />
           <StatCard label="Com mensagem" value={withMessageCount} helper="Possuem lastMessageAt" />
           <StatCard label="Sem mensagem" value={withoutMessageCount} helper="Ordenados por atualização" />
           <StatCard label="Etiquetados" value={labeledCount} helper="Com ao menos uma etiqueta" />

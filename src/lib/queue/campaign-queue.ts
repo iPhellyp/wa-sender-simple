@@ -9,6 +9,7 @@ export const RESET_WHATSAPP_JOB = "reset-whatsapp";
 export const SEND_MANUAL_MESSAGE_JOB = "send-manual-message";
 export const SYNC_WHATSAPP_HISTORY_JOB = "sync-whatsapp-history";
 export const SYNC_WHATSAPP_CATALOG_JOB = "sync-whatsapp-catalog";
+export const APPLY_WHATSAPP_LABELS_JOB = "apply-whatsapp-labels";
 
 const CONNECT_WHATSAPP_JOB_ID = "connect-whatsapp";
 const DISCONNECT_WHATSAPP_JOB_ID = "disconnect-whatsapp";
@@ -24,6 +25,13 @@ export type SendManualMessageJobData = {
 
 export type SyncWhatsappCatalogJobData = {
   forceSnapshot?: boolean;
+};
+
+export type ApplyWhatsappLabelsJobData = {
+  requestId: string;
+  labelId: string;
+  waLabelId: string;
+  jids: string[];
 };
 
 let queue: Queue | null = null;
@@ -140,6 +148,21 @@ export async function enqueueWhatsappCatalogSync(data: SyncWhatsappCatalogJobDat
       jobId: SYNC_WHATSAPP_CATALOG_JOB_ID,
       removeOnComplete: true,
       removeOnFail: 100
+    }
+  );
+
+  return job.id ?? null;
+}
+
+export async function enqueueApplyWhatsappLabels(data: ApplyWhatsappLabelsJobData) {
+  const job = await getCampaignQueue().add(
+    APPLY_WHATSAPP_LABELS_JOB,
+    data,
+    {
+      attempts: 1,
+      jobId: buildJobId("apply-labels", data.requestId),
+      removeOnComplete: true,
+      removeOnFail: 1000
     }
   );
 

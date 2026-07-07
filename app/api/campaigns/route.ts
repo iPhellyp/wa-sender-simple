@@ -81,7 +81,7 @@ export async function POST(request: NextRequest) {
   if (uniqueChatIds.length > 0) {
     if (!defaultMessage) {
       return NextResponse.json(
-        { error: "Mensagem obrigatoria para contatos do catalogo X1" },
+        { error: "Mensagem obrigatoria para contatos do WhatsApp" },
         { status: 400 }
       );
     }

@@ -6,7 +6,6 @@ import { SectionCard } from "@/app/components/ui/SectionCard";
 import { StatCard } from "@/app/components/ui/StatCard";
 import { StatusBadge, statusToneFromValue } from "@/app/components/ui/StatusBadge";
 import { prisma } from "@/src/lib/prisma/client";
-import { SyncCatalogButton } from "./SyncCatalogButton";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -230,7 +229,7 @@ export default async function DashboardPage() {
       ? {
           tone: "warning" as const,
           title: "Nenhuma etiqueta com contato",
-          text: "Sincronize o catálogo ou revise as etiquetas antes de enviar por etiqueta."
+          text: "Conecte o WhatsApp para carregar contatos e etiquetas automaticamente."
         }
       : null,
     recentFailures > 0
@@ -253,14 +252,14 @@ export default async function DashboardPage() {
   return (
     <AppShell
       title="Dashboard"
-      subtitle="Visão operacional do catálogo WhatsApp, etiquetas e campanhas."
+      subtitle="Visao operacional de conversas, etiquetas e campanhas."
     >
       <section className="dashboard-page">
         <div className="dashboard-hero">
           <div>
             <h2>Operação de envio por etiquetas</h2>
             <p>
-              Acompanhe conexão, catálogo X1, etiquetas e desempenho recente de campanhas em
+              Acompanhe conexao, contatos individuais, etiquetas e desempenho recente de campanhas em
               uma tela de trabalho.
             </p>
           </div>
@@ -277,12 +276,12 @@ export default async function DashboardPage() {
             helper={whatsappSession?.connectedPhone ?? "Instância principal"}
             tone={statusToneFromValue(whatsappStatus)}
           />
-          <StatCard label="Contatos X1" value={x1Chats} helper="Catálogo individual" />
+          <StatCard label="Contatos WhatsApp" value={x1Chats} helper="Conversas individuais" />
           <StatCard label="Etiquetas ativas" value={activeLabels} helper="Disponíveis para campanha" />
           <StatCard
             label="Contatos etiquetados"
             value={labeledContacts.length}
-            helper="Contatos X1 com ao menos uma etiqueta"
+            helper="Contatos individuais com ao menos uma etiqueta"
           />
           <StatCard label="Campanhas totais" value={totalCampaigns} helper="Criadas no sistema" />
           <StatCard label="Enviados hoje" value={sentToday} helper="Destinatários enviados" tone="success" />
@@ -300,12 +299,10 @@ export default async function DashboardPage() {
           />
         </section>
 
-        <SectionCard title="Ações rápidas" description="Atalhos para as rotinas operacionais mais comuns.">
+        <SectionCard title="Acoes rapidas" description="Atalhos para as rotinas operacionais mais comuns.">
           <div className="quick-actions-grid">
-            <ButtonLink href="/whatsapp">Abrir WhatsApp</ButtonLink>
-            <SyncCatalogButton />
             <ButtonLink href="/conversas" variant="secondary">
-              Ver catálogo
+              Ver conversas
             </ButtonLink>
             <ButtonLink href="/campanhas" variant="secondary">
               Criar campanha
@@ -313,6 +310,9 @@ export default async function DashboardPage() {
             <ButtonLink href="/contatos" variant="secondary">
               Importar contatos
             </ButtonLink>
+          </div>
+          <div className="message">
+            A sincronizacao de contatos e etiquetas ocorre automaticamente ao conectar o WhatsApp.
           </div>
         </SectionCard>
 

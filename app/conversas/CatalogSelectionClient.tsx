@@ -145,7 +145,7 @@ export function CatalogSelectionClient({ items }: { items: CatalogConversationIt
                 {item.unreadCount > 0 ? <span>{item.unreadCount} não lidas</span> : null}
               </span>
               <span className={item.preview ? "conversation-preview" : "conversation-preview empty"}>
-                {item.preview || "Contato no catálogo X1"}
+                {item.preview || "Contato nas conversas"}
               </span>
               <span className="conversation-card-footer">
                 {item.labels.length > 0 ? (

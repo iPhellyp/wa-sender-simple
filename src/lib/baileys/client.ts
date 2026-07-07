@@ -15,6 +15,8 @@ import QRCode from "qrcode";
 import { WhatsappStatus, type Prisma } from "@prisma/client";
 import { prisma } from "../prisma/client";
 import { normalizeBrazilPhone, toWhatsappJid } from "../phone/normalize";
+import { enqueueWhatsappCatalogSync } from "../queue/campaign-queue";
+import { clearWhatsappOperationalData } from "../server/whatsapp-session-data";
 import { CATALOG_BOOTSTRAP_MODE, shouldIgnoreJidForX1Only } from "../whatsapp/jid";
 import { extractMessageText, isOptOutMessage } from "./opt-out";
 import {
@@ -48,10 +50,13 @@ let lastResetSucceededAt: number | null = null;
 let resetInProgress = false;
 let cleanPairingProfileIndex = 0;
 let catalogBootstrapTimer: ReturnType<typeof setTimeout> | null = null;
+let lastAutoCatalogSyncAt = 0;
+let lastAutoCatalogSyncPhone: string | null = null;
 
 const MAX_GENERAL_RECONNECT_ATTEMPTS = 5;
 const TRANSIENT_RECONNECT_BACKOFF_MS = [2_000, 5_000, 15_000] as const;
 const CATALOG_BOOTSTRAP_WINDOW_MS = 3 * 60_000;
+const AUTO_CATALOG_SYNC_COOLDOWN_MS = 10 * 60_000;
 const TERMINAL_COOLDOWN_MS = 15_000;
 const TRANSIENT_RECONNECT_EXHAUSTED_MESSAGE =
   "Reconexao automatica esgotada apos queda transitoria do socket WhatsApp.";
@@ -175,6 +180,24 @@ function startCatalogBootstrapWindow(reason: string) {
     });
   }, CATALOG_BOOTSTRAP_WINDOW_MS);
   (catalogBootstrapTimer as { unref?: () => void }).unref?.();
+}
+
+async function requestAutoCatalogSyncAfterOpen(connectedPhone: string | null) {
+  const now = Date.now();
+  const samePhone = lastAutoCatalogSyncPhone === connectedPhone;
+
+  if (samePhone && now - lastAutoCatalogSyncAt < AUTO_CATALOG_SYNC_COOLDOWN_MS) {
+    return;
+  }
+
+  lastAutoCatalogSyncAt = now;
+  lastAutoCatalogSyncPhone = connectedPhone;
+
+  console.log("[catalog] auto sync requested after connection open", {
+    connectedPhone: connectedPhone ? "present" : "unknown"
+  });
+
+  await enqueueWhatsappCatalogSync({ forceSnapshot: true });
 }
 
 function getCleanPairingProfile() {
@@ -787,6 +810,16 @@ async function createSocket(options: {
         manualDisconnectRequested = false;
         pairingPending = false;
         const connectedPhone = sock.user?.id?.split(":")[0]?.split("@")[0] ?? null;
+        const previousSession = await getWhatsappStatus();
+
+        if (
+          previousSession.connectedPhone &&
+          connectedPhone &&
+          previousSession.connectedPhone !== connectedPhone
+        ) {
+          await clearWhatsappOperationalData("connected-phone-changed");
+        }
+
         await saveWhatsappSession({
           status: WhatsappStatus.connected,
           qrCode: null,
@@ -794,6 +827,7 @@ async function createSocket(options: {
           lastError: null
         });
         startCatalogBootstrapWindow("connection-open");
+        await requestAutoCatalogSyncAfterOpen(connectedPhone);
         console.log("[baileys] connected", {
           connectedPhone: connectedPhone ? "present" : "unknown"
         });
@@ -1578,4 +1612,59 @@ export async function sendWhatsappMessageToJid(jid: string, text: string) {
 
 export async function sendWhatsappMessage(phoneNormalized: string, message: string) {
   return sendWhatsappMessageToJid(toWhatsappJid(phoneNormalized), message);
+}
+
+export async function applyWhatsappLabelToJids(params: { waLabelId: string; jids: string[] }) {
+  const activeSocket = await getConnectedSocket();
+  const addChatLabel =
+    typeof activeSocket.addChatLabel === "function"
+      ? activeSocket.addChatLabel.bind(activeSocket)
+      : null;
+
+  if (!addChatLabel) {
+    return {
+      ok: false,
+      applied: 0,
+      skipped: params.jids.length,
+      failed: 0,
+      message: "Socket Baileys conectado nao expoe addChatLabel."
+    };
+  }
+
+  let applied = 0;
+  let skipped = 0;
+  let failed = 0;
+
+  for (const jid of Array.from(new Set(params.jids))) {
+    const normalizedJid = normalizeChatJid(jid);
+
+    if (!normalizedJid || shouldIgnoreJidForX1Only(normalizedJid)) {
+      skipped += 1;
+      continue;
+    }
+
+    try {
+      await addChatLabel(normalizedJid, params.waLabelId);
+      applied += 1;
+    } catch (error) {
+      failed += 1;
+      console.error("[contacts-labels] failed", {
+        error: sanitizeErrorMessage(error)
+      });
+    }
+  }
+
+  console.log("[contacts-labels] applied", {
+    applied,
+    skipped,
+    failed
+  });
+
+  return {
+    ok: failed === 0,
+    applied,
+    skipped,
+    failed,
+    message: "Aplicacao de etiqueta finalizada."
+  };
 }

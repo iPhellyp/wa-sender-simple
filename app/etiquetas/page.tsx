@@ -5,7 +5,7 @@ export default function LabelsPage() {
   return (
     <AppShell
       title="Segmentos WhatsApp"
-      subtitle="Etiquetas sincronizadas, contatos X1 elegíveis e histórico de campanha por segmento."
+      subtitle="Etiquetas sincronizadas, contatos individuais elegiveis e historico de campanha por segmento."
     >
       <LabelsClient />
     </AppShell>

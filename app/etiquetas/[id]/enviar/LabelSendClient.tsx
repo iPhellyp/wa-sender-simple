@@ -172,7 +172,7 @@ export function LabelSendClient({ labelId }: { labelId: string }) {
         <label className="checkbox-row">
           <input checked disabled type="checkbox" readOnly />
           <span>
-            <strong>Modo X1 ativo</strong>
+            <strong>Envio para contatos individuais</strong>
             <span className="muted">
               Grupos vinculados a etiqueta serao ignorados e nunca entram no envio.
             </span>

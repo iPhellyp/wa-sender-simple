@@ -37,8 +37,15 @@ type ContactsSummary = {
 type ImportResult = {
   totalRows: number;
   insertedRows: number;
+  updatedRows: number;
   duplicatedRows: number;
   invalidRows: number;
+};
+
+type WhatsappLabel = {
+  id: string;
+  name: string;
+  color: string | null;
 };
 
 const CAMPAIGN_CONTACT_LIMIT = 80;
@@ -68,6 +75,9 @@ function formatDate(value: string | null) {
 export function ContactsClient() {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [origins, setOrigins] = useState<string[]>([]);
+  const [labels, setLabels] = useState<WhatsappLabel[]>([]);
+  const [selectedLabelId, setSelectedLabelId] = useState("");
+  const [bulkMessage, setBulkMessage] = useState<string | null>(null);
   const [summary, setSummary] = useState<ContactsSummary>({
     total: 0,
     optedOut: 0,
@@ -137,6 +147,12 @@ export function ContactsClient() {
     }
   }
 
+  async function loadLabels() {
+    const response = await fetch("/api/etiquetas", { cache: "no-store" });
+    const data = (await response.json()) as { labels?: WhatsappLabel[] };
+    setLabels(data.labels ?? []);
+  }
+
   async function handleImport(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = event.currentTarget;
@@ -154,6 +170,7 @@ export function ContactsClient() {
 
     const formData = new FormData();
     formData.append("file", file);
+    formData.append("importLabel", String(new FormData(form).get("importLabel") ?? ""));
 
     try {
       const response = await fetch("/api/import/excel", {
@@ -209,37 +226,73 @@ export function ContactsClient() {
     setPage(1);
   }
 
+  async function applyBulkLabel() {
+    if (selectedContacts.size === 0 || !selectedLabelId) {
+      return;
+    }
+
+    setBulkMessage(null);
+    setError(null);
+
+    try {
+      const response = await fetch("/api/contacts/bulk-label", {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          contactIds: Array.from(selectedContacts),
+          labelId: selectedLabelId
+        })
+      });
+      const data = (await response.json()) as {
+        error?: string;
+        message?: string;
+        updatedLocal?: number;
+        queuedForWhatsapp?: number;
+        skippedNoChat?: number;
+      };
+
+      if (!response.ok || data.error) {
+        throw new Error(data.error ?? "Falha ao aplicar etiqueta");
+      }
+
+      setBulkMessage(
+        `${data.message ?? "Etiqueta aplicada."} Local: ${data.updatedLocal ?? 0}. WhatsApp: ${
+          data.queuedForWhatsapp ?? 0
+        }. Sem conversa: ${data.skippedNoChat ?? 0}.`
+      );
+      await loadContacts();
+    } catch (labelError) {
+      setError(labelError instanceof Error ? labelError.message : "Erro inesperado");
+    }
+  }
+
   useEffect(() => {
     void loadContacts();
   }, [source, optedOut, sendStatus, search, page, pageSize]);
 
+  useEffect(() => {
+    void loadLabels();
+  }, []);
+
   return (
     <section className="grid">
-      <div className="page-header">
-        <div>
-          <span className="eyebrow">Base operacional</span>
-          <h1>Contatos</h1>
-          <p>
-            Use contatos importados para campanhas manuais ou segmentacoes fora das etiquetas do
-            WhatsApp.
-          </p>
-        </div>
-        <Link className="button secondary" href="/campanhas">
-          Abrir campanhas
-        </Link>
-      </div>
-
       <section className="section-card">
         <div className="section-card-header">
           <div>
             <h2>Importar planilha</h2>
-            <p>Arquivo Excel .xlsx com nome, telefone e mensagem opcional.</p>
+            <p>Arquivos XLS ou XLSX acumulam contatos e atualizam duplicados por telefone.</p>
           </div>
         </div>
         <form className="form-grid" onSubmit={(event) => void handleImport(event)}>
           <div className="field">
-            <label htmlFor="file">Planilha Excel</label>
-            <input className="input" id="file" name="file" type="file" accept=".xlsx" />
+            <label htmlFor="importLabel">Etiqueta da importacao</label>
+            <input className="input" id="importLabel" name="importLabel" placeholder="Opcional" />
+          </div>
+          <div className="field">
+            <label htmlFor="file">Planilha</label>
+            <input className="input" id="file" name="file" type="file" accept=".xls,.xlsx" />
           </div>
           <button className="button" disabled={importing} type="submit">
             {importing ? "Importando..." : "Importar contatos"}
@@ -248,8 +301,8 @@ export function ContactsClient() {
         {error ? <div className="message error">{error}</div> : null}
         {result ? (
           <div className="message">
-            Total {result.totalRows} | Inseridos {result.insertedRows} | Duplicados{" "}
-            {result.duplicatedRows} | Invalidos {result.invalidRows}
+            Total {result.totalRows} | Inseridos {result.insertedRows} | Atualizados{" "}
+            {result.updatedRows} | Duplicados {result.duplicatedRows} | Invalidos {result.invalidRows}
           </div>
         ) : null}
       </section>
@@ -300,7 +353,7 @@ export function ContactsClient() {
               setSource(event.target.value);
             }}
           >
-            <option value="">Todas as origens</option>
+            <option value="">Todas as etiquetas</option>
             {origins.map((origin) => (
               <option key={origin} value={origin}>
                 {origin}
@@ -361,6 +414,31 @@ export function ContactsClient() {
           </Link>
         </div>
 
+        <div className="toolbar">
+          <select
+            className="input"
+            value={selectedLabelId}
+            onChange={(event) => setSelectedLabelId(event.target.value)}
+          >
+            <option value="">Escolha uma etiqueta</option>
+            {labels.map((label) => (
+              <option key={label.id} value={label.id}>
+                {label.name}
+              </option>
+            ))}
+          </select>
+          <button
+            className="button secondary"
+            disabled={selectedContacts.size === 0 || !selectedLabelId}
+            type="button"
+            onClick={() => void applyBulkLabel()}
+          >
+            Aplicar etiqueta
+          </button>
+        </div>
+
+        {bulkMessage ? <div className="message">{bulkMessage}</div> : null}
+
         {hasSelectionOverflow ? (
           <div className="message warning">
             A URL foi limitada aos primeiros {CAMPAIGN_CONTACT_LIMIT} contatos selecionados.
@@ -373,17 +451,15 @@ export function ContactsClient() {
           <div className="muted">Nenhum contato encontrado.</div>
         ) : (
           <div className="table-wrap">
+            <h2 style={{ fontSize: 18, marginTop: 0 }}>Todos os contatos</h2>
             <table className="table">
               <thead>
                 <tr>
                   <th></th>
                   <th>Nome</th>
                   <th>Telefone</th>
-                  <th>Normalizado</th>
-                  <th>Origem</th>
-                  <th>Opt-out</th>
-                  <th>Ultimo envio</th>
-                  <th>Status</th>
+                  <th>Data</th>
+                  <th>Etiqueta</th>
                   <th>Acoes</th>
                 </tr>
               </thead>
@@ -400,37 +476,26 @@ export function ContactsClient() {
                           onChange={() => toggleContact(contact)}
                         />
                       </td>
-                      <td>{contact.name}</td>
-                      <td>{contact.phoneRaw}</td>
-                      <td>{contact.phoneNormalized}</td>
-                      <td>{contact.source}</td>
                       <td>
-                        <span className={`badge ${contact.optedOut ? "danger" : "success"}`}>
-                          {contact.optedOut ? "sim" : "nao"}
-                        </span>
-                      </td>
-                      <td>
-                        {contact.lastSend ? (
-                          <>
-                            <strong>{contact.lastSend.campaignName}</strong>
-                            <br />
-                            <span className="muted">
-                              {formatDate(contact.lastSend.sentAt ?? contact.lastSend.updatedAt)}
-                            </span>
-                          </>
-                        ) : (
-                          <span className="muted">Sem envio</span>
-                        )}
-                      </td>
-                      <td>
+                        <strong>{contact.name}</strong>
+                        <br />
                         <span className={`badge ${statusClass(sendStatusValue)}`}>
                           {statusLabel(sendStatusValue)}
                         </span>
-                        {contact.lastSend?.error ? (
-                          <div className="muted">{contact.lastSend.error}</div>
-                        ) : null}
+                        {contact.optedOut ? <span className="badge danger">opt-out</span> : null}
                       </td>
+                      <td>{contact.phoneRaw || contact.phoneNormalized}</td>
+                      <td>{formatDate(contact.createdAt)}</td>
+                      <td>{contact.source}</td>
                       <td>
+                        {contact.lastSend ? (
+                          <>
+                            <span className="muted">
+                              Ultimo envio: {contact.lastSend.campaignName}
+                            </span>
+                            <br />
+                          </>
+                        ) : null}
                         <Link className="button secondary compact-button" href={`/campanhas?contactIds=${contact.id}`}>
                           Campanha
                         </Link>

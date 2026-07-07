@@ -10,6 +10,7 @@ export type ImportContactsResult = {
   filename: string;
   totalRows: number;
   insertedRows: number;
+  updatedRows: number;
   duplicatedRows: number;
   invalidRows: number;
 };
@@ -36,7 +37,11 @@ function isKnownUniqueError(error: unknown) {
   return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002";
 }
 
-export async function importContactsFromExcel(buffer: Buffer, filename: string) {
+export async function importContactsFromExcel(
+  buffer: Buffer,
+  filename: string,
+  options: { importLabel?: string | null } = {}
+) {
   const workbook = XLSX.read(buffer, { type: "buffer" });
   const firstSheetName = workbook.SheetNames[0];
 
@@ -62,8 +67,10 @@ export async function importContactsFromExcel(buffer: Buffer, filename: string) 
   }
 
   let insertedRows = 0;
+  let updatedRows = 0;
   let duplicatedRows = 0;
   let invalidRows = 0;
+  const importLabel = options.importLabel?.trim() || null;
 
   for (const row of dataRows) {
     const [nameCell, phoneCell, messageCell, sourceCell] = row;
@@ -77,19 +84,45 @@ export async function importContactsFromExcel(buffer: Buffer, filename: string) 
 
     const name = cleanCell(nameCell) || normalizedPhone.normalized;
     const message = cleanCell(messageCell) || null;
-    const source = cleanCell(sourceCell) || "planilha";
+    const source = importLabel ?? (cleanCell(sourceCell) || "planilha");
 
     const existingContact = await prisma.contact.findUnique({
       where: {
         phoneNormalized: normalizedPhone.normalized
       },
       select: {
-        id: true
+        id: true,
+        name: true
       }
     });
 
     if (existingContact) {
-      duplicatedRows += 1;
+      const updateData: Prisma.ContactUpdateInput = {};
+
+      if (name && name !== existingContact.name) {
+        updateData.name = name;
+      }
+
+      if (message) {
+        updateData.message = message;
+      }
+
+      if (importLabel) {
+        updateData.source = importLabel;
+      }
+
+      if (Object.keys(updateData).length > 0) {
+        await prisma.contact.update({
+          where: {
+            id: existingContact.id
+          },
+          data: updateData
+        });
+        updatedRows += 1;
+      } else {
+        duplicatedRows += 1;
+      }
+
       continue;
     }
 
@@ -130,6 +163,7 @@ export async function importContactsFromExcel(buffer: Buffer, filename: string) 
     filename,
     totalRows: dataRows.length,
     insertedRows,
+    updatedRows,
     duplicatedRows,
     invalidRows
   } satisfies ImportContactsResult;

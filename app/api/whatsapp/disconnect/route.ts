@@ -5,6 +5,7 @@ import {
   markWhatsappError
 } from "@/src/lib/baileys/client";
 import { enqueueWhatsappDisconnect } from "@/src/lib/queue/campaign-queue";
+import { clearWhatsappOperationalData } from "@/src/lib/server/whatsapp-session-data";
 
 export const runtime = "nodejs";
 
@@ -14,6 +15,7 @@ function getErrorMessage(error: unknown) {
 
 export async function POST() {
   try {
+    await clearWhatsappOperationalData("manual-disconnect");
     await markWhatsappDisconnected();
     await enqueueWhatsappDisconnect();
 

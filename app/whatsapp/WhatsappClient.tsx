@@ -135,8 +135,8 @@ export function WhatsappClient() {
     <section className="whatsapp-page">
       <div className="whatsapp-health-grid">
         <SectionCard
-          title="Saúde da conexão"
-          description="Instância principal usada para catálogo, etiquetas e campanhas."
+          title="Saude da conexao"
+          description="Instancia principal usada para contatos, etiquetas e campanhas."
         >
           <div className="health-panel">
             <div className="health-status">
@@ -188,34 +188,24 @@ export function WhatsappClient() {
         </SectionCard>
 
         <SectionCard
-          title="Modo X1 ativo"
-          description="O produto opera como catálogo e sender por etiquetas, não como inbox pesada."
-          actions={<ButtonLink href="/conversas">Abrir catálogo X1</ButtonLink>}
+          title="Contatos individuais"
+          description="O produto opera como base de contatos e sender por etiquetas, nao como inbox pesada."
+          actions={<ButtonLink href="/conversas">Abrir conversas</ButtonLink>}
         >
           <div className="message">
             Grupos, broadcasts e newsletters são ignorados para reduzir carga. Contatos individuais
-            @lid e @s.whatsapp.net continuam elegíveis para catálogo, etiquetas e campanhas.
+            @lid e @s.whatsapp.net continuam elegiveis para contatos, etiquetas e campanhas.
           </div>
         </SectionCard>
       </div>
 
       <SectionCard
-        title="Sincronização de catálogo"
-        description="Força app-state quando chats, nomes ou etiquetas não carregarem."
-        actions={
-          <button
-            className="button"
-            disabled={catalogBusy || session?.status === "qr"}
-            type="button"
-            onClick={() => void syncCatalogNow()}
-          >
-            {catalogBusy ? "Enviando..." : "Forçar resync"}
-          </button>
-        }
+        title="Sincronizacao automatica"
+        description="A sincronizacao de contatos e etiquetas ocorre automaticamente ao conectar o WhatsApp."
       >
         <div className="message">
-          Use quando chats, nomes ou etiquetas não carregarem. O resync não apaga dados nem
-          substitui o reset de sessão.
+          Use manutencao avancada apenas se o suporte pedir. Desconectar ou resetar limpa os dados
+          operacionais do numero atual na interface.
         </div>
         {catalogMessage ? <div className="message success">{catalogMessage}</div> : null}
       </SectionCard>
@@ -250,15 +240,23 @@ export function WhatsappClient() {
       ) : null}
 
       <SectionCard
-        title="Manutenção perigosa"
-        description="Use somente quando o QR não aparece, a sessão está corrompida ou a reconexão normal falhou."
+        title="Manutencao avancada"
+        description="Use somente quando o QR nao aparece, a sessao esta corrompida ou a reconexao normal falhou."
         tone="danger"
       >
         <div className="danger-note">
-          Resetar sessão remove a sessão local do Baileys e exige novo pareamento por QR. Não use
-          para quedas transitórias de conexão.
+          Resetar sessao remove a sessao local do Baileys, limpa dados operacionais e exige novo
+          pareamento por QR. Nao use para quedas transitorias de conexao.
         </div>
         <div className="whatsapp-actions">
+          <button
+            className="button secondary"
+            disabled={catalogBusy || session?.status === "qr"}
+            type="button"
+            onClick={() => void syncCatalogNow()}
+          >
+            {catalogBusy ? "Enviando..." : "Sincronizacao manual avancada"}
+          </button>
           <button
             className="button danger"
             disabled={busy}

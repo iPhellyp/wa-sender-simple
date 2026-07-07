@@ -162,11 +162,11 @@ export function LabelDetailClient({ labelId }: { labelId: string }) {
             <h2>{data?.label.name}</h2>
             <p>ID WhatsApp: {data?.label.waLabelId}</p>
           </div>
-          <span className="badge success">segmento X1</span>
+          <span className="badge success">segmento WhatsApp</span>
         </div>
         <div className="inbox-metrics">
           <article className="metric-card">
-            <span>Contatos X1</span>
+            <span>Contatos individuais</span>
             <strong>{data?.metrics.contactCount ?? 0}</strong>
           </article>
           <article className="metric-card">
