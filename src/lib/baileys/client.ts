@@ -1094,7 +1094,7 @@ export async function requestWhatsappHistorySync() {
   const session = await getWhatsappStatus();
 
   if (session.status !== WhatsappStatus.connected) {
-    console.log("[baileys] history sync skipped; not connected", {
+    console.log("[history] sync-whatsapp-history skipped; not connected", {
       status: session.status
     });
 
@@ -1105,17 +1105,50 @@ export async function requestWhatsappHistorySync() {
     };
   }
 
-  console.log("[baileys] history sync requested", {
+  const [chatCount, contactCount, messageCount, oldestMessage] = await Promise.all([
+    prisma.whatsappChat.count(),
+    prisma.whatsappContact.count(),
+    prisma.whatsappMessage.count(),
+    prisma.whatsappMessage.findFirst({
+      where: {
+        timestamp: {
+          not: null
+        }
+      },
+      orderBy: {
+        timestamp: "asc"
+      },
+      select: {
+        jid: true,
+        waMessageId: true,
+        timestamp: true
+      }
+    })
+  ]);
+  const hasFetchMessageHistory = typeof socket?.fetchMessageHistory === "function";
+
+  console.log("[history] sync-whatsapp-history requested", {
     syncFullHistory: false,
-    hasOnDemandHistory: false,
-    mode: "event-driven"
+    hasFetchMessageHistory,
+    hasOldestMessageCursor: Boolean(oldestMessage),
+    mode: "event-driven",
+    chats: chatCount,
+    contacts: contactCount,
+    messages: messageCount
   });
 
   return {
     ok: true,
     mode: "event-driven" as const,
+    counts: {
+      chats: chatCount,
+      contacts: contactCount,
+      messages: messageCount
+    },
+    hasFetchMessageHistory,
+    canUseOnDemandHistory: false,
     message:
-      "O WhatsApp envia historico por eventos proprios. Historico antigo completo nao e solicitado durante pareamento."
+      "Historico verificado. O sistema salva eventos do WhatsApp em tempo real; fetchMessageHistory exige cursor de mensagem antiga e nao foi disparado automaticamente."
   };
 }
 

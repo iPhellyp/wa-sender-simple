@@ -10,7 +10,7 @@ type SyncHistoryResponse = {
 };
 
 const SUCCESS_MESSAGE =
-  "Verificacao de historico enfileirada. Novas mensagens e eventos recebidos pelo WhatsApp serao salvos automaticamente.";
+  "Verificacao enfileirada. O sistema salva o historico que o WhatsApp entregar por eventos; busca antiga completa depende de cursor seguro.";
 
 export function SyncHistoryButton() {
   const [busy, setBusy] = useState(false);

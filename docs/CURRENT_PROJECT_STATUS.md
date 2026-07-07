@@ -3,7 +3,7 @@
 ## Status operacional atual
 
 - O projeto opera com um unico WhatsApp conectado.
-- QR/428 ainda esta em estabilizacao.
+- QR/428 foi estabilizado com QR Safe Mode; nao alterar pairing junto com historico.
 - Pareamento limpo (`session files = 0`) deve usar QR Safe Mode.
 - O worker e responsavel pelo socket Baileys.
 - O app Next nao deve enviar mensagens diretamente pelo Baileys.
@@ -16,7 +16,8 @@
 - Inbox `/conversas`.
 - Detalhe `/conversas/[id]`.
 - Envio manual via fila `send-manual-message`.
-- Sync read-only de chats, contatos e mensagens.
+- History engine para `messaging-history.set`, chats, contatos e mensagens com persistencia idempotente.
+- Live sync de `messages.upsert` para mensagens novas e append.
 - Labels e envio por etiqueta implementados com migration, ainda dependentes de conexao estavel.
 - `/etiquetas` para labels.
 - `/envios` para auditoria operacional de envios.
@@ -25,7 +26,8 @@
 
 - QR Safe Mode precisa ser validado em producao.
 - Labels dependem dos eventos entregues pelo WhatsApp/Baileys.
-- Historico completo antigo nao e garantido.
+- Historico completo antigo nao e garantido; depende do que WhatsApp/Baileys entregar.
+- `fetchMessageHistory` exige cursor de mensagem antiga e nao deve ser disparado sem referencia segura.
 - `SendLog` existe para auditoria de envios, mas logs por `accountId` ainda sao futuros.
 - Multi-numeros ainda nao foi implementado.
 
@@ -40,10 +42,10 @@
 
 ## Regras para proximos agentes
 
-- Primeiro estabilizar QR/428.
+- Preservar QR Safe Mode e nao ligar full-history durante pareamento.
 - Nao testar envio em massa antes de QR conectado.
 - Nao mexer em multi-numeros junto com QR.
 - Nao misturar feature nova com hotfix de conexao.
 - Nao reintroduzir `syncFullHistory=true` no QR_SAFE_MODE.
 - Nao reativar `fetchLatestBaileysVersion` obrigatorio no QR_SAFE_MODE.
-- Sync-history e read-only/informativo.
+- Sync-history enfileira job singleton apenas conectado e nao reseta/recria sessao.

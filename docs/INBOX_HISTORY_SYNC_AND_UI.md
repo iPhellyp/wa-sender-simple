@@ -30,6 +30,7 @@ Quando a sessao ja possui arquivos, o socket entra no modo normal:
 - pode buscar latest version;
 - pode usar `Browsers.macOS("Desktop")`;
 - pode usar `getMessage` lendo do banco por `jid + waMessageId`;
+- usa `syncFullHistory: true` somente fora do pareamento limpo;
 - processa eventos naturais de mensagens, historico, contatos, chats e labels.
 
 ## Por que nem tudo pode aparecer
@@ -38,7 +39,7 @@ Se a sessao ja estava pareada antes dos ajustes de historico, o WhatsApp pode na
 
 Alguns contatos tambem podem chegar sem nome amigavel. Dependendo do evento, a Baileys pode entregar apenas JID, telefone, `lid`, `pushName` parcial ou nenhum historico de mensagem.
 
-O botao `Verificar historico` e informativo/read-only. Ele consulta o status atual da sessao e retorna orientacao. Ele nao cria socket novo, nao chama `startBaileysConnection` e nao executa `fetchMessageHistory` sem cursor seguro. Na versao instalada, `fetchMessageHistory` exige:
+O botao `Verificar historico` enfileira um job singleton somente quando `WhatsappSession.status = connected`. Ele nao cria socket novo, nao reseta sessao e nao executa `fetchMessageHistory` sem cursor seguro. Na versao instalada, `fetchMessageHistory` exige:
 
 - quantidade;
 - chave da mensagem mais antiga;
@@ -54,7 +55,7 @@ A UI nao usa JID cru como primeira opcao quando existe dado melhor. O nome exibi
 2. `WhatsappContact.name`, se existir.
 3. `WhatsappContact.pushName`, se existir.
 4. Telefone formatado a partir do JID, quando o JID for `@s.whatsapp.net`.
-5. Fallback amigavel para grupo ou `lid`.
+5. Fallback amigavel para grupo ou `lid` (`Contato WhatsApp` + sufixo curto).
 6. JID completo apenas como ultimo fallback.
 
 O sync tambem evita sobrescrever um nome bom com candidato pior. Valores iguais ao JID, `@lid` cru ou telefone puro do proprio JID sao tratados como ausencia de nome.
@@ -125,29 +126,31 @@ LIMIT 20;
 Historico:
 
 ```text
-[sync] history set { syncType: ..., chats: X, contacts: Y, messages: Z }
-[sync] history chats { syncType: ..., chats: X, processed: X, skipped: Y, failed: Z }
-[sync] history contacts { syncType: ..., contacts: X, processed: X, skipped: Y, failed: Z }
-[sync] history messages { syncType: ..., messages: X, processed: X, skipped: Y, failed: Z }
+[history] messaging-history.set received { syncType: ..., chats: X, contacts: Y, messages: Z }
+[history] chats persisted { count: X, skipped: Y, failed: Z }
+[history] contacts persisted { count: X, skipped: Y, failed: Z }
+[history] messages persisted { count: X, skipped: Y, failed: Z }
+[history] message skipped { reason: "system-or-empty" }
 ```
 
 Mensagens:
 
 ```text
+[history] messages.upsert received { type: "append", count: X }
+[history] live messages persisted { type: "append", count: X, skipped: Y, failed: Z }
 [sync] messages upsert { type: "append", messages: X, processed: X, skipped: Y, failed: Z }
-[sync] messages upsert { type: "notify", messages: X, processed: X, skipped: Y, failed: Z }
 ```
 
 Solicitacao manual de verificacao de historico:
 
 ```text
-[baileys] history sync skipped; not connected { status: "disconnected" }
+[history] sync-whatsapp-history skipped; not connected { status: "disconnected" }
 ```
 
 ou, se conectado:
 
 ```text
-[baileys] history sync requested { syncFullHistory: false, hasOnDemandHistory: false, mode: "event-driven" }
+[history] sync-whatsapp-history requested { syncFullHistory: false, hasFetchMessageHistory: true, hasOldestMessageCursor: true, mode: "event-driven" }
 ```
 
 Sessao encerrada no celular (428):
@@ -168,6 +171,7 @@ Sessao encerrada no celular (428):
 - lista de conversas em cards com nome amigavel, telefone/JID discreto e badges;
 - botao compacto de nova conversa;
 - botao de verificar historico.
+- status discreto da conexao e ultimo evento salvo.
 
 O filtro `Sem mensagem` concentra contatos sincronizados que ainda nao possuem mensagem salva. Isso evita que a tela inicial vire uma lista gigante de JIDs ou contatos vazios.
 
@@ -181,9 +185,10 @@ O filtro `Sem mensagem` concentra contatos sincronizados que ainda nao possuem m
 
 ## Limitacoes
 
-- Sem realtime.
+- Sem realtime na UI por WebSocket/SSE; o backend persiste eventos live recebidos pela Baileys.
 - Sem multiplos numeros.
 - Sem status persistido de job manual.
+- Sem backfill automatico por `fetchMessageHistory` sem cursor de mensagem antiga.
 - Historico completo depende do que o WhatsApp reenviar para a sessao.
 - Labels e envio por etiqueta existem como feature parcial; ver `docs/WHATSAPP_LABELS_AND_BULK_SEND.md`.
 - QR_SAFE_MODE nao obriga `fetchLatestBaileysVersion` quando a pasta da sessao esta vazia.

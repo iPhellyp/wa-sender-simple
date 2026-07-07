@@ -8,6 +8,7 @@ import {
 } from "@/src/lib/whatsapp/display-name";
 import { StartConversationForm } from "./StartConversationForm";
 import { SyncHistoryButton } from "./SyncHistoryButton";
+import { getWhatsappStatusPayload } from "@/src/lib/baileys/client";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -23,6 +24,7 @@ type ConversationsPageProps = {
 };
 
 type ConversationFilter = "recent" | "all" | "contacts" | "groups" | "empty";
+const DEFAULT_FILTER: ConversationFilter = "all";
 const DEFAULT_PAGE_SIZE = 50;
 const PAGE_SIZE_OPTIONS = [30, 50] as const;
 
@@ -106,7 +108,7 @@ function getFilterValue(searchParams: Awaited<ConversationsPageProps["searchPara
     return type;
   }
 
-  return "recent";
+  return DEFAULT_FILTER;
 }
 
 function getLabelIdValue(searchParams: Awaited<ConversationsPageProps["searchParams"]>) {
@@ -139,7 +141,7 @@ function buildFilterHref(
 ) {
   const params = new URLSearchParams();
 
-  if (type !== "recent") {
+  if (type !== DEFAULT_FILTER) {
     params.set("type", type);
   }
 
@@ -168,7 +170,7 @@ function buildPageHref(
 ) {
   const params = new URLSearchParams();
 
-  if (type !== "recent") {
+  if (type !== DEFAULT_FILTER) {
     params.set("type", type);
   }
 
@@ -397,7 +399,9 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
     withMessagesCount,
     individualCount,
     groupCount,
-    emptyCount
+    emptyCount,
+    whatsappSession,
+    latestStoredMessage
   ] =
     await Promise.all([
     prisma.whatsappLabel.findMany({
@@ -459,6 +463,24 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
           none: {}
         }
       }
+    }),
+    getWhatsappStatusPayload(),
+    prisma.whatsappMessage.findFirst({
+      orderBy: [
+        {
+          timestamp: {
+            sort: "desc",
+            nulls: "last"
+          }
+        },
+        {
+          createdAt: "desc"
+        }
+      ],
+      select: {
+        timestamp: true,
+        createdAt: true
+      }
     })
   ]);
 
@@ -490,6 +512,7 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
   const totalPages = Math.max(1, Math.ceil(filteredCount / limit));
   const firstVisible = chats.length === 0 ? 0 : skip + 1;
   const lastVisible = Math.min(skip + chats.length, filteredCount);
+  const latestSyncAt = latestStoredMessage?.timestamp ?? latestStoredMessage?.createdAt ?? null;
 
   return (
     <AppShell title="Inbox WhatsApp">
@@ -502,6 +525,10 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
             <p className="muted">
               Alguns contatos podem aparecer sem nome ou mensagem porque o WhatsApp nem sempre envia todo
               o historico para sessao ja pareada. Use a verificacao manual sem resetar a conexao atual.
+            </p>
+            <p className="muted">
+              Conexao: {whatsappSession.status}. Ultimo evento salvo: {formatDate(latestSyncAt) ?? "nenhum"}.
+              Alguns nomes dependem do que o WhatsApp entrega; nomes da agenda exigem importador de contatos.
             </p>
           </div>
           <div className="inbox-actions">
@@ -548,7 +575,7 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
           </nav>
 
           <form action="/conversas" className="inbox-search" method="get">
-            {type !== "recent" ? <input name="type" type="hidden" value={type} /> : null}
+            {type !== DEFAULT_FILTER ? <input name="type" type="hidden" value={type} /> : null}
             <input
               className="input"
               defaultValue={query}
@@ -579,8 +606,8 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
 
         {type !== "empty" && emptyCount > 0 ? (
           <div className="empty-hint">
-            A inbox abre em Recentes para evitar uma lista poluida. Use o filtro Sem mensagem para ver
-            contatos sincronizados sem historico salvo.
+            A inbox mostra todas as conversas salvas por padrao. Use Recentes para focar apenas em
+            conversas com mensagens salvas.
           </div>
         ) : null}
 

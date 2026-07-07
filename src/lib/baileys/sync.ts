@@ -24,6 +24,11 @@ type TimestampInput = number | string | Date | null | undefined | {
   toString?: () => string;
 };
 
+type MessageSyncOptions = {
+  log?: boolean;
+  logScope?: "history" | "live";
+};
+
 function sanitizeSyncError(error: unknown) {
   if (error instanceof Error) {
     return error.message;
@@ -54,10 +59,21 @@ function isSystemOnlyMessage(messageType: string | null) {
   );
 }
 
+function isIgnoredJid(jid: string | null | undefined) {
+  const normalized = jid?.trim().toLowerCase() ?? "";
+
+  return (
+    !normalized ||
+    normalized === "status@broadcast" ||
+    normalized.endsWith("@broadcast") ||
+    normalized.includes("newsletter")
+  );
+}
+
 export function normalizeChatJid(jid: string | null | undefined) {
   const trimmed = jid?.trim();
 
-  if (!trimmed || trimmed === "status@broadcast") {
+  if (!trimmed || isIgnoredJid(trimmed)) {
     return null;
   }
 
@@ -74,7 +90,9 @@ export function normalizeChatJid(jid: string | null | undefined) {
     return null;
   }
 
-  return `${local}@${server}`.toLowerCase();
+  const normalizedJid = `${local}@${server}`.toLowerCase();
+
+  return isIgnoredJid(normalizedJid) ? null : normalizedJid;
 }
 
 export function isGroupJid(jid: string | null | undefined) {
@@ -235,6 +253,10 @@ function previewText(text: string | null, messageType: string | null) {
   return text ?? (messageType ? `[${messageType}]` : null);
 }
 
+function getMessageLogNamespace(options: MessageSyncOptions) {
+  return options.logScope === "history" ? "[history]" : "[baileys]";
+}
+
 function toPrismaJson(value: unknown): Prisma.InputJsonValue | typeof Prisma.JsonNull {
   try {
     const serialized = JSON.stringify(value, (_key, nestedValue: unknown) => {
@@ -383,30 +405,8 @@ export async function upsertContactFromBaileys(contact: Partial<Contact>) {
     }
   });
 
-  if (jid.endsWith("@s.whatsapp.net")) {
+  if (!isGroupJid(jid)) {
     await ensureChatForJid(jid, name ?? pushName);
-  } else if (!isGroupJid(jid)) {
-    const existingChat = await prisma.whatsappChat.findUnique({
-      where: {
-        jid
-      },
-      select: {
-        id: true,
-        name: true
-      }
-    });
-    const candidateName = name ?? pushName;
-
-    if (existingChat && isBetterDisplayName(existingChat.name, candidateName, jid)) {
-      await prisma.whatsappChat.update({
-        where: {
-          id: existingChat.id
-        },
-        data: {
-          name: candidateName
-        }
-      });
-    }
   }
 
   return true;
@@ -422,7 +422,7 @@ async function upsertContactFromMessage(options: {
     ? normalizeChatJid(options.senderJid)
     : options.chatJid;
 
-  if (!contactJid?.endsWith("@s.whatsapp.net")) {
+  if (!contactJid || isGroupJid(contactJid)) {
     return;
   }
 
@@ -464,14 +464,14 @@ async function upsertContactFromMessage(options: {
 
 export async function upsertMessageFromBaileys(
   message: WAMessage,
-  options: { log?: boolean } = {}
+  options: MessageSyncOptions = {}
 ) {
   const jid = normalizeChatJid(message.key.remoteJid);
   const waMessageId = compactText(message.key.id);
 
   if (!jid || !waMessageId) {
     if (options.log) {
-      console.log("[baileys] message skipped", {
+      console.log(`${getMessageLogNamespace(options)} message skipped`, {
         reason: "missing-jid-or-message-id"
       });
     }
@@ -487,7 +487,7 @@ export async function upsertMessageFromBaileys(
 
   if (isSystemOnlyMessage(messageType)) {
     if (options.log) {
-      console.log("[baileys] message skipped", {
+      console.log(`${getMessageLogNamespace(options)} message skipped`, {
         reason: "system-or-empty",
         messageId: safeLogMessageId(waMessageId)
       });
@@ -588,7 +588,7 @@ export async function upsertMessageFromBaileys(
   }
 
   if (options.log) {
-    console.log("[baileys] message persisted", {
+    console.log(`${getMessageLogNamespace(options)} message persisted`, {
       chatId: chat.id,
       messageId: safeLogMessageId(waMessageId),
       fromMe
@@ -630,28 +630,52 @@ export async function updateMessageFromBaileys(messageUpdate: WAMessageUpdate) {
 }
 
 export async function syncMessagingHistorySet(event: BaileysEventMap["messaging-history.set"]) {
+  const syncType = event.syncType ?? null;
+  const progress = (event as { progress?: number | null }).progress ?? null;
+
+  console.log("[history] messaging-history.set received", {
+    syncType,
+    progress,
+    chats: event.chats.length,
+    contacts: event.contacts.length,
+    messages: event.messages.length
+  });
+
+  const chatsResult = await settleInBatches(event.chats, upsertChatFromBaileys);
+  console.log("[history] chats persisted", {
+    syncType,
+    count: chatsResult.processed,
+    skipped: chatsResult.skipped,
+    failed: chatsResult.failed,
+    ...(chatsResult.firstError ? { firstError: chatsResult.firstError } : {})
+  });
+
+  const contactsResult = await settleInBatches(event.contacts, upsertContactFromBaileys);
+  console.log("[history] contacts persisted", {
+    syncType,
+    count: contactsResult.processed,
+    skipped: contactsResult.skipped,
+    failed: contactsResult.failed,
+    ...(contactsResult.firstError ? { firstError: contactsResult.firstError } : {})
+  });
+
+  const messagesResult = await settleInBatches(event.messages, (message) =>
+    upsertMessageFromBaileys(message, { log: true, logScope: "history" })
+  );
+  console.log("[history] messages persisted", {
+    syncType,
+    count: messagesResult.processed,
+    skipped: messagesResult.skipped,
+    failed: messagesResult.failed,
+    ...(messagesResult.firstError ? { firstError: messagesResult.firstError } : {})
+  });
+
   console.log("[sync] history set", {
     syncType: event.syncType ?? null,
     chats: event.chats.length,
     contacts: event.contacts.length,
     messages: event.messages.length
   });
-
-  logSyncResult(
-    "history chats",
-    { syncType: event.syncType ?? null, chats: event.chats.length },
-    await settleInBatches(event.chats, upsertChatFromBaileys)
-  );
-  logSyncResult(
-    "history contacts",
-    { syncType: event.syncType ?? null, contacts: event.contacts.length },
-    await settleInBatches(event.contacts, upsertContactFromBaileys)
-  );
-  logSyncResult(
-    "history messages",
-    { syncType: event.syncType ?? null, messages: event.messages.length },
-    await settleInBatches(event.messages, upsertMessageFromBaileys)
-  );
 }
 
 export async function syncChatsUpsert(chats: BaileysEventMap["chats.upsert"]) {
@@ -687,18 +711,24 @@ export async function syncContactsUpdate(contacts: BaileysEventMap["contacts.upd
 }
 
 export async function syncMessagesUpsert(event: BaileysEventMap["messages.upsert"]) {
-  console.log("[baileys] message upsert received", {
+  console.log("[history] messages.upsert received", {
     type: event.type,
     count: event.messages.length
   });
 
-  logSyncResult(
-    "messages upsert",
-    { type: event.type, messages: event.messages.length },
-    await settleInBatches(event.messages, (message) =>
-      upsertMessageFromBaileys(message, { log: true })
-    )
+  const result = await settleInBatches(event.messages, (message) =>
+    upsertMessageFromBaileys(message, { log: true, logScope: "live" })
   );
+
+  console.log("[history] live messages persisted", {
+    type: event.type,
+    count: result.processed,
+    skipped: result.skipped,
+    failed: result.failed,
+    ...(result.firstError ? { firstError: result.firstError } : {})
+  });
+
+  logSyncResult("messages upsert", { type: event.type, messages: event.messages.length }, result);
 }
 
 export async function syncMessagesUpdate(messages: BaileysEventMap["messages.update"]) {

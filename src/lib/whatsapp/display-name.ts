@@ -42,7 +42,7 @@ function formatCompactJid(jid: string) {
   }
 
   if (jid.endsWith("@lid")) {
-    return `lid ${getJidTail(jid)}`;
+    return `Contato WhatsApp ${getJidTail(jid)}`;
   }
 
   return `jid ${getJidTail(jid)}`;
@@ -147,6 +147,12 @@ export function isBetterDisplayName(
 }
 
 export function getWhatsappDisplayName(source: DisplayNameSource) {
+  const chatName = cleanDisplayName(source.chatName, source.jid);
+
+  if (chatName) {
+    return chatName;
+  }
+
   const contactPushName = cleanDisplayName(source.contactPushName, source.jid);
 
   if (contactPushName) {
@@ -157,12 +163,6 @@ export function getWhatsappDisplayName(source: DisplayNameSource) {
 
   if (contactName) {
     return contactName;
-  }
-
-  const chatName = cleanDisplayName(source.chatName, source.jid);
-
-  if (chatName) {
-    return chatName;
   }
 
   const phone = formatJidAsPhone(source.jid);
@@ -186,7 +186,7 @@ export function getWhatsappIdentityLabel(jid: string) {
   }
 
   if (jid.endsWith("@lid")) {
-    return `lid ${getJidTail(jid)}`;
+    return `Contato WhatsApp ${getJidTail(jid)}`;
   }
 
   return formatCompactJid(jid);
