@@ -24,6 +24,14 @@ type ChatPreview = {
   name: string | null;
 };
 
+type ContactPreview = {
+  id: string;
+  name: string;
+  phoneNormalized: string;
+  source: string;
+  optedOut: boolean;
+};
+
 type CampaignSummary = {
   id: string;
   name: string;
@@ -66,6 +74,8 @@ type CampaignPrefillContext = {
   labelName: string | null;
   chatIds: string[];
   chatPreview: ChatPreview[];
+  contactIds: string[];
+  contactPreview: ContactPreview[];
 };
 
 type AudienceMode = "label" | "catalog" | "contacts";
@@ -100,7 +110,9 @@ export function CampaignsClient({
   const [step, setStep] = useState(0);
   const [contacts, setContacts] = useState<ContactOption[]>([]);
   const [campaigns, setCampaigns] = useState<CampaignSummary[]>([]);
-  const [selectedContacts, setSelectedContacts] = useState<Set<string>>(new Set());
+  const [selectedContacts, setSelectedContacts] = useState<Set<string>>(
+    new Set(prefillContext?.contactPreview.map((contact) => contact.id) ?? [])
+  );
   const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(null);
   const [recipients, setRecipients] = useState<RecipientDetail[]>([]);
   const [name, setName] = useState("");
@@ -121,6 +133,11 @@ export function CampaignsClient({
     [contacts]
   );
   const catalogChats = prefillContext?.chatPreview ?? [];
+  const prefilledContacts = prefillContext?.contactPreview ?? [];
+  const removedPrefillContacts = Math.max(
+    0,
+    (prefillContext?.contactIds.length ?? 0) - prefilledContacts.length
+  );
   const selectedLabel = labels.find((label) => label.id === selectedLabelId) ?? null;
   const audienceCount =
     audienceMode === "label"
@@ -131,7 +148,9 @@ export function CampaignsClient({
   const canCreate = Boolean(name.trim()) && Boolean(message.trim()) && intervalMinutes >= 1 && audienceCount > 0 && confirmed;
 
   async function loadContacts() {
-    const response = await fetch("/api/contacts?optedOut=false", { cache: "no-store" });
+    const response = await fetch("/api/contacts?optedOut=false&pageSize=100", {
+      cache: "no-store"
+    });
     const data = (await response.json()) as { contacts: ContactOption[] };
     setContacts(data.contacts);
   }
@@ -277,6 +296,18 @@ export function CampaignsClient({
       </div>
 
       {error ? <div className="message error">{error}</div> : null}
+      {prefilledContacts.length ? (
+        <div className="message">
+          Origem: {prefilledContacts.length} contato(s) importado(s) selecionado(s) em /contatos.
+          Opt-out ja foi removido no carregamento do preview.
+        </div>
+      ) : null}
+      {removedPrefillContacts > 0 ? (
+        <div className="message warning">
+          {removedPrefillContacts} contato(s) da URL foram ignorados por opt-out, duplicidade ou ID
+          invalido.
+        </div>
+      ) : null}
       {createdMessage ? (
         <div className="message">
           {createdMessage}{" "}
@@ -417,6 +448,13 @@ export function CampaignsClient({
 
               {audienceMode === "contacts" ? (
                 <div className="form-grid">
+                  {prefilledContacts.length ? (
+                    <div className="message">
+                      Preview selecionado:{" "}
+                      {prefilledContacts.slice(0, 6).map((contact) => contact.name).join(", ")}
+                      {prefilledContacts.length > 6 ? "..." : ""}
+                    </div>
+                  ) : null}
                   <div className="button-row">
                     <button
                       className="button secondary compact-button"

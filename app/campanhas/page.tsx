@@ -8,10 +8,19 @@ type ChatPreview = {
   name: string | null;
 };
 
+type ContactPreview = {
+  id: string;
+  name: string;
+  phoneNormalized: string;
+  source: string;
+  optedOut: boolean;
+};
+
 type CampaignsPageProps = {
   searchParams?: Promise<{
     labelId?: string | string[];
     chatIds?: string | string[];
+    contactIds?: string | string[];
   }>;
 };
 
@@ -26,6 +35,11 @@ export default async function CampaignsPage({ searchParams }: CampaignsPageProps
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean);
+  const contactIds = (pickSingle(resolvedSearchParams?.contactIds) ?? "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .slice(0, 80);
   const label = labelId
     ? await prisma.whatsappLabel.findFirst({
         where: {
@@ -38,7 +52,7 @@ export default async function CampaignsPage({ searchParams }: CampaignsPageProps
         }
       })
     : null;
-  const [labels, chatPreview] = await Promise.all([
+  const [labels, chatPreview, contactPreview] = await Promise.all([
     prisma.whatsappLabel.findMany({
       where: {
         deleted: false
@@ -69,7 +83,27 @@ export default async function CampaignsPage({ searchParams }: CampaignsPageProps
             name: true
           }
         })
-      : Promise.resolve([] as ChatPreview[])
+      : Promise.resolve([] as ChatPreview[]),
+    contactIds.length
+      ? prisma.contact.findMany({
+          where: {
+            id: {
+              in: contactIds
+            },
+            optedOut: false
+          },
+          orderBy: {
+            name: "asc"
+          },
+          select: {
+            id: true,
+            name: true,
+            phoneNormalized: true,
+            source: true,
+            optedOut: true
+          }
+        })
+      : Promise.resolve([] as ContactPreview[])
   ]);
 
   return (
@@ -79,7 +113,9 @@ export default async function CampaignsPage({ searchParams }: CampaignsPageProps
           labelId: label?.id ?? (labelId || null),
           labelName: label?.name ?? null,
           chatIds,
-          chatPreview
+          chatPreview,
+          contactIds,
+          contactPreview
         }}
         labels={labels}
       />
