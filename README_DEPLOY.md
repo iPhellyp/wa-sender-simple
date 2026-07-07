@@ -75,23 +75,29 @@ O `certresolver` configurado e `letsencryptresolver`. Ajuste esse valor em `dock
 Comandos manuais na VPS:
 
 ```bash
+cd /root/wa-sender-simple
+git switch main
 git pull
-set -a
-. ./.env
-set +a
-docker compose build
 docker volume create wa-sender-simple_postgres_data
 docker volume create wa-sender-simple_baileys_session
 docker volume create wa-sender-simple_uploads
-docker stack deploy --resolve-image never -c docker-stack.yml wa_sender_simple
+chmod +x ./deploy-safe.sh
+./deploy-safe.sh
 APP_CID=$(docker ps -q --filter "name=wa_sender_simple_app" | head -n 1)
 docker exec -it "$APP_CID" npm run prisma:deploy
 ```
 
-`docker stack deploy` nao faz build de imagem. Por isso, rode `docker compose build` antes para criar as imagens locais:
+`docker stack deploy` nao faz build de imagem. O script `deploy-safe.sh` roda apenas:
 
-- `wa-sender-simple-app:latest`
-- `wa-sender-simple-worker:latest`
+```bash
+docker compose build app
+```
+
+Isso cria uma unica imagem local:
+
+- `wa-sender-simple:latest`
+
+O app e o worker usam essa mesma imagem. Nao use `docker compose build` sem especificar `app`, para nao reconstruir servicos desnecessarios.
 
 O uso de `--resolve-image never` evita tentativa de buscar essas imagens em registry externo.
 
@@ -102,17 +108,36 @@ Nao use `docker run` para migration em rede overlay nao attachable. Rode a migra
 Comandos manuais:
 
 ```bash
+cd /root/wa-sender-simple
+git switch main
 git pull
-set -a
-. ./.env
-set +a
-docker compose build
-docker volume create wa-sender-simple_postgres_data
-docker volume create wa-sender-simple_baileys_session
-docker volume create wa-sender-simple_uploads
-docker stack deploy --resolve-image never -c docker-stack.yml wa_sender_simple
+chmod +x ./deploy-safe.sh
+./deploy-safe.sh
 APP_CID=$(docker ps -q --filter "name=wa_sender_simple_app" | head -n 1)
 docker exec -it "$APP_CID" npm run prisma:deploy
+```
+
+O `deploy-safe.sh` carrega `.env` quando existir, mostra `df -h` e `docker system df`, faz build de uma imagem, aplica o stack e roda apenas limpezas seguras:
+
+```bash
+docker container prune -f
+docker builder prune -af
+docker image prune -af
+```
+
+Nao use:
+
+- `docker system prune -a --volumes`
+- `docker volume prune`
+- remocao manual de `/var/lib/docker`
+- remocao manual de `/var/lib/docker/overlay2`
+
+Se o disco estiver alto, use apenas os prunes seguros do script. Eles preservam volumes do Postgres, Redis, uploads e sessao Baileys.
+
+Para reduzir historico de tasks antigas do Swarm, aplique uma vez na VPS:
+
+```bash
+docker swarm update --task-history-limit 2
 ```
 
 ## Migrations

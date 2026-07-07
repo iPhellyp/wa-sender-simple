@@ -26,7 +26,7 @@ services:
         condition: any
 
   app:
-    image: wa-sender-simple-app:latest
+    image: wa-sender-simple:latest
     environment:
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
       APP_URL: "${APP_URL:-https://wa2.supereducarbrasil.com.br}"
@@ -55,7 +55,7 @@ services:
         - traefik.http.services.wa-sender-simple.loadbalancer.server.port=3000
 
   worker:
-    image: wa-sender-simple-worker:latest
+    image: wa-sender-simple:latest
     command: npm run worker
     environment:
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}

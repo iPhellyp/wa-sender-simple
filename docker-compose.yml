@@ -15,9 +15,10 @@ services:
     restart: unless-stopped
 
   app:
-    image: wa-sender-simple-app:latest
+    image: wa-sender-simple:latest
     build:
       context: .
+      dockerfile: Dockerfile
     restart: unless-stopped
     env_file:
       - .env
@@ -33,9 +34,7 @@ services:
       - uploads:/app/uploads
 
   worker:
-    image: wa-sender-simple-worker:latest
-    build:
-      context: .
+    image: wa-sender-simple:latest
     restart: unless-stopped
     command: npm run worker
     env_file:
