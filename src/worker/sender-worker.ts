@@ -26,7 +26,7 @@ import {
 import { ensureChatForJid, isGroupJid, normalizeChatJid } from "../lib/baileys/sync";
 import { completeCampaignIfDone } from "../lib/campaigns/progress";
 import { schedulePendingRecipients } from "../lib/campaigns/schedule";
-import { hashMessage } from "../lib/labels/audience";
+import { hashMessage, resolveCampaignJid, type SkippedReason } from "../lib/labels/audience";
 import { normalizeBrazilPhone, toWhatsappJid } from "../lib/phone/normalize";
 
 const PAUSED_RECHECK_DELAY_MS = 60 * 1000;
@@ -130,29 +130,18 @@ function getPhoneFromRecipientJid(jid: string | null | undefined) {
   return normalized.ok ? normalized.normalized : null;
 }
 
-function getRecipientJidSkipReason(jid: string, excludeGroups: boolean) {
-  const normalizedJid = normalizeChatJid(jid);
-
-  if (!normalizedJid) {
-    return "invalid_jid";
-  }
-
-  if (isGroupJid(normalizedJid)) {
-    return excludeGroups ? "group_excluded" : null;
-  }
-
-  return getPhoneFromRecipientJid(normalizedJid) ? null : "invalid_jid";
-}
-
-async function isRecipientOptedOut(recipient: {
-  jid: string | null;
-  contact: { optedOut: boolean; phoneNormalized: string } | null;
-}) {
+async function isRecipientOptedOut(
+  recipient: {
+    jid: string | null;
+    contact: { optedOut: boolean; phoneNormalized: string } | null;
+  },
+  resolvedJid?: string | null
+) {
   if (recipient.contact?.optedOut) {
     return true;
   }
 
-  const phone = getPhoneFromRecipientJid(recipient.jid);
+  const phone = getPhoneFromRecipientJid(recipient.jid ?? resolvedJid);
 
   if (!phone) {
     return false;
@@ -168,6 +157,46 @@ async function isRecipientOptedOut(recipient: {
   });
 
   return Boolean(contact?.optedOut);
+}
+
+function getSkippedRecipientError(reason: SkippedReason) {
+  if (reason === "group_excluded") {
+    return "Grupo ignorado pela configuracao da campanha";
+  }
+
+  if (reason === "unresolved_chat") {
+    return "Conversa sem JID resolvido para envio";
+  }
+
+  if (reason === "broadcast_or_status") {
+    return "JID de broadcast/status ignorado";
+  }
+
+  return "JID invalido para envio";
+}
+
+async function resolveRecipientSendJid(recipient: {
+  jid: string | null;
+  chatId: string | null;
+}) {
+  if (recipient.jid) {
+    return resolveCampaignJid([recipient.jid]);
+  }
+
+  if (!recipient.chatId) {
+    return resolveCampaignJid([]);
+  }
+
+  const chat = await prisma.whatsappChat.findUnique({
+    where: {
+      id: recipient.chatId
+    },
+    select: {
+      jid: true
+    }
+  });
+
+  return resolveCampaignJid([chat?.jid, recipient.chatId]);
 }
 
 async function processManualMessage(
@@ -275,8 +304,16 @@ async function processRecipient(recipientId: string) {
     return;
   }
 
-  if (recipient.jid) {
-    const skipReason = getRecipientJidSkipReason(recipient.jid, recipient.campaign.excludeGroups);
+  let resolvedRecipientJid: string | null = null;
+
+  if (recipient.jid || recipient.chatId || !recipient.contact) {
+    const resolvedJid = await resolveRecipientSendJid(recipient);
+    const skipReason =
+      !resolvedJid.ok
+        ? resolvedJid.reason
+        : resolvedJid.isGroup && recipient.campaign.excludeGroups
+          ? "group_excluded"
+          : null;
 
     if (skipReason) {
       await prisma.campaignRecipient.update({
@@ -285,10 +322,8 @@ async function processRecipient(recipientId: string) {
         },
         data: {
           status: CampaignRecipientStatus.canceled,
-          error:
-            skipReason === "group_excluded"
-              ? "Grupo ignorado pela configuracao da campanha"
-              : "JID invalido para envio",
+          jid: resolvedJid.ok ? resolvedJid.jid : recipient.jid,
+          error: getSkippedRecipientError(skipReason),
           skippedReason: skipReason
         }
       });
@@ -296,9 +331,13 @@ async function processRecipient(recipientId: string) {
       await schedulePendingRecipients(recipient.campaignId);
       return;
     }
+
+    if (resolvedJid.ok) {
+      resolvedRecipientJid = resolvedJid.jid;
+    }
   }
 
-  if (await isRecipientOptedOut(recipient)) {
+  if (await isRecipientOptedOut(recipient, resolvedRecipientJid)) {
     await prisma.campaignRecipient.update({
       where: {
         id: recipient.id
@@ -331,9 +370,9 @@ async function processRecipient(recipientId: string) {
     let sentMessage: SentWhatsappMessage;
     let sentJid: string;
 
-    if (recipient.jid) {
-      sentJid = recipient.jid;
-      sentMessage = await sendWhatsappMessageToJid(recipient.jid, recipient.messageFinal);
+    if (resolvedRecipientJid) {
+      sentJid = resolvedRecipientJid;
+      sentMessage = await sendWhatsappMessageToJid(resolvedRecipientJid, recipient.messageFinal);
     } else if (recipient.contact) {
       sentJid = toWhatsappJid(recipient.contact.phoneNormalized);
       sentMessage = await sendWhatsappMessage(recipient.contact.phoneNormalized, recipient.messageFinal);
@@ -357,15 +396,16 @@ async function processRecipient(recipientId: string) {
       data: {
         status: CampaignRecipientStatus.sent,
         sentAt,
+        jid: resolvedRecipientJid ? sentJid : recipient.jid,
         chatId: recipient.chatId ?? persistedChatId,
         error: null
       }
     });
 
-    if (recipient.jid) {
+    if (resolvedRecipientJid) {
       await prisma.sendLog.create({
         data: {
-          jid: recipient.jid,
+          jid: sentJid,
           chatId: recipient.chatId ?? persistedChatId,
           campaignId: recipient.campaignId,
           recipientId: recipient.id,
@@ -379,8 +419,8 @@ async function processRecipient(recipientId: string) {
     console.log("[worker] campaign message sent", {
       recipientId: recipient.id,
       campaignId: recipient.campaignId,
-      jidType: recipient.jid
-        ? isGroupJid(recipient.jid)
+      jidType: resolvedRecipientJid
+        ? isGroupJid(resolvedRecipientJid)
           ? "group"
           : "contact"
         : "contact-sheet"
@@ -394,14 +434,15 @@ async function processRecipient(recipientId: string) {
       },
       data: {
         status: CampaignRecipientStatus.failed,
+        jid: resolvedRecipientJid ? resolvedRecipientJid : recipient.jid,
         error: errorMessage
       }
     });
 
-    if (recipient.jid) {
+    if (resolvedRecipientJid) {
       await prisma.sendLog.create({
         data: {
-          jid: recipient.jid,
+          jid: resolvedRecipientJid,
           chatId: recipient.chatId,
           campaignId: recipient.campaignId,
           recipientId: recipient.id,

@@ -7,10 +7,14 @@ export type SkippedReason =
   | "group_excluded"
   | "opt_out"
   | "no_jid"
+  | "unresolved_chat"
+  | "broadcast_or_status"
   | "already_sent_recently"
   | "invalid_jid"
   | "duplicate_in_campaign"
   | "max_recipients_reached";
+
+export type AudienceJidType = "phone_jid" | "lid_jid" | "group_jid";
 
 export type AudienceCandidate = {
   chatId: string;
@@ -18,6 +22,7 @@ export type AudienceCandidate = {
   name: string | null;
   isGroup: boolean;
   phoneNormalized: string | null;
+  jidType: AudienceJidType;
 };
 
 export type AudiencePreviewItem = {
@@ -26,6 +31,7 @@ export type AudiencePreviewItem = {
   name: string | null;
   isGroup: boolean;
   phoneNormalized: string | null;
+  jidType: AudienceJidType;
 };
 
 export type AudienceResult = {
@@ -40,6 +46,7 @@ export type AudienceResult = {
   eligible: number;
   skipped: number;
   skippedReasons: Record<SkippedReason, number>;
+  jidTypeCounts: Record<AudienceJidType, number>;
   recipientsPreview: AudiencePreviewItem[];
 };
 
@@ -59,6 +66,143 @@ function extractPhoneFromJid(jid: string) {
   const phone = jid.split("@")[0]?.split(":")[0] ?? "";
   const normalized = normalizeBrazilPhone(phone);
   return normalized.ok ? normalized.normalized : null;
+}
+
+function getJidLocalPart(jid: string) {
+  return jid.split("@")[0]?.split(":")[0] ?? "";
+}
+
+function looksLikeRawPhone(value: string) {
+  return /^[+\d\s().-]+$/.test(value);
+}
+
+function isBroadcastOrStatusJid(value: string) {
+  const normalized = value.trim().toLowerCase();
+
+  return (
+    normalized === "status@broadcast" ||
+    normalized.endsWith("@broadcast") ||
+    normalized.includes("newsletter")
+  );
+}
+
+export type CampaignJidResolution =
+  | {
+      ok: true;
+      jid: string;
+      isGroup: boolean;
+      phoneNormalized: string | null;
+      jidType: AudienceJidType;
+    }
+  | {
+      ok: false;
+      reason: SkippedReason;
+    };
+
+function classifyCampaignJid(value: string | null | undefined): CampaignJidResolution {
+  const raw = value?.trim();
+
+  if (!raw) {
+    return { ok: false, reason: "unresolved_chat" };
+  }
+
+  if (isBroadcastOrStatusJid(raw)) {
+    return { ok: false, reason: "broadcast_or_status" };
+  }
+
+  if (!raw.includes("@")) {
+    if (!looksLikeRawPhone(raw)) {
+      return { ok: false, reason: "unresolved_chat" };
+    }
+
+    const normalizedPhone = normalizeBrazilPhone(raw);
+
+    if (!normalizedPhone.ok) {
+      return { ok: false, reason: "invalid_jid" };
+    }
+
+    return {
+      ok: true,
+      jid: `${normalizedPhone.normalized}@s.whatsapp.net`,
+      isGroup: false,
+      phoneNormalized: normalizedPhone.normalized,
+      jidType: "phone_jid"
+    };
+  }
+
+  const jid = normalizeChatJid(raw);
+
+  if (!jid) {
+    return { ok: false, reason: "invalid_jid" };
+  }
+
+  if (isBroadcastOrStatusJid(jid)) {
+    return { ok: false, reason: "broadcast_or_status" };
+  }
+
+  if (isGroupJid(jid)) {
+    return {
+      ok: true,
+      jid,
+      isGroup: true,
+      phoneNormalized: null,
+      jidType: "group_jid"
+    };
+  }
+
+  const localPart = getJidLocalPart(jid);
+
+  if (jid.endsWith("@s.whatsapp.net")) {
+    if (!/^\d+$/.test(localPart)) {
+      return { ok: false, reason: "invalid_jid" };
+    }
+
+    return {
+      ok: true,
+      jid,
+      isGroup: false,
+      phoneNormalized: extractPhoneFromJid(jid),
+      jidType: "phone_jid"
+    };
+  }
+
+  if (jid.endsWith("@lid")) {
+    if (!localPart) {
+      return { ok: false, reason: "invalid_jid" };
+    }
+
+    return {
+      ok: true,
+      jid,
+      isGroup: false,
+      phoneNormalized: null,
+      jidType: "lid_jid"
+    };
+  }
+
+  return { ok: false, reason: "invalid_jid" };
+}
+
+export function resolveCampaignJid(
+  candidates: Array<string | null | undefined>
+): CampaignJidResolution {
+  let fallbackReason: SkippedReason | null = null;
+
+  for (const candidate of candidates) {
+    const result = classifyCampaignJid(candidate);
+
+    if (result.ok) {
+      return result;
+    }
+
+    if (result.reason === "unresolved_chat") {
+      continue;
+    }
+
+    fallbackReason ??= result.reason;
+  }
+
+  return { ok: false, reason: fallbackReason ?? "unresolved_chat" };
 }
 
 function logRecipientSkipped(reason: SkippedReason) {
@@ -142,10 +286,20 @@ function emptySkippedReasons(): Record<SkippedReason, number> {
     group_excluded: 0,
     opt_out: 0,
     no_jid: 0,
+    unresolved_chat: 0,
+    broadcast_or_status: 0,
     already_sent_recently: 0,
     invalid_jid: 0,
     duplicate_in_campaign: 0,
     max_recipients_reached: 0
+  };
+}
+
+function emptyJidTypeCounts(): Record<AudienceJidType, number> {
+  return {
+    phone_jid: 0,
+    lid_jid: 0,
+    group_jid: 0
   };
 }
 
@@ -211,23 +365,23 @@ export async function buildLabelAudience(options: {
   const seenJids = new Set<string>();
   const eligibleItems: AudiencePreviewItem[] = [];
   const phonesToCheck: string[] = [];
+  const jidTypeCounts = emptyJidTypeCounts();
 
   for (const association of associations) {
-    const rawJid = association.chat.jid?.trim();
+    const resolvedJid = resolveCampaignJid([
+      association.jid,
+      association.chat.jid,
+      association.chatId
+    ]);
 
-    if (!rawJid) {
-      skippedReasons.no_jid += 1;
-      logRecipientSkipped("no_jid");
+    if (!resolvedJid.ok) {
+      skippedReasons[resolvedJid.reason] += 1;
+      logRecipientSkipped(resolvedJid.reason);
       continue;
     }
 
-    const jid = normalizeChatJid(rawJid);
-
-    if (!jid) {
-      skippedReasons.invalid_jid += 1;
-      logRecipientSkipped("invalid_jid");
-      continue;
-    }
+    const { jid, jidType, phoneNormalized } = resolvedJid;
+    const isGroup = association.chat.isGroup || resolvedJid.isGroup;
 
     if (seenJids.has(jid)) {
       skippedReasons.duplicate_in_campaign += 1;
@@ -236,22 +390,12 @@ export async function buildLabelAudience(options: {
     }
 
     seenJids.add(jid);
-
-    const isGroup = association.chat.isGroup || isGroupJid(jid);
-    let phoneNormalized: string | null = null;
+    jidTypeCounts[jidType] += 1;
 
     if (isGroup) {
       if (!includeGroups) {
         skippedReasons.group_excluded += 1;
         logRecipientSkipped("group_excluded");
-        continue;
-      }
-    } else {
-      phoneNormalized = extractPhoneFromJid(jid);
-
-      if (!phoneNormalized) {
-        skippedReasons.invalid_jid += 1;
-        logRecipientSkipped("invalid_jid");
         continue;
       }
     }
@@ -265,7 +409,8 @@ export async function buildLabelAudience(options: {
       jid,
       name: association.chat.name,
       isGroup,
-      phoneNormalized
+      phoneNormalized,
+      jidType
     });
   }
 
@@ -305,7 +450,8 @@ export async function buildLabelAudience(options: {
     valid: finalEligible.length,
     skippedGroups: skippedReasons.group_excluded,
     invalidJids: skippedReasons.invalid_jid,
-    duplicates: skippedReasons.duplicate_in_campaign
+    duplicates: skippedReasons.duplicate_in_campaign,
+    unresolved: skippedReasons.unresolved_chat
   });
 
   return {
@@ -320,6 +466,7 @@ export async function buildLabelAudience(options: {
     eligible: finalEligible.length,
     skipped,
     skippedReasons,
+    jidTypeCounts,
     eligibleRecipients: finalEligible,
     recipientsPreview: finalEligible.slice(0, previewLimit)
   } satisfies AudienceResult & {

@@ -9,12 +9,14 @@ type AudienceResponse = {
   eligible: number;
   skipped: number;
   skippedReasons: Record<string, number>;
+  jidTypeCounts: Record<string, number>;
   recipientsPreview: Array<{
     chatId: string;
     jid: string;
     name: string | null;
     isGroup: boolean;
     phoneNormalized: string | null;
+    jidType: string;
   }>;
   error?: string;
 };
@@ -229,8 +231,24 @@ export function LabelSendClient({ labelId }: { labelId: string }) {
               <strong>{audience.skippedReasons.group_excluded ?? 0}</strong>
             </article>
             <article className="metric-card">
+              <span>Contatos @lid</span>
+              <strong>{audience.jidTypeCounts.lid_jid ?? 0}</strong>
+            </article>
+            <article className="metric-card">
+              <span>Contatos telefone</span>
+              <strong>{audience.jidTypeCounts.phone_jid ?? 0}</strong>
+            </article>
+            <article className="metric-card">
               <span>JIDs invalidos</span>
               <strong>{audience.skippedReasons.invalid_jid ?? 0}</strong>
+            </article>
+            <article className="metric-card">
+              <span>Sem conversa resolvida</span>
+              <strong>{audience.skippedReasons.unresolved_chat ?? 0}</strong>
+            </article>
+            <article className="metric-card">
+              <span>Broadcast/status</span>
+              <strong>{audience.skippedReasons.broadcast_or_status ?? 0}</strong>
             </article>
             <article className="metric-card">
               <span>Duplicados</span>
@@ -249,7 +267,13 @@ export function LabelSendClient({ labelId }: { labelId: string }) {
               <li key={recipient.jid}>
                 {recipient.name ?? recipient.phoneNormalized ?? recipient.jid}{" "}
                 <span className="muted">
-                  ({recipient.isGroup ? "grupo" : recipient.phoneNormalized ?? "contato"})
+                  (
+                  {recipient.isGroup
+                    ? "grupo"
+                    : recipient.jidType === "lid_jid"
+                      ? "@lid"
+                      : recipient.phoneNormalized ?? "contato"}
+                  )
                 </span>
               </li>
             ))}

@@ -143,7 +143,8 @@ export async function POST(
         total: audience.total,
         eligible: audience.eligible,
         skipped: audience.skipped,
-        skippedReasons: audience.skippedReasons
+        skippedReasons: audience.skippedReasons,
+        jidTypeCounts: audience.jidTypeCounts
       },
       message: payload.startNow
         ? "Envio por etiqueta criado e iniciado."

@@ -140,6 +140,12 @@ export function EnviosClient({ selectedCampaignId }: { selectedCampaignId?: stri
                 {(campaign.skippedReasonCounts.invalid_jid ?? 0) > 0 ? (
                   <span>JIDs invalidos {campaign.skippedReasonCounts.invalid_jid}</span>
                 ) : null}
+                {(campaign.skippedReasonCounts.unresolved_chat ?? 0) > 0 ? (
+                  <span>sem conversa resolvida {campaign.skippedReasonCounts.unresolved_chat}</span>
+                ) : null}
+                {(campaign.skippedReasonCounts.broadcast_or_status ?? 0) > 0 ? (
+                  <span>broadcast/status {campaign.skippedReasonCounts.broadcast_or_status}</span>
+                ) : null}
                 {(campaign.skippedReasonCounts.duplicate_in_campaign ?? 0) > 0 ? (
                   <span>duplicados {campaign.skippedReasonCounts.duplicate_in_campaign}</span>
                 ) : null}
