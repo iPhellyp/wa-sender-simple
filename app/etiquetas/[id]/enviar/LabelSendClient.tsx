@@ -22,7 +22,7 @@ type AudienceResponse = {
 export function LabelSendClient({ labelId }: { labelId: string }) {
   const [name, setName] = useState("");
   const [message, setMessage] = useState("");
-  const [includeGroups, setIncludeGroups] = useState(false);
+  const [excludeGroups, setExcludeGroups] = useState(true);
   const [excludeAlreadySentDays, setExcludeAlreadySentDays] = useState(7);
   const [maxRecipients, setMaxRecipients] = useState(100);
   const [intervalMinutes, setIntervalMinutes] = useState(1);
@@ -39,7 +39,7 @@ export function LabelSendClient({ labelId }: { labelId: string }) {
 
     try {
       const params = new URLSearchParams({
-        includeGroups: String(includeGroups),
+        excludeGroups: String(excludeGroups),
         excludeAlreadySentDays: String(excludeAlreadySentDays),
         maxRecipients: String(maxRecipients),
         limit: "50"
@@ -66,7 +66,7 @@ export function LabelSendClient({ labelId }: { labelId: string }) {
     }
 
     const confirmed = window.confirm(
-      `Voce esta prestes a enviar para ${audience.eligible} conversas. Confirma?`
+      `Voce esta prestes a enviar para ${audience.eligible} conversas. Ignorados: ${audience.skipped}. Confirma?`
     );
 
     if (!confirmed) {
@@ -86,7 +86,7 @@ export function LabelSendClient({ labelId }: { labelId: string }) {
         body: JSON.stringify({
           name,
           message,
-          includeGroups,
+          excludeGroups,
           excludeAlreadySentDays,
           maxRecipients,
           intervalMinutes,
@@ -168,11 +168,16 @@ export function LabelSendClient({ labelId }: { labelId: string }) {
         </label>
         <label className="checkbox-row">
           <input
-            checked={includeGroups}
+            checked={excludeGroups}
             type="checkbox"
-            onChange={(event) => setIncludeGroups(event.target.checked)}
+            onChange={(event) => setExcludeGroups(event.target.checked)}
           />
-          Incluir grupos
+          <span>
+            <strong>Ignorar grupos</strong>
+            <span className="muted">
+              Envia somente para contatos individuais. Grupos vinculados a etiqueta serao ignorados.
+            </span>
+          </span>
         </label>
         <label>
           Nao enviar para quem recebeu nos ultimos (dias)
@@ -219,6 +224,18 @@ export function LabelSendClient({ labelId }: { labelId: string }) {
               <span>Ignorados</span>
               <strong>{audience.skipped}</strong>
             </article>
+            <article className="metric-card">
+              <span>Grupos ignorados</span>
+              <strong>{audience.skippedReasons.group_excluded ?? 0}</strong>
+            </article>
+            <article className="metric-card">
+              <span>JIDs invalidos</span>
+              <strong>{audience.skippedReasons.invalid_jid ?? 0}</strong>
+            </article>
+            <article className="metric-card">
+              <span>Duplicados</span>
+              <strong>{audience.skippedReasons.duplicate_in_campaign ?? 0}</strong>
+            </article>
           </div>
           <div className="muted">
             Motivos:{" "}
@@ -230,7 +247,7 @@ export function LabelSendClient({ labelId }: { labelId: string }) {
           <ul className="list-plain">
             {audience.recipientsPreview.map((recipient) => (
               <li key={recipient.jid}>
-                {recipient.name ?? recipient.jid}{" "}
+                {recipient.name ?? recipient.phoneNormalized ?? recipient.jid}{" "}
                 <span className="muted">
                   ({recipient.isGroup ? "grupo" : recipient.phoneNormalized ?? "contato"})
                 </span>

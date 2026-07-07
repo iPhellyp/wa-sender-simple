@@ -90,6 +90,30 @@ export function WhatsappClient() {
 
   return (
     <section className="grid">
+      <div className="card grid">
+        <div className="button-row" style={{ justifyContent: "space-between" }}>
+          <div className="segmented" role="tablist" aria-label="Instancias WhatsApp">
+            <button className="active" type="button" role="tab" aria-selected="true">
+              Instancia principal
+            </button>
+            <button
+              disabled
+              type="button"
+              role="tab"
+              aria-selected="false"
+              title="Multi-instancia em preparacao"
+            >
+              Nova instancia
+            </button>
+          </div>
+          <span className="badge warning">em preparacao</span>
+        </div>
+        <div className="muted">
+          Multi-instancia requer isolamento por instanceId para sessao, filas, conversas, etiquetas
+          e envios. A conexao atual continua usando apenas a instancia principal.
+        </div>
+      </div>
+
       <div className="card">
         <div className="button-row" style={{ justifyContent: "space-between" }}>
           <div>

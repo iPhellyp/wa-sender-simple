@@ -1,7 +1,7 @@
 import { createHash } from "crypto";
 import { prisma } from "../prisma/client";
 import { normalizeBrazilPhone } from "../phone/normalize";
-import { isGroupJid } from "../baileys/sync";
+import { isGroupJid, normalizeChatJid } from "../baileys/sync";
 
 export type SkippedReason =
   | "group_excluded"
@@ -59,6 +59,10 @@ function extractPhoneFromJid(jid: string) {
   const phone = jid.split("@")[0]?.split(":")[0] ?? "";
   const normalized = normalizeBrazilPhone(phone);
   return normalized.ok ? normalized.normalized : null;
+}
+
+function logRecipientSkipped(reason: SkippedReason) {
+  console.log("[campaign] recipient skipped", { reason });
 }
 
 async function loadOptedOutPhones(phones: string[]) {
@@ -209,30 +213,47 @@ export async function buildLabelAudience(options: {
   const phonesToCheck: string[] = [];
 
   for (const association of associations) {
-    const jid = association.chat.jid;
+    const rawJid = association.chat.jid?.trim();
+
+    if (!rawJid) {
+      skippedReasons.no_jid += 1;
+      logRecipientSkipped("no_jid");
+      continue;
+    }
+
+    const jid = normalizeChatJid(rawJid);
 
     if (!jid) {
-      skippedReasons.no_jid += 1;
+      skippedReasons.invalid_jid += 1;
+      logRecipientSkipped("invalid_jid");
       continue;
     }
 
     if (seenJids.has(jid)) {
       skippedReasons.duplicate_in_campaign += 1;
+      logRecipientSkipped("duplicate_in_campaign");
       continue;
     }
 
     seenJids.add(jid);
 
-    if (!includeGroups && (association.chat.isGroup || isGroupJid(jid))) {
-      skippedReasons.group_excluded += 1;
-      continue;
-    }
+    const isGroup = association.chat.isGroup || isGroupJid(jid);
+    let phoneNormalized: string | null = null;
 
-    const phoneNormalized = extractPhoneFromJid(jid);
+    if (isGroup) {
+      if (!includeGroups) {
+        skippedReasons.group_excluded += 1;
+        logRecipientSkipped("group_excluded");
+        continue;
+      }
+    } else {
+      phoneNormalized = extractPhoneFromJid(jid);
 
-    if (!includeGroups && !phoneNormalized) {
-      skippedReasons.invalid_jid += 1;
-      continue;
+      if (!phoneNormalized) {
+        skippedReasons.invalid_jid += 1;
+        logRecipientSkipped("invalid_jid");
+        continue;
+      }
     }
 
     if (phoneNormalized) {
@@ -243,7 +264,7 @@ export async function buildLabelAudience(options: {
       chatId: association.chat.id,
       jid,
       name: association.chat.name,
-      isGroup: association.chat.isGroup,
+      isGroup,
       phoneNormalized
     });
   }
@@ -259,16 +280,19 @@ export async function buildLabelAudience(options: {
   for (const item of eligibleItems) {
     if (finalEligible.length >= maxRecipients) {
       skippedReasons.max_recipients_reached += 1;
+      logRecipientSkipped("max_recipients_reached");
       continue;
     }
 
     if (item.phoneNormalized && optedOutPhones.has(item.phoneNormalized)) {
       skippedReasons.opt_out += 1;
+      logRecipientSkipped("opt_out");
       continue;
     }
 
     if (recentlySentJids.has(item.jid)) {
       skippedReasons.already_sent_recently += 1;
+      logRecipientSkipped("already_sent_recently");
       continue;
     }
 
@@ -276,6 +300,13 @@ export async function buildLabelAudience(options: {
   }
 
   const skipped = associations.length - finalEligible.length;
+
+  console.log("[campaign] audience resolved", {
+    valid: finalEligible.length,
+    skippedGroups: skippedReasons.group_excluded,
+    invalidJids: skippedReasons.invalid_jid,
+    duplicates: skippedReasons.duplicate_in_campaign
+  });
 
   return {
     label: {

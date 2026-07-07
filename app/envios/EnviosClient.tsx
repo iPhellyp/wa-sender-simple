@@ -134,6 +134,15 @@ export function EnviosClient({ selectedCampaignId }: { selectedCampaignId?: stri
                 <span>{campaign.recipientCount} destinatarios</span>
                 <span>enviados {campaign.recipientStatusCounts.sent ?? 0}</span>
                 <span>falhas {campaign.recipientStatusCounts.failed ?? 0}</span>
+                {(campaign.skippedReasonCounts.group_excluded ?? 0) > 0 ? (
+                  <span>grupos ignorados {campaign.skippedReasonCounts.group_excluded}</span>
+                ) : null}
+                {(campaign.skippedReasonCounts.invalid_jid ?? 0) > 0 ? (
+                  <span>JIDs invalidos {campaign.skippedReasonCounts.invalid_jid}</span>
+                ) : null}
+                {(campaign.skippedReasonCounts.duplicate_in_campaign ?? 0) > 0 ? (
+                  <span>duplicados {campaign.skippedReasonCounts.duplicate_in_campaign}</span>
+                ) : null}
               </span>
               <span className="button-row">
                 <button

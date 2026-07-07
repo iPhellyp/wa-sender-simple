@@ -130,6 +130,20 @@ function getPhoneFromRecipientJid(jid: string | null | undefined) {
   return normalized.ok ? normalized.normalized : null;
 }
 
+function getRecipientJidSkipReason(jid: string, excludeGroups: boolean) {
+  const normalizedJid = normalizeChatJid(jid);
+
+  if (!normalizedJid) {
+    return "invalid_jid";
+  }
+
+  if (isGroupJid(normalizedJid)) {
+    return excludeGroups ? "group_excluded" : null;
+  }
+
+  return getPhoneFromRecipientJid(normalizedJid) ? null : "invalid_jid";
+}
+
 async function isRecipientOptedOut(recipient: {
   jid: string | null;
   contact: { optedOut: boolean; phoneNormalized: string } | null;
@@ -259,6 +273,29 @@ async function processRecipient(recipientId: string) {
   if (recipient.scheduledAt && recipient.scheduledAt.getTime() > Date.now()) {
     await requeueRecipient(recipient.id, recipient.scheduledAt.getTime() - Date.now());
     return;
+  }
+
+  if (recipient.jid) {
+    const skipReason = getRecipientJidSkipReason(recipient.jid, recipient.campaign.excludeGroups);
+
+    if (skipReason) {
+      await prisma.campaignRecipient.update({
+        where: {
+          id: recipient.id
+        },
+        data: {
+          status: CampaignRecipientStatus.canceled,
+          error:
+            skipReason === "group_excluded"
+              ? "Grupo ignorado pela configuracao da campanha"
+              : "JID invalido para envio",
+          skippedReason: skipReason
+        }
+      });
+      console.log("[campaign] recipient skipped", { reason: skipReason });
+      await schedulePendingRecipients(recipient.campaignId);
+      return;
+    }
   }
 
   if (await isRecipientOptedOut(recipient)) {

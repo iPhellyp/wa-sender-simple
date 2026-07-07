@@ -24,6 +24,7 @@ export async function POST(
     message?: string;
     intervalMinutes?: number;
     includeGroups?: boolean;
+    excludeGroups?: boolean;
     excludeAlreadySentDays?: number;
     maxRecipients?: number;
     sendWindowStart?: string | null;
@@ -34,7 +35,9 @@ export async function POST(
   const name = String(payload.name ?? "").trim();
   const message = String(payload.message ?? "").trim();
   const intervalMinutes = Number(payload.intervalMinutes ?? 1);
-  const includeGroups = payload.includeGroups === true;
+  const excludeGroups =
+    payload.excludeGroups === undefined ? payload.includeGroups !== true : payload.excludeGroups !== false;
+  const includeGroups = !excludeGroups;
   const excludeAlreadySentDays = Number(
     payload.excludeAlreadySentDays ?? DEFAULT_EXCLUDE_ALREADY_SENT_DAYS
   );
@@ -98,7 +101,7 @@ export async function POST(
       status: CampaignStatus.draft,
       targetMode: "label",
       targetLabelId: audience.label.id,
-      excludeGroups: !includeGroups,
+      excludeGroups,
       excludeAlreadySentDays,
       dedupeKey,
       maxRecipients,

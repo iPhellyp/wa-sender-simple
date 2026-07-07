@@ -36,6 +36,18 @@ function getJidTail(jid: string) {
   return normalized.slice(-6) || jid.slice(0, 6);
 }
 
+function formatCompactJid(jid: string) {
+  if (jid.endsWith("@g.us")) {
+    return `Grupo ${getJidTail(jid)}`;
+  }
+
+  if (jid.endsWith("@lid")) {
+    return `lid ${getJidTail(jid)}`;
+  }
+
+  return `jid ${getJidTail(jid)}`;
+}
+
 export function formatJidAsPhone(jid: string | null | undefined) {
   if (!jid?.endsWith("@s.whatsapp.net")) {
     return null;
@@ -135,10 +147,10 @@ export function isBetterDisplayName(
 }
 
 export function getWhatsappDisplayName(source: DisplayNameSource) {
-  const chatName = cleanDisplayName(source.chatName, source.jid);
+  const contactPushName = cleanDisplayName(source.contactPushName, source.jid);
 
-  if (chatName) {
-    return chatName;
+  if (contactPushName) {
+    return contactPushName;
   }
 
   const contactName = cleanDisplayName(source.contactName, source.jid);
@@ -147,10 +159,10 @@ export function getWhatsappDisplayName(source: DisplayNameSource) {
     return contactName;
   }
 
-  const contactPushName = cleanDisplayName(source.contactPushName, source.jid);
+  const chatName = cleanDisplayName(source.chatName, source.jid);
 
-  if (contactPushName) {
-    return contactPushName;
+  if (chatName) {
+    return chatName;
   }
 
   const phone = formatJidAsPhone(source.jid);
@@ -163,11 +175,7 @@ export function getWhatsappDisplayName(source: DisplayNameSource) {
     return `Grupo ${getJidTail(source.jid)}`;
   }
 
-  if (source.jid.endsWith("@lid")) {
-    return "Contato sincronizado";
-  }
-
-  return source.jid;
+  return formatCompactJid(source.jid);
 }
 
 export function getWhatsappIdentityLabel(jid: string) {
@@ -181,5 +189,5 @@ export function getWhatsappIdentityLabel(jid: string) {
     return `lid ${getJidTail(jid)}`;
   }
 
-  return jid;
+  return formatCompactJid(jid);
 }
