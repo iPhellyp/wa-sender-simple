@@ -9,6 +9,10 @@ export const RESET_WHATSAPP_JOB = "reset-whatsapp";
 export const SEND_MANUAL_MESSAGE_JOB = "send-manual-message";
 export const SYNC_WHATSAPP_HISTORY_JOB = "sync-whatsapp-history";
 
+const CONNECT_WHATSAPP_JOB_ID = "connect-whatsapp";
+const DISCONNECT_WHATSAPP_JOB_ID = "disconnect-whatsapp";
+const RESET_WHATSAPP_JOB_ID = "reset-whatsapp";
+
 export type SendManualMessageJobData = {
   chatId: string;
   jid: string;
@@ -57,7 +61,7 @@ export async function enqueueWhatsappConnect() {
     {},
     {
       attempts: 1,
-      jobId: buildJobId("connect-whatsapp", String(Date.now())),
+      jobId: CONNECT_WHATSAPP_JOB_ID,
       removeOnComplete: true,
       removeOnFail: 100
     }
@@ -70,7 +74,7 @@ export async function enqueueWhatsappDisconnect() {
     {},
     {
       attempts: 1,
-      jobId: buildJobId("disconnect-whatsapp", String(Date.now())),
+      jobId: DISCONNECT_WHATSAPP_JOB_ID,
       removeOnComplete: true,
       removeOnFail: 100
     }
@@ -83,7 +87,7 @@ export async function enqueueWhatsappReset() {
     {},
     {
       attempts: 1,
-      jobId: buildJobId("reset-whatsapp", String(Date.now())),
+      jobId: RESET_WHATSAPP_JOB_ID,
       removeOnComplete: true,
       removeOnFail: 100
     }

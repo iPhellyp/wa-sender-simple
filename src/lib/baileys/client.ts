@@ -47,6 +47,8 @@ const MAX_GENERAL_RECONNECT_ATTEMPTS = 5;
 const TERMINAL_COOLDOWN_MS = 15_000;
 const TERMINAL_SESSION_MESSAGE =
   "Conexao WhatsApp encerrada ou removida no celular. Use Resetar sessao e Reconectar para gerar novo QR.";
+const QR_SAFE_428_MESSAGE =
+  "Falha ao gerar QR mesmo em modo seguro. Tente Resetar sessao e Reconectar novamente.";
 
 export class BaileysStartSkippedError extends Error {
   constructor(message: string) {
@@ -335,9 +337,11 @@ async function handleIncomingMessages(event: BaileysEventMap["messages.upsert"])
   }
 }
 
-async function createSocket() {
+async function createSocket(options: { sessionFileCount: number }) {
   invalidateSocketHandlers();
   const localGeneration = socketGeneration;
+  const { sessionFileCount } = options;
+  const isCleanPairing = sessionFileCount === 0;
 
   if (socket) {
     socket.end(new Error("Replacing existing socket"));
@@ -360,24 +364,40 @@ async function createSocket() {
   });
 
   const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
-  const { version, isLatest, error: versionError } = await fetchLatestBaileysVersion();
+  let normalModeSocketOptions: Partial<Parameters<typeof makeWASocket>[0]> = {};
 
-  console.log("[baileys] fetched latest version", {
-    version: version.join("."),
-    isLatest,
-    error: versionError ? sanitizeErrorMessage(versionError) : null
-  });
+  if (isCleanPairing) {
+    console.log("[baileys] latest version skipped for qr safe mode");
+    console.log("[baileys] qr safe mode enabled", {
+      sessionFiles: sessionFileCount,
+      syncFullHistory: false,
+      versionSource: "local-default"
+    });
+  } else {
+    console.log("[baileys] normal socket mode enabled", { sessionFiles: sessionFileCount });
+    const { version, isLatest, error: versionError } = await fetchLatestBaileysVersion();
+
+    console.log("[baileys] fetched latest version", {
+      version: version.join("."),
+      isLatest,
+      error: versionError ? sanitizeErrorMessage(versionError) : null
+    });
+
+    normalModeSocketOptions = {
+      version,
+      getMessage: getStoredMessage
+    };
+  }
 
   const sock = makeWASocket({
     auth: state,
-    version,
     printQRInTerminal: false,
     logger: P({ level: process.env.BAILEYS_LOG_LEVEL ?? "silent" }),
-    browser: Browsers.macOS("Desktop"),
-    syncFullHistory: true,
-    shouldSyncHistoryMessage: () => true,
-    getMessage: getStoredMessage,
-    markOnlineOnConnect: false
+    browser: isCleanPairing ? Browsers.ubuntu("Chrome") : Browsers.macOS("Desktop"),
+    syncFullHistory: !isCleanPairing,
+    shouldSyncHistoryMessage: () => !isCleanPairing,
+    markOnlineOnConnect: false,
+    ...normalModeSocketOptions
   });
 
   socket = sock;
@@ -483,19 +503,24 @@ async function createSocket() {
         if (statusCode === 428 || isTerminalSessionStatusCode(statusCode)) {
           clearReconnectTimer();
           lastTerminalErrorAt = Date.now();
+          const isCleanPairing428 = statusCode === 428 && isCleanPairing;
           const lastError =
-            statusCode === 428
+            isCleanPairing428
+              ? QR_SAFE_428_MESSAGE
+              : statusCode === 428
               ? TERMINAL_SESSION_MESSAGE
               : lastDisconnectError ?? TERMINAL_SESSION_MESSAGE;
 
           await saveWhatsappSession({
-            status: WhatsappStatus.disconnected,
+            status: isCleanPairing428 ? WhatsappStatus.error : WhatsappStatus.disconnected,
             qrCode: null,
             connectedPhone: null,
             lastError
           });
 
-          if (statusCode === 428) {
+          if (isCleanPairing428) {
+            console.log("[baileys] clean pairing failed with 428");
+          } else if (statusCode === 428) {
             console.log("[baileys] connection terminated 428; reconnect disabled");
           } else {
             console.log("[baileys] connection terminated; reconnect disabled", { statusCode });
@@ -665,7 +690,7 @@ export async function startBaileysConnection(options: { resetRetry?: boolean } =
 
   manualDisconnectRequested = false;
 
-  startPromise = createSocket()
+  startPromise = createSocket({ sessionFileCount })
     .catch(async (error) => {
       startPromise = null;
       const lastError = sanitizeErrorMessage(error) || "Erro ao iniciar Baileys";
@@ -836,8 +861,8 @@ export async function requestWhatsappHistorySync() {
   }
 
   console.log("[baileys] history sync requested", {
-    syncFullHistory: true,
-    hasOnDemandHistory: typeof socket?.fetchMessageHistory === "function",
+    syncFullHistory: false,
+    hasOnDemandHistory: false,
     mode: "event-driven"
   });
 
@@ -845,7 +870,7 @@ export async function requestWhatsappHistorySync() {
     ok: true,
     mode: "event-driven" as const,
     message:
-      "O WhatsApp envia historico por eventos proprios. Para tentar historico completo, use Resetar sessao e Reconectar."
+      "O WhatsApp envia historico por eventos proprios. Historico antigo completo nao e solicitado durante pareamento."
   };
 }
 

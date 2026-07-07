@@ -14,6 +14,18 @@ type WhatsappSession = {
   error?: string;
 };
 
+function getQrRecoveryMessage(session: WhatsappSession | null) {
+  if (
+    !session?.lastError ||
+    (session.status !== "error" && session.status !== "disconnected") ||
+    !/(428|qr)/i.test(session.lastError)
+  ) {
+    return null;
+  }
+
+  return "Nao foi possivel gerar QR. Clique Resetar sessao uma vez e depois Reconectar. Se persistir, o sistema usara modo QR seguro.";
+}
+
 export function WhatsappClient() {
   const [session, setSession] = useState<WhatsappSession | null>(null);
   const [loading, setLoading] = useState(true);
@@ -73,6 +85,9 @@ export function WhatsappClient() {
     return <div className="card">Carregando...</div>;
   }
 
+  const qrRecoveryMessage = getQrRecoveryMessage(session);
+  const reconnectDisabled = busy || session?.status === "connecting" || session?.status === "qr";
+
   return (
     <section className="grid">
       <div className="card">
@@ -90,7 +105,7 @@ export function WhatsappClient() {
           <div className="button-row">
             <button
               className="button"
-              disabled={busy}
+              disabled={reconnectDisabled}
               type="button"
               onClick={() => void postAction("/api/whatsapp/reconnect")}
             >
@@ -122,7 +137,8 @@ export function WhatsappClient() {
       </div>
 
       {error ? <div className="message error">{error}</div> : null}
-      {session?.lastError && session.status !== "error" ? (
+      {qrRecoveryMessage ? <div className="message error">{qrRecoveryMessage}</div> : null}
+      {!qrRecoveryMessage && session?.lastError && session.status !== "error" ? (
         <div className="message error">{session.lastError}</div>
       ) : null}
 
@@ -132,7 +148,7 @@ export function WhatsappClient() {
         </div>
       ) : null}
 
-      {session?.status === "error" && session.lastError ? (
+      {!qrRecoveryMessage && session?.status === "error" && session.lastError ? (
         <div className="message error">{session.lastError}</div>
       ) : null}
 

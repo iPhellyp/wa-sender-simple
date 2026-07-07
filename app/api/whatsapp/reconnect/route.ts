@@ -14,6 +14,15 @@ function getErrorMessage(error: unknown) {
 
 export async function POST() {
   try {
+    const currentSession = await getWhatsappStatusPayload();
+
+    if (currentSession.status === "connecting" || currentSession.status === "qr") {
+      return NextResponse.json({
+        ...currentSession,
+        message: "Conexao WhatsApp ja esta em andamento"
+      });
+    }
+
     await markWhatsappConnecting();
     await enqueueWhatsappConnect();
 
