@@ -40,13 +40,17 @@ let connectRetryCount = 0;
 let socketGeneration = 0;
 let status515RestartCount = 0;
 let generalReconnectCount = 0;
+let transientReconnectCount = 0;
 let lastTerminalErrorAt: number | null = null;
 let lastResetSucceededAt: number | null = null;
 let resetInProgress = false;
 let cleanPairingProfileIndex = 0;
 
 const MAX_GENERAL_RECONNECT_ATTEMPTS = 5;
+const TRANSIENT_RECONNECT_BACKOFF_MS = [2_000, 5_000, 15_000] as const;
 const TERMINAL_COOLDOWN_MS = 15_000;
+const TRANSIENT_RECONNECT_EXHAUSTED_MESSAGE =
+  "Reconexao automatica esgotada apos queda transitoria do socket WhatsApp.";
 const TERMINAL_SESSION_MESSAGE =
   "Conexao WhatsApp encerrada ou removida no celular. Use Resetar sessao e Reconectar para gerar novo QR.";
 const QR_SAFE_428_MESSAGE =
@@ -129,6 +133,7 @@ function resetReconnectCounters() {
   connectRetryCount = 0;
   status515RestartCount = 0;
   generalReconnectCount = 0;
+  transientReconnectCount = 0;
 }
 
 function getCleanPairingProfile() {
@@ -180,6 +185,27 @@ function sanitizeErrorMessage(error: unknown) {
 
 function getDisconnectStatusCode(error: unknown) {
   return (error as { output?: { statusCode?: number } } | null)?.output?.statusCode;
+}
+
+function isAckStreamError(message: string | null) {
+  return /stream errored.*ack|ack.*stream errored/i.test(message ?? "");
+}
+
+function isTransientSocketClose(options: {
+  statusCode: number | undefined;
+  errorMessage: string | null;
+  wasConnected: boolean;
+  pairingMode: boolean;
+}) {
+  if (options.statusCode === 500 && isAckStreamError(options.errorMessage)) {
+    return true;
+  }
+
+  return (
+    options.statusCode === DisconnectReason.restartRequired &&
+    options.wasConnected &&
+    !options.pairingMode
+  );
 }
 
 function getMessageTimestampForJson(messageTimestamp: unknown) {
@@ -335,6 +361,83 @@ function scheduleReconnect(delayMs: number, reason: string) {
       if (!isBaileysStartSkippedError(error)) {
         console.warn("[baileys] scheduled reconnect failed", {
           error: sanitizeErrorMessage(error)
+        });
+      }
+    });
+  }, delayMs);
+}
+
+async function scheduleTransientReconnect(options: {
+  statusCode: number | undefined;
+  lastError: string;
+  currentConnectedPhone: string | null;
+}) {
+  if (manualDisconnectRequested || resetInProgress) {
+    console.log("[baileys] transient reconnect skipped after manual disconnect", {
+      statusCode: options.statusCode
+    });
+    return;
+  }
+
+  if (reconnectTimer || startPromise) {
+    console.log("[baileys] transient reconnect already scheduled or running", {
+      statusCode: options.statusCode
+    });
+    return;
+  }
+
+  if (transientReconnectCount >= TRANSIENT_RECONNECT_BACKOFF_MS.length) {
+    clearReconnectTimer();
+    lastTerminalErrorAt = Date.now();
+    await saveWhatsappSession({
+      status: WhatsappStatus.disconnected,
+      qrCode: null,
+      connectedPhone: options.currentConnectedPhone,
+      lastError: TRANSIENT_RECONNECT_EXHAUSTED_MESSAGE
+    });
+    console.log("[baileys] transient reconnect exhausted", {
+      statusCode: options.statusCode,
+      attempts: transientReconnectCount,
+      lastError: options.lastError
+    });
+    return;
+  }
+
+  const attempt = transientReconnectCount + 1;
+  const delayMs =
+    TRANSIENT_RECONNECT_BACKOFF_MS[transientReconnectCount] ??
+    TRANSIENT_RECONNECT_BACKOFF_MS[TRANSIENT_RECONNECT_BACKOFF_MS.length - 1];
+  transientReconnectCount = attempt;
+
+  await saveWhatsappSession({
+    status: WhatsappStatus.connecting,
+    qrCode: null,
+    connectedPhone: options.currentConnectedPhone,
+    lastError: `Reconectando apos queda transitoria: ${options.lastError}`
+  });
+
+  console.log("[baileys] transient close; scheduling reconnect", {
+    statusCode: options.statusCode,
+    attempt,
+    delayMs
+  });
+
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    console.log("[baileys] transient reconnect attempt", {
+      statusCode: options.statusCode,
+      attempt
+    });
+    void startBaileysConnection({ resetRetry: false }).catch((error) => {
+      if (!isBaileysStartSkippedError(error)) {
+        console.warn("[baileys] transient reconnect attempt failed", {
+          attempt,
+          error: sanitizeErrorMessage(error)
+        });
+        void scheduleTransientReconnect({
+          statusCode: options.statusCode,
+          lastError: sanitizeErrorMessage(error),
+          currentConnectedPhone: options.currentConnectedPhone
         });
       }
     });
@@ -616,6 +719,9 @@ async function createSocket(options: {
           (pairingPending || isDbPairingPendingNow) && hasStoredPairingQr;
         const shouldRestartInPairingMode =
           isCleanPairing || pairingPending || isDbPairingPendingNow;
+        const wasConnected =
+          currentSession.status === WhatsappStatus.connected ||
+          Boolean(currentSession.connectedPhone);
 
         if (statusCode === 428 || isTerminalSessionStatusCode(statusCode)) {
           if (statusCode === 428 && shouldPreserveQrDuringPairing) {
@@ -737,6 +843,22 @@ async function createSocket(options: {
             lastError
           });
           console.log("[baileys] connection terminated; reconnect disabled", { statusCode: 405 });
+          return;
+        }
+
+        if (
+          isTransientSocketClose({
+            statusCode,
+            errorMessage: lastDisconnectError,
+            wasConnected,
+            pairingMode: shouldRestartInPairingMode
+          })
+        ) {
+          await scheduleTransientReconnect({
+            statusCode,
+            lastError: lastDisconnectError ?? "Queda transitoria do socket",
+            currentConnectedPhone: currentSession.connectedPhone
+          });
           return;
         }
 
@@ -940,7 +1062,7 @@ export async function startBaileysConnection(options: { resetRetry?: boolean } =
       await saveWhatsappSession({
         status: WhatsappStatus.error,
         qrCode: null,
-        connectedPhone: null,
+        connectedPhone: shouldResetRetry ? null : dbSession.connectedPhone,
         lastError
       });
       throw error;

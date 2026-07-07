@@ -28,6 +28,13 @@ function getQrRecoveryMessage(session: WhatsappSession | null) {
   return "Nao foi possivel gerar QR. Clique Resetar sessao uma vez e depois Reconectar. Se persistir, o sistema usara modo QR seguro.";
 }
 
+function isTransientReconnectStatus(session: WhatsappSession | null) {
+  return (
+    session?.status === "connecting" &&
+    /reconectando apos queda transitoria/i.test(session.lastError ?? "")
+  );
+}
+
 export function WhatsappClient() {
   const [session, setSession] = useState<WhatsappSession | null>(null);
   const [loading, setLoading] = useState(true);
@@ -88,6 +95,7 @@ export function WhatsappClient() {
   }
 
   const qrRecoveryMessage = getQrRecoveryMessage(session);
+  const isTransientReconnect = isTransientReconnectStatus(session);
   const reconnectDisabled = busy || session?.status === "connecting" || session?.status === "qr";
 
   return (
@@ -195,11 +203,15 @@ export function WhatsappClient() {
 
       {error ? <div className="message error">{error}</div> : null}
       {qrRecoveryMessage ? <div className="message error">{qrRecoveryMessage}</div> : null}
-      {!qrRecoveryMessage && session?.lastError && session.status !== "error" ? (
+      {!qrRecoveryMessage && !isTransientReconnect && session?.lastError && session.status !== "error" ? (
         <div className="message error">{session.lastError}</div>
       ) : null}
 
-      {session?.status === "connecting" ? (
+      {isTransientReconnect ? (
+        <div className="message">
+          Reconectando com a sessao atual. Nao e necessario resetar nem ler QR agora.
+        </div>
+      ) : session?.status === "connecting" ? (
         <div className="message">
           Aguardando QR Code. Isso pode levar alguns segundos.
         </div>
