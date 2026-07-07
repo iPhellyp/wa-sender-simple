@@ -41,7 +41,7 @@ export async function POST(
 
   if (shouldIgnoreJidForX1Only(chat.jid)) {
     return NextResponse.json(
-      { error: "Envio para grupo ignorado pelo modo X1" },
+      { error: "Envio para grupo ignorado pelo modo de envio individual" },
       { status: 400 }
     );
   }
@@ -67,4 +67,5 @@ export async function POST(
     message: "Mensagem enviada para fila"
   });
 }
+
 

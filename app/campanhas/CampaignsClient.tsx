@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
@@ -80,7 +80,7 @@ type CampaignPrefillContext = {
 
 type AudienceMode = "label" | "catalog" | "contacts";
 
-const steps = ["Dados", "Publico", "Mensagem", "Seguranca", "Revisao"];
+const steps = ["Publico", "Mensagem", "Seguranca", "Revisao"];
 
 function statusClass(status: string) {
   if (["sent", "completed", "connected"].includes(status)) return "success";
@@ -89,10 +89,36 @@ function statusClass(status: string) {
   return "warning";
 }
 
+function statusLabel(status: string) {
+  const labels: Record<string, string> = {
+    draft: "rascunho",
+    running: "rodando",
+    paused: "pausada",
+    completed: "completa",
+    canceled: "cancelada",
+    sent: "enviada",
+    failed: "falhou",
+    pending: "pendente"
+  };
+
+  return labels[status] ?? status;
+}
+
 function audienceLabel(mode: AudienceMode) {
-  if (mode === "label") return "Etiqueta";
-  if (mode === "catalog") return "Contatos selecionados do WhatsApp";
+  if (mode === "label") return "Etiqueta WhatsApp";
+  if (mode === "catalog") return "Contatos WhatsApp";
   return "Contatos importados";
+}
+
+function campaignAudienceLabel(mode: string) {
+  if (mode === "label") return "Etiqueta WhatsApp";
+  if (mode === "chatIds" || mode === "catalog") return "Contatos WhatsApp";
+  if (mode === "contacts") return "Contatos importados";
+  return mode;
+}
+
+function getPendingCount(counts: Record<string, number>) {
+  return (counts.pending ?? 0) + (counts.scheduled ?? 0) + (counts.sending ?? 0);
 }
 
 export function CampaignsClient({
@@ -121,7 +147,9 @@ export function CampaignsClient({
   const [audienceMode, setAudienceMode] = useState<AudienceMode>(initialMode);
   const [selectedLabelId, setSelectedLabelId] = useState(prefillContext?.labelId ?? labels[0]?.id ?? "");
   const [labelAudience, setLabelAudience] = useState<LabelAudience | null>(null);
-  const [confirmed, setConfirmed] = useState(false);
+  const [confirmedAudience, setConfirmedAudience] = useState(false);
+  const [confirmedMessage, setConfirmedMessage] = useState(false);
+  const [confirmedGroups, setConfirmedGroups] = useState(false);
   const [createdCampaignId, setCreatedCampaignId] = useState<string | null>(null);
   const [createdMessage, setCreatedMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -145,7 +173,13 @@ export function CampaignsClient({
       : audienceMode === "catalog"
         ? catalogChats.length
         : selectedContacts.size;
-  const canCreate = Boolean(name.trim()) && Boolean(message.trim()) && intervalMinutes >= 1 && audienceCount > 0 && confirmed;
+  const securityConfirmed = confirmedAudience && confirmedMessage && confirmedGroups;
+  const canCreate =
+    Boolean(name.trim()) &&
+    Boolean(message.trim()) &&
+    intervalMinutes >= 1 &&
+    audienceCount > 0 &&
+    securityConfirmed;
 
   async function loadContacts() {
     const response = await fetch("/api/contacts?optedOut=false&pageSize=100", {
@@ -169,13 +203,18 @@ export function CampaignsClient({
 
   async function refresh() {
     setLoading(true);
-    await Promise.all([loadContacts(), loadCampaigns()]);
-    if (selectedCampaignId) await loadRecipients(selectedCampaignId);
-    setLoading(false);
+    try {
+      await Promise.all([loadContacts(), loadCampaigns()]);
+      if (selectedCampaignId) await loadRecipients(selectedCampaignId);
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => {
-    void refresh();
+    void refresh().catch((loadError) => {
+      setError(loadError instanceof Error ? loadError.message : "Erro inesperado");
+    });
   }, []);
 
   useEffect(() => {
@@ -280,39 +319,25 @@ export function CampaignsClient({
   }
 
   return (
-    <section className="grid">
-      <div className="page-header">
-        <div>
-          <span className="eyebrow">Campanhas WhatsApp</span>
-          <h1>Crie envios por etiqueta, contatos WhatsApp ou contatos importados</h1>
-          <p>
-            Fluxo simples: escolha o publico, revise a mensagem e crie a campanha em rascunho
-            antes de iniciar.
-          </p>
-        </div>
-        <Link className="button secondary" href="/envios">
-          Ver historico de envios
-        </Link>
-      </div>
-
-      {error ? <div className="message error">{error}</div> : null}
+    <section className="page-shell">
+      {error ? <div className="message error compact">{error}</div> : null}
       {prefilledContacts.length ? (
-        <div className="message">
+        <div className="message compact">
           Origem: {prefilledContacts.length} contato(s) importado(s) selecionado(s) em /contatos.
-          Opt-out ja foi removido no carregamento do preview.
+          Opt-out ja foi removido no preview.
         </div>
       ) : null}
       {removedPrefillContacts > 0 ? (
-        <div className="message warning">
+        <div className="message warning compact">
           {removedPrefillContacts} contato(s) da URL foram ignorados por opt-out, duplicidade ou ID
           invalido.
         </div>
       ) : null}
       {createdMessage ? (
-        <div className="message">
-          {createdMessage}{" "}
+        <div className="message compact success-row">
+          <span>{createdMessage}</span>
           {createdCampaignId ? (
-            <>
+            <span className="button-row">
               <button
                 className="button compact-button"
                 disabled={busy}
@@ -320,361 +345,412 @@ export function CampaignsClient({
                 onClick={() => void runAction(createdCampaignId, "start")}
               >
                 Iniciar agora
-              </button>{" "}
-              <Link className="button secondary compact-button" href={`/envios?campaignId=${createdCampaignId}`}>
+              </button>
+              <Link className="button secondary compact-button" href={`/envios?campaign=${createdCampaignId}`}>
                 Acompanhar em envios
               </Link>
-            </>
+            </span>
           ) : null}
         </div>
       ) : null}
 
-      <section className="section-card">
-        <div className="toolbar">
-          <div className="button-row" aria-label="Etapas da campanha">
+      <section className="wizard-layout">
+        <div className="wizard-main">
+          <aside className="wizard-sidebar">
             {steps.map((label, index) => (
               <button
-                className={`button ${step === index ? "" : "secondary"} compact-button`}
+                className={`wizard-step ${step === index ? "active" : ""}`}
                 key={label}
                 type="button"
                 onClick={() => setStep(index)}
               >
-                {index + 1}. {label}
+                <span>{index + 1}</span>
+                <strong>{label}</strong>
               </button>
             ))}
-          </div>
-          <span className="muted">{audienceCount} destinatario(s) elegivel(is)</span>
-        </div>
-
-        {step === 0 ? (
-          <div className="form-grid">
-            <div className="field">
-              <label htmlFor="campaign-name">Nome da campanha</label>
-              <input
-                className="input"
-                id="campaign-name"
-                maxLength={120}
-                value={name}
-                onChange={(event) => setName(event.target.value)}
-              />
+            <div className="wizard-note">
+              <strong>{audienceCount}</strong>
+              <span>destinatario(s) elegivel(is)</span>
             </div>
-            <div className="field">
-              <label htmlFor="campaign-interval">Intervalo entre envios em minutos</label>
-              <input
-                className="input"
-                id="campaign-interval"
-                min="1"
-                type="number"
-                value={intervalMinutes}
-                onChange={(event) => setIntervalMinutes(Number(event.target.value))}
-              />
-            </div>
-          </div>
-        ) : null}
+          </aside>
 
-        {step === 1 ? (
-          <div className="grid two-column">
-            <div className="field">
-              <label>Publico</label>
-              <div className="button-row">
-                <button
-                  className={`button ${audienceMode === "label" ? "" : "secondary"}`}
-                  type="button"
-                  onClick={() => setAudienceMode("label")}
-                >
-                  Etiqueta
-                </button>
-                <button
-                  className={`button ${audienceMode === "catalog" ? "" : "secondary"}`}
-                  disabled={catalogChats.length === 0}
-                  type="button"
-                  onClick={() => setAudienceMode("catalog")}
-                >
-                  Contatos WhatsApp
-                </button>
-                <button
-                  className={`button ${audienceMode === "contacts" ? "" : "secondary"}`}
-                  type="button"
-                  onClick={() => setAudienceMode("contacts")}
-                >
-                  Importados
-                </button>
-              </div>
-              <p className="muted">Grupos continuam excluidos. @lid e @s.whatsapp.net seguem elegiveis.</p>
-            </div>
-
-            <div className="card">
-              <strong>{audienceLabel(audienceMode)}</strong>
-              {audienceMode === "label" ? (
-                <div className="form-grid">
-                  <select
-                    className="input"
-                    value={selectedLabelId}
-                    onChange={(event) => setSelectedLabelId(event.target.value)}
+          <div className="wizard-content">
+            {step === 0 ? (
+              <div className="form-grid">
+                <div className="audience-grid">
+                  <button
+                    className={`audience-card ${audienceMode === "label" ? "active" : ""}`}
+                    type="button"
+                    onClick={() => setAudienceMode("label")}
                   >
-                    {labels.map((label) => (
-                      <option key={label.id} value={label.id}>
-                        {label.name}
-                      </option>
-                    ))}
-                  </select>
-                  <div className="muted">
-                    {selectedLabel?.name ?? "Etiqueta"}: {labelAudience?.eligible ?? 0} elegiveis,
-                    {` ${labelAudience?.skipped ?? 0}`} ignorados.
+                    <strong>Etiqueta WhatsApp</strong>
+                    <span>{labelAudience?.eligible ?? 0} elegiveis</span>
+                  </button>
+                  <button
+                    className={`audience-card ${audienceMode === "catalog" ? "active" : ""}`}
+                    disabled={catalogChats.length === 0}
+                    type="button"
+                    onClick={() => setAudienceMode("catalog")}
+                  >
+                    <strong>Contatos WhatsApp</strong>
+                    <span>{catalogChats.length} selecionados</span>
+                  </button>
+                  <button
+                    className={`audience-card ${audienceMode === "contacts" ? "active" : ""}`}
+                    type="button"
+                    onClick={() => setAudienceMode("contacts")}
+                  >
+                    <strong>Contatos importados</strong>
+                    <span>{selectedContacts.size} selecionados</span>
+                  </button>
+                </div>
+
+                {audienceMode === "label" ? (
+                  <div className="data-card compact">
+                    <div className="field">
+                      <label htmlFor="campaign-label">Etiqueta</label>
+                      <select
+                        className="select"
+                        id="campaign-label"
+                        value={selectedLabelId}
+                        onChange={(event) => setSelectedLabelId(event.target.value)}
+                      >
+                        {labels.map((label) => (
+                          <option key={label.id} value={label.id}>
+                            {label.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="row-meta">
+                      <span>{selectedLabel?.name ?? "Etiqueta"}: {labelAudience?.eligible ?? 0} elegiveis</span>
+                      <span>{labelAudience?.skipped ?? 0} ignorados</span>
+                    </div>
+                    <ul className="list-plain">
+                      {(labelAudience?.recipientsPreview ?? []).map((recipient) => (
+                        <li key={recipient.chatId}>
+                          {recipient.name ?? recipient.jid} <span className="muted">({recipient.jidType})</span>
+                        </li>
+                      ))}
+                    </ul>
                   </div>
+                ) : null}
+
+                {audienceMode === "catalog" ? (
+                  <div className="data-card compact">
+                    <strong>Contatos WhatsApp selecionados</strong>
+                    <ul className="list-plain">
+                      {catalogChats.length === 0 ? (
+                        <li>Nenhum contato veio selecionado das conversas.</li>
+                      ) : (
+                        catalogChats.slice(0, 8).map((chat) => (
+                          <li key={chat.id}>
+                            {chat.name ?? chat.jid} <span className="muted">{chat.jid}</span>
+                          </li>
+                        ))
+                      )}
+                    </ul>
+                  </div>
+                ) : null}
+
+                {audienceMode === "contacts" ? (
+                  <div className="data-card compact">
+                    {prefilledContacts.length ? (
+                      <div className="message compact">
+                        Preview selecionado:{" "}
+                        {prefilledContacts.slice(0, 6).map((contact) => contact.name).join(", ")}
+                        {prefilledContacts.length > 6 ? "..." : ""}
+                      </div>
+                    ) : null}
+                    <div className="button-row">
+                      <button
+                        className="button secondary compact-button"
+                        type="button"
+                        onClick={() => setSelectedContacts(new Set(selectableContacts.map((contact) => contact.id)))}
+                      >
+                        Selecionar todos
+                      </button>
+                      <button
+                        className="button secondary compact-button"
+                        type="button"
+                        onClick={() => setSelectedContacts(new Set())}
+                      >
+                        Limpar
+                      </button>
+                    </div>
+                    <div className="contact-picker compact">
+                      {selectableContacts.map((contact) => (
+                        <label className="contact-option" key={contact.id}>
+                          <input
+                            checked={selectedContacts.has(contact.id)}
+                            type="checkbox"
+                            onChange={() => toggleContact(contact.id)}
+                          />
+                          <span>
+                            <strong>{contact.name}</strong>
+                            <br />
+                            <span className="muted">
+                              {contact.phoneNormalized} | {contact.source}
+                            </span>
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+
+            {step === 1 ? (
+              <div className="form-grid">
+                <div className="field">
+                  <label htmlFor="campaign-name">Nome da campanha</label>
+                  <input
+                    className="input"
+                    id="campaign-name"
+                    maxLength={120}
+                    value={name}
+                    onChange={(event) => setName(event.target.value)}
+                  />
+                </div>
+                <div className="field">
+                  <label htmlFor="campaign-message">Mensagem</label>
+                  <textarea
+                    className="textarea tall"
+                    id="campaign-message"
+                    maxLength={4000}
+                    value={message}
+                    onChange={(event) => setMessage(event.target.value)}
+                  />
+                  <span className="muted">{message.length}/4000 caracteres</span>
+                </div>
+                <div className="field">
+                  <label htmlFor="campaign-interval">Intervalo entre envios em minutos</label>
+                  <input
+                    className="input"
+                    id="campaign-interval"
+                    min="1"
+                    type="number"
+                    value={intervalMinutes}
+                    onChange={(event) => setIntervalMinutes(Number(event.target.value))}
+                  />
+                </div>
+              </div>
+            ) : null}
+
+            {step === 2 ? (
+              <div className="form-grid">
+                <label className="check-card">
+                  <input
+                    checked={confirmedAudience}
+                    type="checkbox"
+                    onChange={(event) => setConfirmedAudience(event.target.checked)}
+                  />
+                  <span>Conferi o publico selecionado.</span>
+                </label>
+                <label className="check-card">
+                  <input
+                    checked={confirmedMessage}
+                    type="checkbox"
+                    onChange={(event) => setConfirmedMessage(event.target.checked)}
+                  />
+                  <span>Conferi a mensagem e o intervalo.</span>
+                </label>
+                <label className="check-card">
+                  <input
+                    checked={confirmedGroups}
+                    type="checkbox"
+                    onChange={(event) => setConfirmedGroups(event.target.checked)}
+                  />
+                  <span>Entendo que grupos sao ignorados.</span>
+                </label>
+              </div>
+            ) : null}
+
+            {step === 3 ? (
+              <div className="review-grid">
+                <div className="data-card compact">
+                  <strong>Resumo</strong>
                   <ul className="list-plain">
-                    {(labelAudience?.recipientsPreview ?? []).map((recipient) => (
-                      <li key={recipient.chatId}>
-                        {recipient.name ?? recipient.jid} <span className="muted">({recipient.jidType})</span>
-                      </li>
-                    ))}
+                    <li>Nome: {name || "nao informado"}</li>
+                    <li>Publico: {audienceLabel(audienceMode)}</li>
+                    <li>Destinatarios: {audienceCount}</li>
+                    <li>Intervalo: {intervalMinutes || 0} minuto(s)</li>
+                    <li>Mensagem: {message.trim() ? "preenchida" : "pendente"}</li>
+                    <li>Seguranca: {securityConfirmed ? "confirmada" : "pendente"}</li>
                   </ul>
                 </div>
-              ) : null}
-
-              {audienceMode === "catalog" ? (
-                <ul className="list-plain">
-                  {catalogChats.length === 0 ? (
-                    <li>Nenhum contato veio selecionado das conversas.</li>
-                  ) : (
-                    catalogChats.slice(0, 8).map((chat) => (
-                      <li key={chat.id}>
-                        {chat.name ?? chat.jid} <span className="muted">{chat.jid}</span>
-                      </li>
-                    ))
-                  )}
-                </ul>
-              ) : null}
-
-              {audienceMode === "contacts" ? (
-                <div className="form-grid">
-                  {prefilledContacts.length ? (
-                    <div className="message">
-                      Preview selecionado:{" "}
-                      {prefilledContacts.slice(0, 6).map((contact) => contact.name).join(", ")}
-                      {prefilledContacts.length > 6 ? "..." : ""}
-                    </div>
-                  ) : null}
-                  <div className="button-row">
-                    <button
-                      className="button secondary compact-button"
-                      type="button"
-                      onClick={() => setSelectedContacts(new Set(selectableContacts.map((contact) => contact.id)))}
-                    >
-                      Selecionar todos
-                    </button>
-                    <button
-                      className="button secondary compact-button"
-                      type="button"
-                      onClick={() => setSelectedContacts(new Set())}
-                    >
-                      Limpar
-                    </button>
-                  </div>
-                  <div className="contact-picker">
-                    {selectableContacts.map((contact) => (
-                      <label className="contact-option" key={contact.id}>
-                        <input
-                          checked={selectedContacts.has(contact.id)}
-                          type="checkbox"
-                          onChange={() => toggleContact(contact.id)}
-                        />
-                        <span>
-                          <strong>{contact.name}</strong>
-                          <br />
-                          <span className="muted">
-                            {contact.phoneNormalized} | {contact.source}
-                          </span>
-                        </span>
-                      </label>
-                    ))}
-                  </div>
+                <div className="data-card compact">
+                  <strong>Criar rascunho</strong>
+                  <p className="muted">O envio so comeca quando voce iniciar a campanha.</p>
+                  <button
+                    className="button wide-action"
+                    disabled={busy || !canCreate}
+                    type="button"
+                    onClick={() => void createCampaign()}
+                  >
+                    Criar campanha em rascunho
+                  </button>
                 </div>
-              ) : null}
-            </div>
-          </div>
-        ) : null}
+              </div>
+            ) : null}
 
-        {step === 2 ? (
-          <div className="grid two-column">
-            <div className="field">
-              <label htmlFor="campaign-message">Mensagem</label>
-              <textarea
-                className="textarea"
-                id="campaign-message"
-                maxLength={4000}
-                rows={10}
-                value={message}
-                onChange={(event) => setMessage(event.target.value)}
-              />
-              <span className="muted">{message.length}/4000 caracteres</span>
-            </div>
-            <div className="card">
-              <strong>Preview</strong>
-              <p style={{ whiteSpace: "pre-wrap" }}>{message || "Digite a mensagem da campanha."}</p>
-            </div>
-          </div>
-        ) : null}
-
-        {step === 3 ? (
-          <div className="grid">
-            <div className="message warning">
-              A campanha sera criada em rascunho. O envio so comeca quando voce clicar em iniciar.
-              Grupos sao ignorados e opt-out continua respeitado nas rotas existentes.
-            </div>
-            <label className="contact-option">
-              <input
-                checked={confirmed}
-                type="checkbox"
-                onChange={(event) => setConfirmed(event.target.checked)}
-              />
-              <span>Confirmei publico, mensagem e intervalo antes de criar a campanha.</span>
-            </label>
-          </div>
-        ) : null}
-
-        {step === 4 ? (
-          <div className="grid two-column">
-            <div className="card">
-              <strong>Resumo</strong>
-              <ul className="list-plain">
-                <li>Nome: {name || "nao informado"}</li>
-                <li>Publico: {audienceLabel(audienceMode)}</li>
-                <li>Destinatarios: {audienceCount}</li>
-                <li>Intervalo: {intervalMinutes || 0} minuto(s)</li>
-                <li>Mensagem: {message.trim() ? "preenchida" : "pendente"}</li>
-              </ul>
-            </div>
-            <div className="card">
-              <strong>Acoes</strong>
-              <p className="muted">Crie a campanha em rascunho e acompanhe o status em /envios.</p>
-              <button className="button" disabled={busy || !canCreate} type="button" onClick={() => void createCampaign()}>
-                Criar campanha em rascunho
+            <div className="wizard-nav">
+              <button
+                className="button secondary"
+                disabled={step === 0}
+                type="button"
+                onClick={() => setStep((current) => Math.max(0, current - 1))}
+              >
+                Voltar
+              </button>
+              <button
+                className="button"
+                disabled={step === steps.length - 1}
+                type="button"
+                onClick={() => setStep((current) => Math.min(steps.length - 1, current + 1))}
+              >
+                Proximo
               </button>
             </div>
           </div>
-        ) : null}
-
-        <div className="button-row">
-          <button
-            className="button secondary"
-            disabled={step === 0}
-            type="button"
-            onClick={() => setStep((current) => Math.max(0, current - 1))}
-          >
-            Voltar
-          </button>
-          <button
-            className="button"
-            disabled={step === steps.length - 1}
-            type="button"
-            onClick={() => setStep((current) => Math.min(steps.length - 1, current + 1))}
-          >
-            Proximo
-          </button>
         </div>
+
+        <aside className="preview-panel">
+          <div className="preview-panel-header">
+            <strong>Preview</strong>
+            <span className={`status-badge ${canCreate ? "success" : "warning"}`}>
+              {canCreate ? "pronto" : "pendente"}
+            </span>
+          </div>
+          <div className="meta-list compact">
+            <div className="meta-row">
+              <span>Publico</span>
+              <span>{audienceLabel(audienceMode)}</span>
+            </div>
+            <div className="meta-row">
+              <span>Elegiveis</span>
+              <span>{audienceCount}</span>
+            </div>
+            <div className="meta-row">
+              <span>Intervalo</span>
+              <span>{intervalMinutes || 0} min</span>
+            </div>
+          </div>
+          <div className="message-preview">
+            {message.trim() ? message : "Digite a mensagem para visualizar o envio."}
+          </div>
+        </aside>
       </section>
 
-      <section className="grid two-column">
-        <div className="section-card">
-          <div className="toolbar">
+      <section className="data-card">
+        <div className="table-toolbar">
+          <div>
             <strong>Campanhas recentes</strong>
-            <button className="button secondary compact-button" type="button" onClick={() => void refresh()}>
-              Atualizar
-            </button>
+            <span className="muted">{campaigns.length} campanha(s)</span>
           </div>
-          {loading ? (
-            <div>Carregando...</div>
-          ) : campaigns.length === 0 ? (
-            <div className="muted">Nenhuma campanha criada.</div>
-          ) : (
-            <div className="table-wrap">
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th>Campanha</th>
-                    <th>Publico</th>
-                    <th>Status</th>
-                    <th>Destinatarios</th>
-                    <th>Acoes</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {campaigns.map((campaign) => (
-                    <tr key={campaign.id}>
-                      <td>{campaign.name}</td>
-                      <td>{campaign.targetLabel?.name ?? campaign.targetMode}</td>
-                      <td>
-                        <span className={`badge ${statusClass(campaign.status)}`}>{campaign.status}</span>
-                      </td>
-                      <td>
-                        {campaign.recipientCount} | sent {campaign.recipientStatusCounts.sent ?? 0} | fail{" "}
-                        {campaign.recipientStatusCounts.failed ?? 0}
-                      </td>
-                      <td>
-                        <div className="button-row">
-                          <button
-                            className="button secondary compact-button"
-                            type="button"
-                            onClick={() => {
-                              setSelectedCampaignId(campaign.id);
-                              void loadRecipients(campaign.id);
-                            }}
-                          >
-                            Ver
-                          </button>
-                          <button
-                            className="button secondary compact-button"
-                            disabled={busy || !["draft", "paused"].includes(campaign.status)}
-                            type="button"
-                            onClick={() => void runAction(campaign.id, campaign.status === "paused" ? "resume" : "start")}
-                          >
-                            {campaign.status === "paused" ? "Retomar" : "Iniciar"}
-                          </button>
-                          <button
-                            className="button danger compact-button"
-                            disabled={busy || ["completed", "canceled"].includes(campaign.status)}
-                            type="button"
-                            onClick={() => void runAction(campaign.id, "cancel")}
-                          >
-                            Cancelar
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+          <button className="button secondary compact-button" type="button" onClick={() => void refresh()}>
+            Atualizar
+          </button>
         </div>
+        {loading ? (
+          <div className="empty-state compact">Carregando campanhas...</div>
+        ) : campaigns.length === 0 ? (
+          <div className="empty-state compact">
+            <strong>Nenhuma campanha criada</strong>
+            <span>Crie um rascunho para iniciar os envios.</span>
+          </div>
+        ) : (
+          <div className="table-wrap">
+            <table className="data-table compact">
+              <thead>
+                <tr>
+                  <th>Campanha</th>
+                  <th>Publico</th>
+                  <th>Status</th>
+                  <th>Destinatarios</th>
+                  <th>Acoes</th>
+                </tr>
+              </thead>
+              <tbody>
+                {campaigns.map((campaign) => (
+                  <tr key={campaign.id}>
+                    <td>{campaign.name}</td>
+                    <td>{campaign.targetLabel?.name ?? campaignAudienceLabel(campaign.targetMode)}</td>
+                    <td>
+                      <span className={`status-badge ${statusClass(campaign.status)}`}>
+                        {statusLabel(campaign.status)}
+                      </span>
+                    </td>
+                    <td>
+                      {campaign.recipientCount} total | {campaign.recipientStatusCounts.sent ?? 0} enviados |{" "}
+                      {campaign.recipientStatusCounts.failed ?? 0} falhas |{" "}
+                      {getPendingCount(campaign.recipientStatusCounts)} pendentes
+                    </td>
+                    <td>
+                      <div className="button-row">
+                        <button
+                          className="button secondary compact-button"
+                          type="button"
+                          onClick={() => {
+                            setSelectedCampaignId(campaign.id);
+                            void loadRecipients(campaign.id);
+                          }}
+                        >
+                          Ver
+                        </button>
+                        <button
+                          className="button secondary compact-button"
+                          disabled={busy || !["draft", "paused"].includes(campaign.status)}
+                          type="button"
+                          onClick={() => void runAction(campaign.id, campaign.status === "paused" ? "resume" : "start")}
+                        >
+                          {campaign.status === "paused" ? "Retomar" : "Iniciar"}
+                        </button>
+                        <button
+                          className="button danger compact-button"
+                          disabled={busy || ["completed", "canceled"].includes(campaign.status)}
+                          type="button"
+                          onClick={() => void runAction(campaign.id, "cancel")}
+                        >
+                          Cancelar
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
 
-        <aside className="section-card">
-          <strong>Destinatarios da campanha</strong>
-          {selectedCampaignId ? (
-            recipients.length === 0 ? (
-              <div className="muted">Nenhum destinatario.</div>
+        {selectedCampaignId ? (
+          <div className="detail-panel compact">
+            <div className="table-toolbar">
+              <strong>Destinatarios da campanha</strong>
+              <span className="muted">{recipients.length} exibido(s)</span>
+            </div>
+            {recipients.length === 0 ? (
+              <div className="empty-state compact">Nenhum destinatario.</div>
             ) : (
-              <div className="grid">
-                {recipients.slice(0, 20).map((recipient) => (
-                  <div key={recipient.id} style={{ borderBottom: "1px solid var(--line)", paddingBottom: 10 }}>
-                    <div className="button-row" style={{ justifyContent: "space-between" }}>
+              <div className="campaign-list compact">
+                {recipients.slice(0, 12).map((recipient) => (
+                  <div className="recipient-row" key={recipient.id}>
+                    <div>
                       <strong>{recipient.contact?.name ?? recipient.jid ?? recipient.id}</strong>
-                      <span className={`badge ${statusClass(recipient.status)}`}>{recipient.status}</span>
+                      <span className="muted">{recipient.contact?.phoneNormalized ?? recipient.jid}</span>
                     </div>
-                    <div className="muted">{recipient.contact?.phoneNormalized ?? recipient.jid}</div>
-                    {recipient.error ? <div className="message error">{recipient.error}</div> : null}
+                    <span className={`status-badge ${statusClass(recipient.status)}`}>
+                      {statusLabel(recipient.status)}
+                    </span>
+                    {recipient.error ? <span className="send-error">{recipient.error}</span> : null}
                   </div>
                 ))}
               </div>
-            )
-          ) : (
-            <div className="muted">Selecione uma campanha para ver sent, failed e pending.</div>
-          )}
-        </aside>
+            )}
+          </div>
+        ) : null}
       </section>
     </section>
   );
 }
-
-

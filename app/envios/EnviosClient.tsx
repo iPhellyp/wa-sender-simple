@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
@@ -47,6 +47,23 @@ function statusClass(status: string) {
   return "warning";
 }
 
+function statusLabel(status: string) {
+  const labels: Record<string, string> = {
+    draft: "rascunho",
+    running: "rodando",
+    paused: "pausada",
+    completed: "completa",
+    canceled: "cancelada",
+    pending: "pendente",
+    scheduled: "agendado",
+    sending: "enviando",
+    sent: "enviado",
+    failed: "falhou"
+  };
+
+  return labels[status] ?? status;
+}
+
 function formatDate(value: string | null) {
   if (!value) return "-";
   return new Intl.DateTimeFormat("pt-BR", {
@@ -62,6 +79,18 @@ function inPeriod(createdAt: string, period: string) {
   const now = Date.now();
   const days = period === "today" ? 1 : period === "7d" ? 7 : 30;
   return created >= now - days * 24 * 60 * 60 * 1000;
+}
+
+function getPendingCount(counts: Record<string, number>) {
+  return (counts.pending ?? 0) + (counts.scheduled ?? 0) + (counts.sending ?? 0);
+}
+
+function getAudienceLabel(campaign: Pick<EnvioSummary, "targetLabel" | "targetMode">) {
+  if (campaign.targetLabel) return campaign.targetLabel.name;
+  if (campaign.targetMode === "chatIds") return "Contatos WhatsApp";
+  if (campaign.targetMode === "contacts") return "Contatos importados";
+  if (campaign.targetMode === "label") return "Etiqueta WhatsApp";
+  return campaign.targetMode;
 }
 
 export function EnviosClient({ selectedCampaignId }: { selectedCampaignId?: string | null }) {
@@ -98,10 +127,7 @@ export function EnviosClient({ selectedCampaignId }: { selectedCampaignId?: stri
         accumulator.recipients += campaign.recipientCount;
         accumulator.sent += campaign.recipientStatusCounts.sent ?? 0;
         accumulator.failed += campaign.recipientStatusCounts.failed ?? 0;
-        accumulator.pending +=
-          (campaign.recipientStatusCounts.pending ?? 0) +
-          (campaign.recipientStatusCounts.scheduled ?? 0) +
-          (campaign.recipientStatusCounts.sending ?? 0);
+        accumulator.pending += getPendingCount(campaign.recipientStatusCounts);
         return accumulator;
       },
       { campaigns: 0, recipients: 0, sent: 0, failed: 0, pending: 0 }
@@ -118,6 +144,10 @@ export function EnviosClient({ selectedCampaignId }: { selectedCampaignId?: stri
       )
     };
   }, [details]);
+
+  const selectedCampaign = campaigns.find((campaign) => campaign.id === selectedId) ?? null;
+  const detailTotal = details?.recipients.length ?? 0;
+  const progressPercent = detailTotal > 0 ? Math.round((detailGroups.sent.length / detailTotal) * 100) : 0;
 
   async function loadCampaigns() {
     const response = await fetch("/api/envios", { cache: "no-store" });
@@ -137,6 +167,18 @@ export function EnviosClient({ selectedCampaignId }: { selectedCampaignId?: stri
   async function refresh() {
     await loadCampaigns();
     if (selectedId) await loadDetails(selectedId);
+  }
+
+  async function refreshWithErrorHandling() {
+    setBusy(true);
+    setError(null);
+    try {
+      await refresh();
+    } catch (refreshError) {
+      setError(refreshError instanceof Error ? refreshError.message : "Erro inesperado");
+    } finally {
+      setBusy(false);
+    }
   }
 
   useEffect(() => {
@@ -166,7 +208,7 @@ export function EnviosClient({ selectedCampaignId }: { selectedCampaignId?: stri
 
       if (!response.ok) {
         const data = (await response.json()) as { error?: string };
-        throw new Error(data.error ?? `Falha ao ${action} campanha`);
+        throw new Error(data.error ?? `Falha ao atualizar campanha`);
       }
 
       await refresh();
@@ -178,200 +220,286 @@ export function EnviosClient({ selectedCampaignId }: { selectedCampaignId?: stri
   }
 
   if (loading) {
-    return <div className="section-card">Carregando envios...</div>;
+    return <div className="data-card compact">Carregando envios...</div>;
   }
 
   return (
-    <section className="grid">
-      <div className="page-header">
-        <div>
-          <span className="eyebrow">Auditoria de campanhas</span>
-          <h1>Envios</h1>
-          <p>Historico operacional por campanha, com destinatarios enviados, pendentes e falhos.</p>
-        </div>
-        <Link className="button" href="/campanhas">
-          Criar campanha
-        </Link>
-      </div>
+    <section className="page-shell">
+      {error ? <div className="message error compact">{error}</div> : null}
 
-      {error ? <div className="message error">{error}</div> : null}
-
-      <div className="stats-grid">
-        <div className="stat-card">
+      <div className="metric-grid">
+        <article className="metric-card compact">
           <span>Campanhas</span>
           <strong>{totals.campaigns}</strong>
-        </div>
-        <div className="stat-card">
+        </article>
+        <article className="metric-card compact">
           <span>Destinatarios</span>
           <strong>{totals.recipients}</strong>
-        </div>
-        <div className="stat-card">
+        </article>
+        <article className="metric-card compact">
           <span>Enviados</span>
           <strong>{totals.sent}</strong>
-        </div>
-        <div className="stat-card">
+        </article>
+        <article className="metric-card compact">
           <span>Falhas</span>
           <strong>{totals.failed}</strong>
-        </div>
-        <div className="stat-card">
+        </article>
+        <article className="metric-card compact">
           <span>Pendentes</span>
           <strong>{totals.pending}</strong>
+        </article>
+      </div>
+
+      <div className="data-card compact">
+        <div className="filter-bar">
+          <input
+            className="input"
+            placeholder="Buscar campanha ou etiqueta"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+          />
+          <select
+            className="select"
+            value={statusFilter}
+            onChange={(event) => setStatusFilter(event.target.value)}
+          >
+            <option value="all">Todos os status</option>
+            <option value="draft">Rascunho</option>
+            <option value="running">Rodando</option>
+            <option value="paused">Pausada</option>
+            <option value="completed">Completa</option>
+            <option value="canceled">Cancelada</option>
+          </select>
+          <select
+            className="select"
+            value={periodFilter}
+            onChange={(event) => setPeriodFilter(event.target.value)}
+          >
+            <option value="all">Todo periodo</option>
+            <option value="today">Hoje</option>
+            <option value="7d">Ultimos 7 dias</option>
+            <option value="30d">Ultimos 30 dias</option>
+          </select>
+          <button
+            className="button secondary"
+            disabled={busy}
+            type="button"
+            onClick={() => void refreshWithErrorHandling()}
+          >
+            Atualizar
+          </button>
         </div>
       </div>
 
-      <div className="toolbar">
-        <input
-          className="input"
-          placeholder="Buscar campanha ou etiqueta"
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-        />
-        <select className="input" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
-          <option value="all">Todos os status</option>
-          <option value="draft">Rascunho</option>
-          <option value="running">Rodando</option>
-          <option value="paused">Pausada</option>
-          <option value="completed">Completa</option>
-          <option value="canceled">Cancelada</option>
-        </select>
-        <select className="input" value={periodFilter} onChange={(event) => setPeriodFilter(event.target.value)}>
-          <option value="all">Todo periodo</option>
-          <option value="today">Hoje</option>
-          <option value="7d">Ultimos 7 dias</option>
-          <option value="30d">Ultimos 30 dias</option>
-        </select>
-        <button className="button secondary" type="button" onClick={() => void refresh()}>
-          Atualizar
-        </button>
-      </div>
-
-      <section className="grid two-column">
-        <div className="section-card">
-          <div className="toolbar">
-            <strong>Campanhas</strong>
-            <span className="muted">{filteredCampaigns.length} resultado(s)</span>
+      <section className="split-layout">
+        <div className="data-card">
+          <div className="table-toolbar">
+            <div>
+              <strong>Campanhas</strong>
+              <span className="muted">{filteredCampaigns.length} resultado(s)</span>
+            </div>
           </div>
-          <div className="conversation-grid">
-            {filteredCampaigns.map((campaign) => (
-              <article className="inbox-conversation-card label-card" key={campaign.id}>
-                <span className="conversation-card-body">
-                  <span className="toolbar">
-                    <strong>{campaign.name}</strong>
-                    <span className={`badge ${statusClass(campaign.status)}`}>{campaign.status}</span>
-                  </span>
-                  <span className="conversation-card-meta">
-                    <span>{campaign.targetLabel?.name ?? campaign.targetMode}</span>
-                    <span>{campaign.recipientCount} destinatarios</span>
-                    <span>sent {campaign.recipientStatusCounts.sent ?? 0}</span>
-                    <span>failed {campaign.recipientStatusCounts.failed ?? 0}</span>
-                    <span>pending {(campaign.recipientStatusCounts.pending ?? 0) + (campaign.recipientStatusCounts.scheduled ?? 0)}</span>
-                    <span>criada {formatDate(campaign.createdAt)}</span>
-                    {(campaign.skippedReasonCounts.group_excluded ?? 0) > 0 ? (
-                      <span>grupos ignorados {campaign.skippedReasonCounts.group_excluded}</span>
-                    ) : null}
-                    {(campaign.skippedReasonCounts.invalid_jid ?? 0) > 0 ? (
-                      <span>JIDs invalidos {campaign.skippedReasonCounts.invalid_jid}</span>
-                    ) : null}
-                  </span>
-                  <span className="button-row">
-                    <button
-                      className="button secondary compact-button"
-                      type="button"
-                      onClick={() => {
-                        setSelectedId(campaign.id);
-                        void loadDetails(campaign.id);
-                      }}
-                    >
-                      Detalhes
-                    </button>
-                    {campaign.status === "draft" ? (
-                      <button
-                        className="button compact-button"
-                        disabled={busy}
-                        type="button"
-                        onClick={() => void runCampaignAction(campaign.id, "start")}
-                      >
-                        Iniciar
-                      </button>
-                    ) : null}
-                    {campaign.status === "paused" ? (
-                      <button
-                        className="button compact-button"
-                        disabled={busy}
-                        type="button"
-                        onClick={() => void runCampaignAction(campaign.id, "resume")}
-                      >
-                        Retomar
-                      </button>
-                    ) : null}
-                    {campaign.status === "running" ? (
+
+          {filteredCampaigns.length === 0 ? (
+            <div className="empty-state compact">
+              <strong>Nenhuma campanha encontrada</strong>
+              <span>Ajuste os filtros ou crie uma nova campanha.</span>
+              <Link className="button compact-button" href="/campanhas">
+                Criar campanha
+              </Link>
+            </div>
+          ) : (
+            <div className="campaign-list">
+              {filteredCampaigns.map((campaign) => {
+                const pending = getPendingCount(campaign.recipientStatusCounts);
+                const isSelected = selectedId === campaign.id;
+
+                return (
+                  <article className={`campaign-row ${isSelected ? "active" : ""}`} key={campaign.id}>
+                    <div className="campaign-row-main">
+                      <div>
+                        <strong>{campaign.name}</strong>
+                        <span className="muted">{getAudienceLabel(campaign)}</span>
+                      </div>
+                      <span className={`status-badge ${statusClass(campaign.status)}`}>
+                        {statusLabel(campaign.status)}
+                      </span>
+                    </div>
+                    <div className="row-meta">
+                      <span>{campaign.recipientCount} destinatarios</span>
+                      <span>{campaign.recipientStatusCounts.sent ?? 0} enviados</span>
+                      <span>{campaign.recipientStatusCounts.failed ?? 0} falhas</span>
+                      <span>{pending} pendentes</span>
+                      <span>criada {formatDate(campaign.createdAt)}</span>
+                    </div>
+                    <div className="button-row">
                       <button
                         className="button secondary compact-button"
-                        disabled={busy}
                         type="button"
-                        onClick={() => void runCampaignAction(campaign.id, "pause")}
+                        onClick={() => {
+                          setSelectedId(campaign.id);
+                          void loadDetails(campaign.id);
+                        }}
                       >
-                        Pausar
+                        Ver detalhes
                       </button>
-                    ) : null}
-                  </span>
-                </span>
-              </article>
-            ))}
-            {filteredCampaigns.length === 0 ? <div className="muted">Nenhuma campanha encontrada.</div> : null}
-          </div>
+                      {campaign.status === "draft" ? (
+                        <button
+                          className="button compact-button"
+                          disabled={busy}
+                          type="button"
+                          onClick={() => void runCampaignAction(campaign.id, "start")}
+                        >
+                          Iniciar
+                        </button>
+                      ) : null}
+                      {campaign.status === "paused" ? (
+                        <button
+                          className="button compact-button"
+                          disabled={busy}
+                          type="button"
+                          onClick={() => void runCampaignAction(campaign.id, "resume")}
+                        >
+                          Retomar
+                        </button>
+                      ) : null}
+                      {campaign.status === "running" ? (
+                        <button
+                          className="button secondary compact-button"
+                          disabled={busy}
+                          type="button"
+                          onClick={() => void runCampaignAction(campaign.id, "pause")}
+                        >
+                          Pausar
+                        </button>
+                      ) : null}
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          )}
         </div>
 
-        <aside className="section-card">
-          <div className="toolbar">
-            <strong>Detalhes</strong>
-            {details ? <span className={`badge ${statusClass(details.status)}`}>{details.status}</span> : null}
-          </div>
+        <aside className="detail-panel">
           {details ? (
-            <div className="grid">
-              <div>
-                <h2 style={{ fontSize: 18, margin: 0 }}>{details.name}</h2>
-                <p className="muted">
-                  {details.targetLabel?.name ?? details.targetMode} | sent {detailGroups.sent.length} | failed{" "}
-                  {detailGroups.failed.length} | pending {detailGroups.pending.length}
-                </p>
+            <div className="detail-stack">
+              <div className="detail-heading">
+                <div>
+                  <strong>{details.name}</strong>
+                  <span className="muted">{details.targetLabel?.name ?? details.targetMode}</span>
+                </div>
+                <span className={`status-badge ${statusClass(details.status)}`}>
+                  {statusLabel(details.status)}
+                </span>
               </div>
-              <div className="table-wrap">
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th>Destinatario</th>
-                      <th>Status</th>
-                      <th>Quando</th>
-                      <th>Erro</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {details.recipients.map((recipient) => (
-                      <tr key={recipient.id}>
-                        <td>
-                          <strong>{recipient.contact?.name ?? recipient.jid ?? recipient.id}</strong>
-                          <br />
-                          <span className="muted">{recipient.contact?.phoneNormalized ?? recipient.jid}</span>
-                        </td>
-                        <td>
-                          <span className={`badge ${statusClass(recipient.status)}`}>{recipient.status}</span>
-                          {recipient.skippedReason ? <div className="muted">{recipient.skippedReason}</div> : null}
-                        </td>
-                        <td>{formatDate(recipient.sentAt ?? recipient.scheduledAt ?? recipient.updatedAt)}</td>
-                        <td>{recipient.error ? <span className="message error">{recipient.error}</span> : "-"}</td>
+
+              <div className="progress-block">
+                <div className="progress-row">
+                  <span>Progresso</span>
+                  <strong>{progressPercent}%</strong>
+                </div>
+                <div className="progress-track">
+                  <span style={{ width: `${progressPercent}%` }} />
+                </div>
+              </div>
+
+              <div className="detail-metrics">
+                <span>{detailTotal} total</span>
+                <span>{detailGroups.sent.length} enviados</span>
+                <span>{detailGroups.failed.length} falhas</span>
+                <span>{detailGroups.pending.length} pendentes</span>
+              </div>
+
+              {selectedCampaign ? (
+                <div className="button-row">
+                  {selectedCampaign.status === "draft" ? (
+                    <button
+                      className="button compact-button"
+                      disabled={busy}
+                      type="button"
+                      onClick={() => void runCampaignAction(selectedCampaign.id, "start")}
+                    >
+                      Iniciar agora
+                    </button>
+                  ) : null}
+                  {selectedCampaign.status === "paused" ? (
+                    <button
+                      className="button compact-button"
+                      disabled={busy}
+                      type="button"
+                      onClick={() => void runCampaignAction(selectedCampaign.id, "resume")}
+                    >
+                      Retomar
+                    </button>
+                  ) : null}
+                  {selectedCampaign.status === "running" ? (
+                    <button
+                      className="button secondary compact-button"
+                      disabled={busy}
+                      type="button"
+                      onClick={() => void runCampaignAction(selectedCampaign.id, "pause")}
+                    >
+                      Pausar
+                    </button>
+                  ) : null}
+                  {!["completed", "canceled"].includes(selectedCampaign.status) ? (
+                    <button
+                      className="button danger compact-button"
+                      disabled={busy}
+                      type="button"
+                      onClick={() => void runCampaignAction(selectedCampaign.id, "cancel")}
+                    >
+                      Cancelar
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
+
+              <div>
+                <strong>Destinatarios recentes</strong>
+                <div className="table-wrap">
+                  <table className="data-table compact">
+                    <thead>
+                      <tr>
+                        <th>Destinatario</th>
+                        <th>Status</th>
+                        <th>Quando</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {details.recipients.slice(0, 10).map((recipient) => (
+                        <tr key={recipient.id}>
+                          <td>
+                            <div className="identity-cell">
+                              <strong>{recipient.contact?.name ?? recipient.jid ?? recipient.id}</strong>
+                              <span className="muted">
+                                {recipient.contact?.phoneNormalized ?? recipient.jid ?? "-"}
+                              </span>
+                              {recipient.error ? <span className="send-error">{recipient.error}</span> : null}
+                            </div>
+                          </td>
+                          <td>
+                            <span className={`status-badge ${statusClass(recipient.status)}`}>
+                              {statusLabel(recipient.status)}
+                            </span>
+                          </td>
+                          <td>{formatDate(recipient.sentAt ?? recipient.scheduledAt ?? recipient.updatedAt)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
           ) : (
-            <div className="muted">Selecione uma campanha para auditar destinatarios.</div>
+            <div className="empty-state compact">
+              <strong>Selecione uma campanha</strong>
+              <span>Os detalhes de progresso, falhas e destinatarios recentes aparecerao aqui.</span>
+            </div>
           )}
         </aside>
       </section>
     </section>
   );
 }
-

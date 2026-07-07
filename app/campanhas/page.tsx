@@ -1,4 +1,5 @@
-﻿import { AppShell } from "@/app/components/AppShell";
+import Link from "next/link";
+import { AppShell } from "@/app/components/AppShell";
 import { prisma } from "@/src/lib/prisma/client";
 import { CampaignsClient } from "./CampaignsClient";
 
@@ -107,7 +108,15 @@ export default async function CampaignsPage({ searchParams }: CampaignsPageProps
   ]);
 
   return (
-    <AppShell title="Campanhas">
+    <AppShell
+      title="Nova campanha"
+      subtitle="Escolha o publico, escreva a mensagem e revise antes de enviar."
+      actions={
+        <Link className="button secondary" href="/envios">
+          Historico de envios
+        </Link>
+      }
+    >
       <CampaignsClient
         prefillContext={{
           labelId: label?.id ?? (labelId || null),
@@ -122,4 +131,3 @@ export default async function CampaignsPage({ searchParams }: CampaignsPageProps
     </AppShell>
   );
 }
-

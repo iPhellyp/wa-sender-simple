@@ -87,21 +87,35 @@ APP_CID=$(docker ps -q --filter "name=wa_sender_simple_app" | head -n 1)
 docker exec -it "$APP_CID" npm run prisma:deploy
 ```
 
-`docker stack deploy` nao faz build de imagem. O script `deploy-safe.sh` roda apenas:
+`docker stack deploy` nao faz build de imagem. O deploy correto e sempre:
 
 ```bash
-docker compose build app
+./deploy-safe.sh
 ```
 
-Isso cria uma unica imagem local:
+O script entra em `/root/wa-sender-simple`, carrega `.env` ou `.env.production.docker`,
+valida variaveis criticas sem imprimir valores, builda uma unica imagem local e aplica o stack:
+
+```bash
+docker build -t wa-sender-simple:latest .
+docker stack deploy --resolve-image never -c docker-stack.yml wa_sender_simple
+docker service update --image wa-sender-simple:latest --force --detach=false wa_sender_simple_app
+docker service update --image wa-sender-simple:latest --force --detach=false wa_sender_simple_worker
+```
+
+Isso preserva e reaplica a imagem local:
 
 - `wa-sender-simple:latest`
 
-O app e o worker usam essa mesma imagem. Nao use `docker compose build` sem especificar `app`, para nao reconstruir servicos desnecessarios.
+O app e o worker usam essa mesma imagem.
 
 O uso de `--resolve-image never` evita tentativa de buscar essas imagens em registry externo.
 
 Nao use `docker run` para migration em rede overlay nao attachable. Rode a migration dentro do container do app criado pelo stack.
+
+Nao rode `docker service update --force` manualmente sem garantir antes que
+`wa-sender-simple:latest` existe na VPS. Sem a imagem local, o Swarm pode recriar tasks com
+`No such image: wa-sender-simple:latest`.
 
 ## Atualizacao
 
@@ -117,16 +131,19 @@ APP_CID=$(docker ps -q --filter "name=wa_sender_simple_app" | head -n 1)
 docker exec -it "$APP_CID" npm run prisma:deploy
 ```
 
-O `deploy-safe.sh` carrega `.env` quando existir, mostra `df -h` e `docker system df`, faz build de uma imagem, aplica o stack e roda apenas limpezas seguras:
+O `deploy-safe.sh` carrega `.env` ou `.env.production.docker`, mostra `df -h` e
+`docker system df`, faz build de uma imagem, aplica o stack, forca app/worker com a imagem
+explicita e roda apenas limpezas seguras:
 
 ```bash
 docker container prune -f
 docker builder prune -af
-docker image prune -af
+docker image prune -f
 ```
 
 Nao use:
 
+- `docker image prune -af`
 - `docker system prune -a --volumes`
 - `docker volume prune`
 - remocao manual de `/var/lib/docker`

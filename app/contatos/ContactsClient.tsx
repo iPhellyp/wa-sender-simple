@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import Link from "next/link";
 import { FormEvent, useEffect, useMemo, useState } from "react";
@@ -98,6 +98,7 @@ export function ContactsClient() {
   const [selectedContacts, setSelectedContacts] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [importing, setImporting] = useState(false);
+  const [showImportPanel, setShowImportPanel] = useState(false);
   const [result, setResult] = useState<ImportResult | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -109,6 +110,8 @@ export function ContactsClient() {
   const campaignIds = selectedIds.slice(0, CAMPAIGN_CONTACT_LIMIT);
   const campaignUrl = `/campanhas?contactIds=${campaignIds.join(",")}`;
   const hasSelectionOverflow = selectedIds.length > CAMPAIGN_CONTACT_LIMIT;
+  const visibleStart = total === 0 ? 0 : (page - 1) * pageSize + 1;
+  const visibleEnd = Math.min(total, page * pageSize);
 
   async function loadContacts() {
     setLoading(true);
@@ -277,65 +280,84 @@ export function ContactsClient() {
   }, []);
 
   return (
-    <section className="grid">
-      <section className="section-card">
-        <div className="section-card-header">
-          <div>
-            <h2>Importar planilha</h2>
-            <p>Arquivos XLS ou XLSX acumulam contatos e atualizam duplicados por telefone.</p>
-          </div>
-        </div>
-        <form className="form-grid" onSubmit={(event) => void handleImport(event)}>
-          <div className="field">
-            <label htmlFor="importLabel">Etiqueta da importacao</label>
-            <input className="input" id="importLabel" name="importLabel" placeholder="Opcional" />
-          </div>
-          <div className="field">
-            <label htmlFor="file">Planilha</label>
-            <input className="input" id="file" name="file" type="file" accept=".xls,.xlsx" />
-          </div>
-          <button className="button" disabled={importing} type="submit">
-            {importing ? "Importando..." : "Importar contatos"}
+    <section className="page-shell">
+      <div className="page-topbar actions-only">
+        <div />
+        <div className="page-actions">
+          <button
+            className={`button ${showImportPanel ? "" : "secondary"}`}
+            type="button"
+            onClick={() => setShowImportPanel((current) => !current)}
+          >
+            Importar contatos
           </button>
-        </form>
-        {error ? <div className="message error">{error}</div> : null}
-        {result ? (
-          <div className="message">
-            Total {result.totalRows} | Inseridos {result.insertedRows} | Atualizados{" "}
-            {result.updatedRows} | Duplicados {result.duplicatedRows} | Invalidos {result.invalidRows}
-          </div>
-        ) : null}
-      </section>
-
-      <div className="stats-grid">
-        <div className="stat-card">
-          <span>Total contatos</span>
-          <strong>{summary.total}</strong>
-        </div>
-        <div className="stat-card">
-          <span>Opt-out</span>
-          <strong>{summary.optedOut}</strong>
-        </div>
-        <div className="stat-card">
-          <span>Elegiveis</span>
-          <strong>{summary.eligible}</strong>
-        </div>
-        <div className="stat-card">
-          <span>Ja enviados</span>
-          <strong>{summary.sent}</strong>
-        </div>
-        <div className="stat-card">
-          <span>Nunca enviados</span>
-          <strong>{summary.neverSent}</strong>
-        </div>
-        <div className="stat-card">
-          <span>Falhas</span>
-          <strong>{summary.failed}</strong>
+          <Link className="button secondary" href="/campanhas">
+            Criar campanha
+          </Link>
         </div>
       </div>
 
-      <section className="section-card">
-        <div className="toolbar">
+      {showImportPanel ? (
+        <section className="data-card compact" id="contact-import-panel">
+          <form className="filter-bar import-panel" onSubmit={(event) => void handleImport(event)}>
+            <div className="field">
+              <label htmlFor="importLabel">Etiqueta da importacao</label>
+              <input className="input" id="importLabel" name="importLabel" placeholder="Opcional" />
+            </div>
+            <div className="field">
+              <label htmlFor="file">Planilha XLS/XLSX</label>
+              <input className="input" id="file" name="file" type="file" accept=".xls,.xlsx" />
+            </div>
+            <button className="button" disabled={importing} type="submit">
+              {importing ? "Importando..." : "Importar"}
+            </button>
+          </form>
+          {result ? (
+            <div className="message compact">
+              Total {result.totalRows} | Inseridos {result.insertedRows} | Atualizados{" "}
+              {result.updatedRows} | Duplicados {result.duplicatedRows} | Invalidos {result.invalidRows}
+            </div>
+          ) : null}
+        </section>
+      ) : null}
+
+      {error ? <div className="message error compact">{error}</div> : null}
+      {bulkMessage ? <div className="message compact">{bulkMessage}</div> : null}
+      {hasSelectionOverflow ? (
+        <div className="message warning compact">
+          A URL foi limitada aos primeiros {CAMPAIGN_CONTACT_LIMIT} contatos selecionados.
+        </div>
+      ) : null}
+
+      <div className="metric-grid">
+        <article className="metric-card compact">
+          <span>Total</span>
+          <strong>{summary.total}</strong>
+        </article>
+        <article className="metric-card compact">
+          <span>Elegiveis</span>
+          <strong>{summary.eligible}</strong>
+        </article>
+        <article className="metric-card compact">
+          <span>Opt-out</span>
+          <strong>{summary.optedOut}</strong>
+        </article>
+        <article className="metric-card compact">
+          <span>Ja enviados</span>
+          <strong>{summary.sent}</strong>
+        </article>
+        <article className="metric-card compact">
+          <span>Nunca enviados</span>
+          <strong>{summary.neverSent}</strong>
+        </article>
+        <article className="metric-card compact">
+          <span>Falhas</span>
+          <strong>{summary.failed}</strong>
+        </article>
+      </div>
+
+      <section className="data-card">
+        <div className="filter-bar">
           <input
             className="input"
             placeholder="Buscar por nome ou telefone"
@@ -346,7 +368,7 @@ export function ContactsClient() {
             }}
           />
           <select
-            className="input"
+            className="select"
             value={source}
             onChange={(event) => {
               setPage(1);
@@ -361,40 +383,61 @@ export function ContactsClient() {
             ))}
           </select>
           <select
-            className="input"
+            className="select"
             value={optedOut}
             onChange={(event) => {
               setPage(1);
               setOptedOut(event.target.value);
             }}
           >
-            <option value="">Todos opt-out</option>
+            <option value="">Opt-out: todos</option>
             <option value="false">Nao opt-out</option>
             <option value="true">Opt-out</option>
           </select>
           <select
-            className="input"
+            className="select"
             value={sendStatus}
             onChange={(event) => {
               setPage(1);
               setSendStatus(event.target.value);
             }}
           >
-            <option value="">Todos envios</option>
+            <option value="">Status: todos</option>
             <option value="sent">Ja enviado</option>
             <option value="never_sent">Nunca enviado</option>
             <option value="failed">Falhou</option>
             <option value="pending">Pendente</option>
           </select>
           <button className="button secondary" type="button" onClick={resetFilters}>
-            Limpar filtros
+            Limpar
           </button>
         </div>
 
-        <div className="toolbar">
-          <div className="button-row">
-            <button className="button secondary compact-button" type="button" onClick={selectVisible}>
-              Selecionar visiveis
+        {selectedContacts.size > 0 ? (
+          <div className="bulk-action-bar">
+            <strong>{selectedContacts.size} selecionado(s)</strong>
+            <Link className="button compact-button" href={campaignUrl}>
+              Criar campanha
+            </Link>
+            <select
+              className="select"
+              value={selectedLabelId}
+              onChange={(event) => setSelectedLabelId(event.target.value)}
+            >
+              <option value="">Escolha uma etiqueta</option>
+              {labels.map((label) => (
+                <option key={label.id} value={label.id}>
+                  {label.name}
+                </option>
+              ))}
+            </select>
+            <button
+              className="button secondary compact-button"
+              disabled={!selectedLabelId}
+              type="button"
+              onClick={() => void applyBulkLabel()}
+            >
+              Aplicar etiqueta
             </button>
             <button
               className="button secondary compact-button"
@@ -403,56 +446,31 @@ export function ContactsClient() {
             >
               Limpar selecao
             </button>
-            <span className="muted">{selectedContacts.size} selecionado(s)</span>
-          </div>
-          <Link
-            className={`button ${selectedContacts.size === 0 ? "secondary" : ""}`}
-            href={selectedContacts.size === 0 ? "/contatos" : campaignUrl}
-            aria-disabled={selectedContacts.size === 0}
-          >
-            Criar campanha
-          </Link>
-        </div>
-
-        <div className="toolbar">
-          <select
-            className="input"
-            value={selectedLabelId}
-            onChange={(event) => setSelectedLabelId(event.target.value)}
-          >
-            <option value="">Escolha uma etiqueta</option>
-            {labels.map((label) => (
-              <option key={label.id} value={label.id}>
-                {label.name}
-              </option>
-            ))}
-          </select>
-          <button
-            className="button secondary"
-            disabled={selectedContacts.size === 0 || !selectedLabelId}
-            type="button"
-            onClick={() => void applyBulkLabel()}
-          >
-            Aplicar etiqueta
-          </button>
-        </div>
-
-        {bulkMessage ? <div className="message">{bulkMessage}</div> : null}
-
-        {hasSelectionOverflow ? (
-          <div className="message warning">
-            A URL foi limitada aos primeiros {CAMPAIGN_CONTACT_LIMIT} contatos selecionados.
           </div>
         ) : null}
 
+        <div className="table-toolbar">
+          <div>
+            <strong>Lista de contatos</strong>
+            <span className="muted">
+              {loading ? "Carregando..." : `${visibleStart}-${visibleEnd} de ${total}`}
+            </span>
+          </div>
+          <button className="button secondary compact-button" type="button" onClick={selectVisible}>
+            Selecionar visiveis
+          </button>
+        </div>
+
         {loading ? (
-          <div>Carregando...</div>
+          <div className="empty-state compact">Carregando contatos...</div>
         ) : contacts.length === 0 ? (
-          <div className="muted">Nenhum contato encontrado.</div>
+          <div className="empty-state compact">
+            <strong>Nenhum contato encontrado</strong>
+            <span>Ajuste os filtros ou importe uma planilha.</span>
+          </div>
         ) : (
           <div className="table-wrap">
-            <h2 style={{ fontSize: 18, marginTop: 0 }}>Todos os contatos</h2>
-            <table className="table">
+            <table className="data-table compact">
               <thead>
                 <tr>
                   <th></th>
@@ -477,26 +495,26 @@ export function ContactsClient() {
                         />
                       </td>
                       <td>
-                        <strong>{contact.name}</strong>
-                        <br />
-                        <span className={`badge ${statusClass(sendStatusValue)}`}>
-                          {statusLabel(sendStatusValue)}
-                        </span>
-                        {contact.optedOut ? <span className="badge danger">opt-out</span> : null}
+                        <div className="identity-cell">
+                          <strong>{contact.name || "Sem nome"}</strong>
+                          <span>
+                            <span className={`status-badge ${statusClass(sendStatusValue)}`}>
+                              {statusLabel(sendStatusValue)}
+                            </span>
+                            {contact.optedOut ? (
+                              <span className="status-badge danger">opt-out</span>
+                            ) : null}
+                          </span>
+                        </div>
                       </td>
                       <td>{contact.phoneRaw || contact.phoneNormalized}</td>
                       <td>{formatDate(contact.createdAt)}</td>
-                      <td>{contact.source}</td>
+                      <td>{contact.source || "-"}</td>
                       <td>
-                        {contact.lastSend ? (
-                          <>
-                            <span className="muted">
-                              Ultimo envio: {contact.lastSend.campaignName}
-                            </span>
-                            <br />
-                          </>
-                        ) : null}
-                        <Link className="button secondary compact-button" href={`/campanhas?contactIds=${contact.id}`}>
+                        <Link
+                          className="button secondary compact-button"
+                          href={`/campanhas?contactIds=${contact.id}`}
+                        >
                           Campanha
                         </Link>
                       </td>
@@ -508,13 +526,13 @@ export function ContactsClient() {
           </div>
         )}
 
-        <div className="toolbar">
+        <div className="pagination-bar">
           <span className="muted">
             Pagina {page} de {totalPages} | {total} contato(s)
           </span>
           <div className="button-row">
             <select
-              className="input"
+              className="select compact-select"
               value={pageSize}
               onChange={(event) => {
                 setPage(1);
@@ -547,4 +565,3 @@ export function ContactsClient() {
     </section>
   );
 }
-

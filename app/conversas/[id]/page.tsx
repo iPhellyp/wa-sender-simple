@@ -88,7 +88,7 @@ export default async function ConversationDetailPage({ params }: ConversationDet
           </Link>
           {chat.isGroup ? (
             <Link className="button secondary" href="/conversas">
-              Voltar para X1
+              Voltar para contatos
             </Link>
           ) : null}
         </div>

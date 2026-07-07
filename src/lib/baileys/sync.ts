@@ -162,7 +162,7 @@ export async function ensureChatForJid(jid: string, optionalName?: string | null
   }
 
   if (shouldIgnoreJidForX1Only(normalizedJid)) {
-    throw new Error("JID ignorado pelo modo X1");
+    throw new Error("JID ignorado pelo modo de envio individual");
   }
 
   const name = cleanDisplayName(optionalName, normalizedJid);

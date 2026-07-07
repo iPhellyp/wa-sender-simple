@@ -34,6 +34,7 @@ import { completeCampaignIfDone } from "../lib/campaigns/progress";
 import { schedulePendingRecipients } from "../lib/campaigns/schedule";
 import { hashMessage, resolveCampaignJid, type SkippedReason } from "../lib/labels/audience";
 import { normalizeBrazilPhone, toWhatsappJid } from "../lib/phone/normalize";
+import { clearWhatsappOperationalData } from "../lib/server/whatsapp-session-data";
 import { shouldIgnoreJidForX1Only } from "../lib/whatsapp/jid";
 
 const PAUSED_RECHECK_DELAY_MS = 60 * 1000;
@@ -81,7 +82,7 @@ async function persistOutboundMessage(options: {
   }
 
   if (shouldIgnoreJidForX1Only(normalizedJid)) {
-    throw new Error("JID ignorado pelo modo X1");
+    throw new Error("JID ignorado pelo modo de envio individual");
   }
 
   const chat = await ensureChatForJid(normalizedJid);
@@ -172,7 +173,7 @@ async function isRecipientOptedOut(
 
 function getSkippedRecipientError(reason: SkippedReason) {
   if (reason === "group_excluded") {
-    return "Grupo ignorado pelo modo X1";
+    return "Grupo ignorado pelo modo de envio individual";
   }
 
   if (reason === "unresolved_chat") {
@@ -227,7 +228,7 @@ async function processManualMessage(
   }
 
   if (shouldIgnoreJidForX1Only(normalizedJid)) {
-    throw new Error("Envio manual para grupo ignorado pelo modo X1");
+    throw new Error("Envio manual para grupo ignorado pelo modo de envio individual");
   }
 
   if (!text) {
@@ -517,6 +518,7 @@ const worker = new Worker(
       console.log("[worker] disconnect-whatsapp job received");
 
       try {
+        await clearWhatsappOperationalData("manual-disconnect-worker");
         await disconnectBaileys();
         console.log("[worker] disconnect-whatsapp finished");
       } catch (error) {
@@ -533,6 +535,7 @@ const worker = new Worker(
       console.log("[worker] reset-whatsapp job received");
 
       try {
+        await clearWhatsappOperationalData("manual-reset-worker");
         await resetBaileysSession();
         console.log("[worker] reset-whatsapp finished");
       } catch (error) {

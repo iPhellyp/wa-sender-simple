@@ -108,7 +108,7 @@ export async function POST(request: NextRequest) {
 
     if (chats.length === 0) {
       return NextResponse.json(
-        { error: "Nenhum contato X1 valido selecionado" },
+        { error: "Nenhum contato individual valido selecionado" },
         { status: 400 }
       );
     }

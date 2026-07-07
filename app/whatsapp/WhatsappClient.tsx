@@ -161,7 +161,7 @@ export function WhatsappClient() {
                 <span>{formatDateTime(session?.latestMessageAt)}</span>
               </div>
               <div className="meta-row">
-                <span>QR disponÃ­vel</span>
+                <span>QR disponivel</span>
                 <span>{session?.hasQrCode ? "Sim" : "Nao"}</span>
               </div>
             </div>
@@ -218,7 +218,7 @@ export function WhatsappClient() {
 
       {isTransientReconnect ? (
         <div className="message">
-          Reconectando com a sessao atual. Nao Ã© necessÃ¡rio resetar nem ler QR agora.
+          Reconectando com a sessao atual. Nao e necessario resetar nem ler QR agora.
         </div>
       ) : session?.status === "connecting" ? (
         <div className="message">Aguardando QR Code. Isso pode levar alguns segundos.</div>
@@ -231,7 +231,7 @@ export function WhatsappClient() {
       {session?.status === "qr" && session.qrCode ? (
         <SectionCard
           title="Leitura do QR Code"
-          description="Escaneie com o WhatsApp do aparelho responsÃ¡vel pela instancia."
+          description="Escaneie com o WhatsApp do aparelho responsavel pela instancia."
         >
           <div className="qr-card">
             <img className="qr" src={session.qrCode} alt="QR Code do WhatsApp" />
@@ -270,5 +270,6 @@ export function WhatsappClient() {
     </section>
   );
 }
+
 
 
