@@ -8,7 +8,14 @@ Sincronizar conversas, contatos e mensagens recebidas pelo Baileys sem alterar o
 
 O worker cria o socket Baileys e registra listeners em `sock.ev`. Cada evento recebido e persistido no Postgres por helpers em `src/lib/baileys/sync.ts`.
 
-O socket usa `syncFullHistory: true`, `Browsers.macOS("Desktop")`, `shouldSyncHistoryMessage: () => true` e `getMessage` lendo mensagens salvas para auxiliar retries internos da Baileys.
+Em pareamento limpo (`session files = 0`), o socket entra em QR_SAFE_MODE:
+
+- `syncFullHistory: false`;
+- `shouldSyncHistoryMessage: () => false`;
+- sem `fetchLatestBaileysVersion` obrigatorio;
+- sem `getMessage` antes do QR.
+
+Em sessao existente, o modo normal pode usar browser desktop, latest version e `getMessage` lendo mensagens salvas para auxiliar retries internos da Baileys.
 
 O processamento e idempotente:
 
@@ -84,21 +91,21 @@ Ao atualizar mensagem:
 
 ## Limitacoes
 
-- Nao sincroniza labels nesta fase.
+- Este documento descreve a fase read-only original; labels atuais estao documentadas em `WHATSAPP_LABELS_AND_BULK_SEND.md`.
 - Nao cria `accountId`, pois ainda existe apenas um numero.
 - Nao altera campanhas.
 - Nao apaga ou reseta sessao Baileys.
 - Historico completo depende do que o WhatsApp reenviar para a sessao.
 - `messages.update` ainda nao possui campo de status dedicado; salva atualizacao simples em `rawJson`.
 
-## Proxima fase sugerida
+## Evolucao de labels
 
-Implementar labels em modo read-only:
+Labels foram implementadas depois da fase read-only original:
 
-1. Registrar payload real de `labels.edit` e `labels.association`.
-2. Criar `WhatsappLabel` e `WhatsappChatLabel`.
-3. Persistir associacoes sem aplicar etiqueta no WhatsApp.
-4. Exibir etiquetas em `/conversas`.
+1. `labels.edit` cria/atualiza `WhatsappLabel`.
+2. `labels.association` cria/remove associacoes em `WhatsappChatLabel`.
+3. A feature depende dos eventos que o WhatsApp/Baileys entregar.
+4. Validar apenas depois de QR/conexao estavel.
 
 ## Evolucao operacional
 

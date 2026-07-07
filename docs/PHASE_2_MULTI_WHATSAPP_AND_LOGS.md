@@ -2,6 +2,14 @@
 
 Este documento e apenas planejamento. Nao implementar nesta fase de estabilizacao do QR.
 
+Estado real atual:
+
+- O projeto ainda usa um unico WhatsApp conectado.
+- QR/428 e QR_SAFE_MODE devem ser estabilizados antes de multi-numeros.
+- `SendLog` pode ja existir por causa de labels/envios.
+- Ainda falta `accountId` e isolamento por numero em chats, mensagens, labels, campanhas e logs.
+- Nao implementar multi-numeros junto com hotfix de QR.
+
 ## Objetivo futuro
 
 - Permitir multiplos numeros WhatsApp.
@@ -32,13 +40,14 @@ Adicionar em `CampaignRecipient`:
 
 - `whatsappAccountId` usado no envio
 
-Criar `SendLog` ou `EventLog`:
+Evoluir `SendLog` ou criar `EventLog`:
 
 - `id`
 - `type`
 - `level`
 - `message`
 - `whatsappAccountId` opcional
+- `accountId` quando `WhatsappAccount` existir
 - `campaignId` opcional
 - `recipientId` opcional
 - `metadata` JSON opcional

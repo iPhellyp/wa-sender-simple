@@ -13,25 +13,32 @@ A Baileys entrega historico por eventos:
 
 O evento `messages.upsert` pode chegar como `notify` ou `append`. A inbox processa ambos.
 
-## Configuracao de full history
+## QR Safe Mode vs modo conectado
 
-O socket foi configurado com:
+Quando `session files = 0`, o pareamento limpo entra em QR_SAFE_MODE:
 
-- `browser: Browsers.macOS("Desktop")`
-- `syncFullHistory: true`
-- `shouldSyncHistoryMessage: () => true`
-- `markOnlineOnConnect: false`
-- `getMessage` lendo do banco por `jid + waMessageId`
+- usa browser conservador para QR;
+- nao passa `version` obtida por `fetchLatestBaileysVersion`;
+- `syncFullHistory: false`;
+- `shouldSyncHistoryMessage: () => false`;
+- nao injeta `getMessage` antes do pareamento.
 
-Isso pede ao WhatsApp Web historico completo quando a sessao permite.
+Esse modo prioriza gerar QR e conectar. Historico completo antigo nao deve bloquear o pareamento.
+
+Quando a sessao ja possui arquivos, o socket entra no modo normal:
+
+- pode buscar latest version;
+- pode usar `Browsers.macOS("Desktop")`;
+- pode usar `getMessage` lendo do banco por `jid + waMessageId`;
+- processa eventos naturais de mensagens, historico, contatos, chats e labels.
 
 ## Por que nem tudo pode aparecer
 
-Se a sessao ja estava pareada antes de `syncFullHistory: true`, o WhatsApp pode nao reenviar todo o historico antigo. Nesse caso, a aplicacao nao consegue inventar conversas que nao chegaram por evento.
+Se a sessao ja estava pareada antes dos ajustes de historico, o WhatsApp pode nao reenviar todo o historico antigo. Nesse caso, a aplicacao nao consegue inventar conversas que nao chegaram por evento.
 
 Alguns contatos tambem podem chegar sem nome amigavel. Dependendo do evento, a Baileys pode entregar apenas JID, telefone, `lid`, `pushName` parcial ou nenhum historico de mensagem.
 
-O botao `Verificar historico` consulta o status atual da sessao e retorna orientacao informativa. Ele nao cria socket novo, nao chama `startBaileysConnection` e nao executa `fetchMessageHistory` sem cursor seguro. Na versao instalada, `fetchMessageHistory` exige:
+O botao `Verificar historico` e informativo/read-only. Ele consulta o status atual da sessao e retorna orientacao. Ele nao cria socket novo, nao chama `startBaileysConnection` e nao executa `fetchMessageHistory` sem cursor seguro. Na versao instalada, `fetchMessageHistory` exige:
 
 - quantidade;
 - chave da mensagem mais antiga;
@@ -74,20 +81,19 @@ Nao clique repetidamente em `Verificar historico`. O botao apenas confirma statu
 
 ## Jobs administrativos singleton
 
-Connect, reset, disconnect e sync-history usam `jobId` fixo no Redis/BullMQ:
+Connect, reset e disconnect usam `jobId` fixo no Redis/BullMQ:
 
-- `connect-whatsapp-singleton`
-- `reset-whatsapp-singleton`
-- `disconnect-whatsapp-singleton`
-- `sync-whatsapp-history-singleton`
+- `connect-whatsapp`
+- `reset-whatsapp`
+- `disconnect-whatsapp`
 
-Isso impede rajada de jobs quando o usuario clica varias vezes. Reset remove jobs pendentes de connect/disconnect/sync antes de enfileirar.
+Isso reduz rajada de jobs administrativos quando o usuario clica varias vezes. A rota de reconnect tambem evita enfileirar novo connect se o status ja estiver `connecting` ou `qr`.
 
 ## Quando usar reset/reconnect manual
 
 Use reconnect manual se o worker nao estiver conectado ou se nao houver eventos novos.
 
-Use reset manual apenas quando aceitar parear novamente o numero. Para forcar o WhatsApp a reenviar mais historico, pode ser necessario resetar a sessao e parear de novo com `syncFullHistory` ja ativo.
+Use reset manual apenas quando aceitar parear novamente o numero. No estado atual, reset/reconnect prioriza QR e conexao estavel; historico antigo completo nao e garantido.
 
 Nao use reset automatico em producao sem decisao operacional.
 
@@ -141,7 +147,7 @@ Solicitacao manual de verificacao de historico:
 ou, se conectado:
 
 ```text
-[baileys] history sync requested { syncFullHistory: true, hasOnDemandHistory: true, mode: "event-driven" }
+[baileys] history sync requested { syncFullHistory: false, hasOnDemandHistory: false, mode: "event-driven" }
 ```
 
 Sessao encerrada no celular (428):
@@ -176,9 +182,8 @@ O filtro `Sem mensagem` concentra contatos sincronizados que ainda nao possuem m
 ## Limitacoes
 
 - Sem realtime.
-- Sem labels.
 - Sem multiplos numeros.
 - Sem status persistido de job manual.
 - Historico completo depende do que o WhatsApp reenviar para a sessao.
-- `fetchLatestBaileysVersion` segue ativo porque a conexao esta estavel, mas a propria Baileys recomenda cautela com mudancas de versao.
-- Etiquetas e envio por etiqueta: ver `docs/WHATSAPP_LABELS_AND_BULK_SEND.md`.
+- Labels e envio por etiqueta existem como feature parcial; ver `docs/WHATSAPP_LABELS_AND_BULK_SEND.md`.
+- QR_SAFE_MODE nao obriga `fetchLatestBaileysVersion` quando a pasta da sessao esta vazia.

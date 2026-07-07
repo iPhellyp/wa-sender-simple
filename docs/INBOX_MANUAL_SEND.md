@@ -131,7 +131,6 @@ Em caso de falha:
 - Sem status persistido de mensagem manual em fila.
 - Mensagem outbound so e salva depois de `sendMessage` retornar sucesso.
 - Sem verificacao se o numero existe no WhatsApp.
-- Sem labels.
 - Sem multiplos numeros.
 - Sem automacao.
-- Sem envio por etiqueta.
+- Este documento descreve a fase de envio manual; labels/envio por etiqueta estao documentados separadamente em `WHATSAPP_LABELS_AND_BULK_SEND.md`.

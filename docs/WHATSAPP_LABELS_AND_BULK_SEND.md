@@ -1,5 +1,11 @@
 # WhatsApp Labels e Envio por Etiqueta
 
+## Aviso operacional
+
+Use/teste labels e envio por etiqueta somente depois de QR/conexao estavel. Enquanto QR/428 estiver em estabilizacao, nao use esta feature para validar producao.
+
+O projeto ainda e single WhatsApp. Todo envio por etiqueta usa o unico WhatsApp conectado; multi-numeros ainda nao existe.
+
 ## Como as etiquetas sao sincronizadas
 
 O worker Baileys escuta eventos reais da versao instalada:
@@ -20,8 +26,10 @@ Etiquetas removidas no celular ficam com `deleted=true`. Associacoes antigas pod
 ## Limitacoes
 
 - Etiquetas so aparecem apos conexao e eventos do WhatsApp.
+- Labels sao event-driven e podem nao aparecer imediatamente.
 - Labels/associacoes antigas podem nao chegar se a sessao ja estava pareada antes.
-- Pode ser necessario reset/reconnect para historico completo de labels (sem alterar automaticamente).
+- Nao ha backfill confiavel de labels antigas.
+- Reset/reconnect deve priorizar QR e conexao estavel; nao use reset automatico para tentar labels.
 - Dashboard de labels e read-only; criar/editar etiqueta no WhatsApp nao esta implementado.
 - Envio por etiqueta usa JID da conversa; grupos ficam excluidos por padrao.
 
@@ -61,6 +69,7 @@ Defaults seguros:
 - `includeGroups=false`
 - `excludeAlreadySentDays=7`
 - `maxRecipients=100` (limite absoluto 500)
+- Comece com 1 a 2 contatos ate QR/conexao e labels estarem validados.
 
 ## Anti-repeticao
 
@@ -97,6 +106,7 @@ Associacao de mensagem ignorada:
 - Envios em massa agressivos podem causar restricao.
 - Use lotes menores, intervalo adequado e relacionamento real com contatos.
 - Respeite opt-out e evite repeticao em poucos dias.
+- Nao teste envio por etiqueta antes de confirmar que o unico WhatsApp conectado esta estavel.
 
 ## APIs
 

@@ -10,7 +10,9 @@ const protectedPagePrefixes = [
   "/whatsapp",
   "/conversas",
   "/contatos",
-  "/campanhas"
+  "/campanhas",
+  "/etiquetas",
+  "/envios"
 ];
 
 const protectedApiPrefixes = [
@@ -18,7 +20,9 @@ const protectedApiPrefixes = [
   "/api/contacts",
   "/api/conversas",
   "/api/whatsapp",
-  "/api/campaigns"
+  "/api/campaigns",
+  "/api/etiquetas",
+  "/api/envios"
 ];
 
 function startsWithAny(pathname: string, prefixes: string[]) {

@@ -1,5 +1,17 @@
 # Command Center WhatsApp - SDD
 
+## Status real atual
+
+- O produto ainda e single WhatsApp.
+- QR/428 esta em estabilizacao com QR_SAFE_MODE para pareamento limpo.
+- A inbox `/conversas` e o detalhe `/conversas/[id]` existem.
+- Envio manual por conversa existe via fila `send-manual-message`.
+- Labels e envio por etiqueta foram implementados antes de multi-numeros, mas dependem de QR/conexao estavel para validacao real.
+- Multi-numeros continua futuro.
+- Sync-history e informativo/read-only; nao cria socket nem forca historico antigo.
+
+Observacao de ordem: a sequencia planejada mudou parcialmente. A Fase 1 foi implementada, labels/envio por etiqueta avancaram de forma parcial, e a Fase 2 de multi-numeros ainda nao deve ser misturada com hotfix de QR/conexao.
+
 ## 1. Objetivo
 
 Transformar o `wa-sender-simple` em um Command Center WhatsApp interno para operar multiplos numeros, sincronizar conversas/etiquetas, executar campanhas controladas e auditar envios sem misturar sessoes ou dados entre remetentes.
@@ -19,7 +31,9 @@ Transformar o `wa-sender-simple` em um Command Center WhatsApp interno para oper
 
 ### Fase 0 - Estabilizar Baileys QR e conexao
 
-- Usar `fetchLatestBaileysVersion`.
+- Status: em estabilizacao por QR/428/QR_SAFE_MODE.
+- Em pareamento limpo (`session files = 0`), nao obrigar `fetchLatestBaileysVersion`.
+- Em pareamento limpo, nao usar `syncFullHistory=true`.
 - Adicionar reset controlado de sessao.
 - Melhorar reconnect seguro.
 - Registrar `lastError` claro.
@@ -27,12 +41,12 @@ Transformar o `wa-sender-simple` em um Command Center WhatsApp interno para oper
 
 ### Fase 1 - Sync read-only
 
-- Status: implementada parcialmente em `20260706174000_whatsapp_sync_read_only`.
+- Status: implementada.
 - Salvar chats, contatos e mensagens.
 - Tratar eventos Baileys sem alterar fluxo de campanha.
 - Criar tela basica de conversas.
-- Labels e associacoes ficam documentadas para fase futura.
-- Nao implementar envio por etiqueta ainda.
+- Envio manual por conversa foi implementado em fase posterior.
+- Labels/envio por etiqueta existem como feature parcial documentada em `WHATSAPP_LABELS_AND_BULK_SEND.md`.
 
 ### Fase 2 - Multiplos numeros
 
@@ -43,6 +57,7 @@ Transformar o `wa-sender-simple` em um Command Center WhatsApp interno para oper
 
 ### Fase 3 - Campanha por etiqueta
 
+- Status: implementada/parcial, dependente de conexao estavel para validacao.
 - Adicionar `targetLabelId`.
 - Gerar previa de publico.
 - Criar fila com anti-repeticao.
@@ -222,7 +237,7 @@ Eventos implementados na Fase 1 read-only:
 - `messages.upsert`
 - `messages.update`
 
-Eventos de labels confirmados, mas nao implementados nesta fase:
+Eventos de labels confirmados e implementados de forma parcial:
 
 - `labels.edit`
 - `labels.association`
@@ -245,7 +260,7 @@ Observacao: `messaging-history.status` nao apareceu nos tipos locais da versao 6
 
 ## 7. Regras de Etiquetas
 
-Fluxo futuro para envio por etiqueta:
+Fluxo atual/parcial para envio por etiqueta:
 
 1. Usuario escolhe uma etiqueta de origem.
 2. Sistema busca chats com essa etiqueta.
@@ -256,17 +271,15 @@ Fluxo futuro para envio por etiqueta:
    - marca destinatario como `sent`
    - cria `WhatsappMessage` outbound
    - cria `SendLog`
-   - aplica `afterSendAddLabelIds`
-   - remove `afterSendRemoveLabelIds`
+   - automacoes de adicionar/remover etiquetas seguem futuras
 7. Se falhar:
    - marca `failed`
    - cria `SendLog`
-   - opcionalmente aplica etiqueta de erro
+   - etiqueta de erro automatica segue futura
 8. Se responder:
    - atualiza `lastInboundAt`
    - cria mensagem inbound
-   - aplica regras `onReply`
-   - pode cancelar follow-ups futuros
+   - regras `onReply` seguem futuras
 
 ## 8. Filas BullMQ Necessarias
 
@@ -280,32 +293,28 @@ Fluxo futuro para envio por etiqueta:
 
 ### `/whatsapp`
 
-- listar numeros
-- adicionar numero
-- QR por numero
-- resetar sessao por numero
-- status por numero
+- status do unico WhatsApp
+- QR do unico WhatsApp
+- resetar sessao
+- reconectar/desconectar
 
 ### `/conversas`
 
 - lista de chats
 - filtro por etiqueta
-- filtro por numero
 - ultimas mensagens
 - status de envio
 
 ### `/etiquetas`
 
 - etiquetas sincronizadas
-- criar etiqueta interna
-- mapear etiqueta WhatsApp
+- dashboard read-only de labels
 - quantidade de chats por etiqueta
 
 ### `/campanhas`
 
-- escolher numero remetente
+- usa o unico WhatsApp conectado
 - escolher etiqueta alvo
-- escolher etiquetas a adicionar/remover pos-envio
 - previa de publico
 - dedupe
 
@@ -344,10 +353,10 @@ Fase 0:
 
 Fase 1:
 
-- Chats, contatos e mensagens sao salvos sem envio por etiqueta.
+- Chats, contatos e mensagens sao salvos.
 - Reprocessamento nao duplica dados.
 - Tela de conversas mostra dados reais.
-- Labels seguem fora do escopo ate a proxima fase.
+- Labels e envio por etiqueta existem, mas so devem ser validados depois de QR/conexao estavel.
 
 Fase 2:
 
@@ -377,9 +386,9 @@ Fase 5:
 1. Estabilizar conexao Baileys para 1 numero.
 2. Adicionar logs/eventos persistidos.
 3. Criar sync read-only sem alterar campanhas.
-4. Adicionar `WhatsappAccount` e isolar sessoes.
-5. Migrar campanhas para escolher remetente.
-6. Implementar etiqueta como alvo.
+4. Validar labels/envio por etiqueta com 1 a 2 contatos depois da conexao estavel.
+5. Adicionar `WhatsappAccount` e isolar sessoes.
+6. Migrar campanhas para escolher remetente.
 7. Implementar anti-repeticao forte.
 8. Implementar automacoes de etiquetas.
 9. Implementar retry/manual e observabilidade avancada.
@@ -415,16 +424,16 @@ Limitacoes desta fase:
 
 - Sem multiplos numeros.
 - Sem accountId.
-- Sem envio manual pela conversa.
-- Sem etiquetas sincronizadas.
+- Envio manual pela conversa foi implementado depois.
+- Etiquetas sincronizadas foram implementadas depois como feature parcial.
 - Sem automacao de etiquetas.
-- Sem alterar campanhas.
+- Campanhas por etiqueta foram implementadas depois como feature parcial.
 - `messages.update` persiste atualizacao simples em `rawJson`, sem modelar status dedicado.
 
-Proximos passos para etiquetas:
+Proximos passos para estabilizacao:
 
-1. Confirmar payload real de `labels.edit` e `labels.association` em producao.
-2. Criar `WhatsappLabel` e `WhatsappChatLabel`.
-3. Sincronizar labels em modo read-only.
-4. Exibir labels na tela de conversas.
-5. So depois usar labels como alvo de campanha.
+1. Validar QR_SAFE_MODE em producao.
+2. Confirmar conexao estavel sem loop 428.
+3. Validar labels/eventos com o WhatsApp conectado.
+4. Testar envio por etiqueta com 1 a 2 contatos.
+5. Planejar multi-numeros separadamente.

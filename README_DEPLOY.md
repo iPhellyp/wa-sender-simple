@@ -10,19 +10,38 @@ https://wa2.supereducarbrasil.com.br
 
 ## Documentacao relacionada
 
+- Estado atual: `docs/CURRENT_PROJECT_STATUS.md`
 - Inbox e historico: `docs/INBOX_HISTORY_SYNC_AND_UI.md`
 - QR e conexao: `docs/WHATSAPP_QR_DEBUG.md`
 - Etiquetas e envio por etiqueta: `docs/WHATSAPP_LABELS_AND_BULK_SEND.md`
 
-## Variaveis
+## Ambientes e variaveis
+
+### Docker Compose local
+
+Dentro dos containers do Compose, use os hosts internos:
+
+```env
+DATABASE_URL=postgresql://wa_sender:wa_sender@postgres:5432/wa_sender_simple?schema=public
+REDIS_URL=redis://redis:6379
+```
+
+### Docker Swarm producao
+
+No Swarm, use os hosts internos unicos do stack:
+
+```env
+DATABASE_URL=postgresql://wa_sender:SENHA@wa_sender_simple_postgres:5432/wa_sender_simple?schema=public
+REDIS_URL=redis://wa_sender_simple_redis:6379
+```
 
 Crie `.env` na VPS a partir de `.env.example` e troque as senhas:
 
 ```env
 POSTGRES_DB=wa_sender_simple
 POSTGRES_USER=wa_sender
-POSTGRES_PASSWORD=wa_sender
-DATABASE_URL=postgresql://wa_sender:wa_sender@wa_sender_simple_postgres:5432/wa_sender_simple?schema=public
+POSTGRES_PASSWORD=SENHA_FORTE_AQUI
+DATABASE_URL=postgresql://wa_sender:SENHA_FORTE_AQUI@wa_sender_simple_postgres:5432/wa_sender_simple?schema=public
 REDIS_URL=redis://wa_sender_simple_redis:6379
 ADMIN_PASSWORD=SUA_SENHA_ADMIN_AQUI
 BAILEYS_SESSION_DIR=/app/data/baileys-session
@@ -30,11 +49,6 @@ BAILEYS_LOG_LEVEL=silent
 APP_URL=https://wa2.supereducarbrasil.com.br
 NEXT_PUBLIC_APP_URL=https://wa2.supereducarbrasil.com.br
 ```
-
-No Swarm, use os hosts internos unicos do stack:
-
-- `wa_sender_simple_postgres`
-- `wa_sender_simple_redis`
 
 Nao use `localhost` dentro dos containers.
 
@@ -101,6 +115,21 @@ APP_CID=$(docker ps -q --filter "name=wa_sender_simple_app" | head -n 1)
 docker exec -it "$APP_CID" npm run prisma:deploy
 ```
 
+## Migrations
+
+Quando houver migration, rode dentro do container do app criado pelo stack:
+
+```bash
+APP_CID=$(docker ps -q --filter "name=wa_sender_simple_app" | head -n 1)
+docker exec -it "$APP_CID" npm run prisma:deploy
+```
+
+Nao use em producao:
+
+- `prisma db push`
+- `prisma migrate reset`
+- reset, drop ou truncate manual
+
 ## Logs importantes
 
 Para acompanhar o QR Code:
@@ -113,7 +142,9 @@ Logs esperados ao clicar em Reconectar:
 
 ```text
 [worker] connect-whatsapp job received
+[baileys] session files before start { files: 0 }
 [baileys] creating socket
+[baileys] qr safe mode enabled { sessionFiles: 0, syncFullHistory: false, versionSource: "local-default" }
 [baileys] qr received and saved
 ```
 
@@ -122,6 +153,30 @@ O log do app nao deve mostrar:
 ```text
 Custom Id cannot contain :
 ```
+
+## QR Safe Mode
+
+Quando a pasta de sessao esta vazia (`session files = 0`), o worker deve iniciar em QR_SAFE_MODE.
+
+Valide nos logs:
+
+```text
+[baileys] session files before start { files: 0 }
+[baileys] latest version skipped for qr safe mode
+[baileys] qr safe mode enabled { sessionFiles: 0, syncFullHistory: false, versionSource: "local-default" }
+```
+
+Se aparecer 428 com `files=0` antes do QR, o problema provavel e config/version/browser, nao sessao antiga.
+
+Fluxo correto:
+
+1. Acesse `/whatsapp`.
+2. Clique `Resetar sessao` uma vez.
+3. Aguarde o worker finalizar.
+4. Clique `Reconectar` uma vez.
+5. Escaneie o QR.
+
+Nao clique repetidamente em `Reconectar`; o sistema nao deve voltar a loop infinito 428.
 
 ## Volumes
 
@@ -138,6 +193,18 @@ O `docker-compose.yml` tambem usa esses mesmos nomes para evitar migrar um banco
 ## Debug do QR
 
 Checklist detalhado em [docs/WHATSAPP_QR_DEBUG.md](docs/WHATSAPP_QR_DEBUG.md).
+
+## Checklist pos-deploy
+
+- App rodando.
+- Worker rodando.
+- Migrations aplicadas quando houver migration nova.
+- `/whatsapp` acessivel.
+- QR gera em QR_SAFE_MODE quando `session files = 0`.
+- `/conversas` abre.
+- `/etiquetas` so testada depois do WhatsApp conectado.
+- Worker logs sem 428 em loop.
+- Postgres e Redis continuam sem portas publicas.
 
 ## Observacoes
 
