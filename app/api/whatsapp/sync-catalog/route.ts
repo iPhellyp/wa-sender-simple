@@ -22,12 +22,12 @@ export async function POST() {
     );
   }
 
-  const jobId = await enqueueWhatsappCatalogSync();
+  const jobId = await enqueueWhatsappCatalogSync({ forceSnapshot: true });
 
   return NextResponse.json({
     ok: true,
     jobId,
     message:
-      "Sincronizacao de catalogo enviada. Aguarde 1 a 3 minutos e recarregue conversas/etiquetas."
+      "Resync de catalogo/app-state enviado. Aguarde 1 a 3 minutos e recarregue conversas/etiquetas."
   });
 }

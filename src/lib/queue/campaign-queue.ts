@@ -22,6 +22,10 @@ export type SendManualMessageJobData = {
   text: string;
 };
 
+export type SyncWhatsappCatalogJobData = {
+  forceSnapshot?: boolean;
+};
+
 let queue: Queue | null = null;
 
 function safeJobIdPart(value: string) {
@@ -127,10 +131,10 @@ export async function enqueueWhatsappHistorySync() {
   return job.id ?? null;
 }
 
-export async function enqueueWhatsappCatalogSync() {
+export async function enqueueWhatsappCatalogSync(data: SyncWhatsappCatalogJobData = {}) {
   const job = await getCampaignQueue().add(
     SYNC_WHATSAPP_CATALOG_JOB,
-    {},
+    data,
     {
       attempts: 1,
       jobId: SYNC_WHATSAPP_CATALOG_JOB_ID,

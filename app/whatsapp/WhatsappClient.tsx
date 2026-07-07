@@ -229,9 +229,9 @@ export function WhatsappClient() {
       <div className="card grid">
         <div className="button-row" style={{ justifyContent: "space-between" }}>
           <div>
-            <strong>Sincronizar catalogo agora</strong>
+            <strong>Forçar resync de catálogo/app-state</strong>
             <div className="muted">
-              Carrega contatos, nomes e etiquetas sem salvar historico de mensagens.
+              Força resync de catálogo/app-state. Use se chats/nomes/etiquetas não carregarem.
             </div>
           </div>
           <button
@@ -240,7 +240,7 @@ export function WhatsappClient() {
             type="button"
             onClick={() => void syncCatalogNow()}
           >
-            {catalogBusy ? "Enviando..." : "Sincronizar catalogo agora"}
+            {catalogBusy ? "Enviando..." : "Forçar resync"}
           </button>
         </div>
         {catalogMessage ? <div className="message success">{catalogMessage}</div> : null}

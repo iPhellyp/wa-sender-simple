@@ -1,10 +1,11 @@
 import makeWASocket, {
+  ALL_WA_PATCH_NAMES,
   Browsers,
   DisconnectReason,
   fetchLatestBaileysVersion,
+  proto,
   useMultiFileAuthState,
   type BaileysEventMap,
-  type proto,
   type WASocket
 } from "@whiskeysockets/baileys";
 import { mkdir, readdir, rm, unlink, writeFile } from "fs/promises";
@@ -14,7 +15,7 @@ import QRCode from "qrcode";
 import { WhatsappStatus, type Prisma } from "@prisma/client";
 import { prisma } from "../prisma/client";
 import { normalizeBrazilPhone, toWhatsappJid } from "../phone/normalize";
-import { CATALOG_BOOTSTRAP_MODE } from "../whatsapp/jid";
+import { CATALOG_BOOTSTRAP_MODE, shouldIgnoreJidForX1Only } from "../whatsapp/jid";
 import { extractMessageText, isOptOutMessage } from "./opt-out";
 import {
   syncChatsUpdate,
@@ -60,6 +61,17 @@ const QR_SAFE_428_MESSAGE =
   "Falha ao gerar QR mesmo em modo seguro. Tente Resetar sessao e Reconectar novamente.";
 const QR_SAFE_405_EXHAUSTED_MESSAGE =
   "Falha ao gerar QR: todos os perfis seguros de pareamento retornaram erro 405. Tente novamente em alguns minutos ou revise a versao/browser Baileys.";
+const CATALOG_APP_STATE_COLLECTIONS = ALL_WA_PATCH_NAMES;
+const CATALOG_HISTORY_SYNC_TYPES = new Set<number>([
+  proto.Message.HistorySyncNotification.HistorySyncType.INITIAL_BOOTSTRAP,
+  proto.Message.HistorySyncNotification.HistorySyncType.RECENT,
+  proto.Message.HistorySyncNotification.HistorySyncType.FULL,
+  proto.Message.HistorySyncNotification.HistorySyncType.PUSH_NAME,
+  proto.Message.HistorySyncNotification.HistorySyncType.NON_BLOCKING_DATA,
+  proto.Message.HistorySyncNotification.HistorySyncType.ON_DEMAND
+]);
+
+type CatalogAppStateCollection = (typeof CATALOG_APP_STATE_COLLECTIONS)[number];
 
 type CleanPairingProfile = {
   id: string;
@@ -235,6 +247,61 @@ function isTransientSocketClose(options: {
     options.wasConnected &&
     !options.pairingMode
   );
+}
+
+function shouldSyncCatalogHistoryMessage(message: proto.Message.IHistorySyncNotification) {
+  const syncType = message.syncType ?? null;
+  const shouldSync = syncType !== null && CATALOG_HISTORY_SYNC_TYPES.has(syncType);
+
+  console.log("[catalog] shouldSyncHistoryMessage", {
+    syncType,
+    shouldSync
+  });
+
+  return shouldSync;
+}
+
+function shouldIgnoreCatalogJid(jid: string | null | undefined) {
+  return shouldIgnoreJidForX1Only(jid);
+}
+
+async function clearCatalogAppStateVersionsForSnapshot(activeSocket: WASocket) {
+  const collections = [...CATALOG_APP_STATE_COLLECTIONS];
+  const currentVersions = await activeSocket.authState.keys.get(
+    "app-state-sync-version",
+    collections
+  );
+  const resetVersions = CATALOG_APP_STATE_COLLECTIONS.reduce(
+    (versions, collection) => {
+      versions[collection] = null;
+      return versions;
+    },
+    {} as Record<CatalogAppStateCollection, null>
+  );
+  const versionSummary = CATALOG_APP_STATE_COLLECTIONS.reduce(
+    (summary, collection) => {
+      summary[collection] = currentVersions[collection]?.version ?? null;
+      return summary;
+    },
+    {} as Record<CatalogAppStateCollection, number | null>
+  );
+
+  console.log("[catalog] force snapshot app-state versions backup", {
+    collections: CATALOG_APP_STATE_COLLECTIONS,
+    versions: versionSummary
+  });
+
+  await activeSocket.authState.keys.set({
+    "app-state-sync-version": resetVersions
+  });
+
+  console.log("[catalog] force snapshot app-state versions cleared", {
+    collections: CATALOG_APP_STATE_COLLECTIONS
+  });
+
+  return {
+    cleared: CATALOG_APP_STATE_COLLECTIONS.length
+  };
 }
 
 function getMessageTimestampForJson(messageTimestamp: unknown) {
@@ -610,6 +677,7 @@ async function createSocket(options: {
       sessionFiles: sessionFileCount,
       syncFullHistory: shouldSyncCatalogHistory
     });
+    console.log("[catalog] normal desktop browser enabled for full catalog sync");
     const { version, isLatest, error: versionError } = await fetchLatestBaileysVersion();
 
     console.log("[baileys] fetched latest version", {
@@ -630,7 +698,10 @@ async function createSocket(options: {
     logger: P({ level: process.env.BAILEYS_LOG_LEVEL ?? "silent" }),
     browser: cleanPairingProfile ? cleanPairingProfile.browser() : Browsers.macOS("Desktop"),
     syncFullHistory: shouldSyncCatalogHistory,
-    shouldSyncHistoryMessage: () => shouldSyncCatalogHistory,
+    shouldSyncHistoryMessage: (message) =>
+      shouldSyncCatalogHistory && shouldSyncCatalogHistoryMessage(message),
+    shouldIgnoreJid: shouldIgnoreCatalogJid,
+    fireInitQueries: true,
     markOnlineOnConnect: false,
     ...socketModeOptions
   });
@@ -1308,8 +1379,9 @@ export async function requestWhatsappHistorySync() {
   };
 }
 
-export async function requestWhatsappCatalogSync() {
+export async function requestWhatsappCatalogSync(options: { forceSnapshot?: boolean } = {}) {
   let activeSocket: WASocket;
+  const forceSnapshot = options.forceSnapshot === true;
 
   try {
     activeSocket = await getConnectedSocket();
@@ -1321,7 +1393,7 @@ export async function requestWhatsappCatalogSync() {
 
     return {
       ok: false,
-      mode: "event-driven" as const,
+      mode: "resync-app-state" as const,
       message
     };
   }
@@ -1348,37 +1420,105 @@ export async function requestWhatsappCatalogSync() {
       }
     })
   ]);
-  const runtimeSocket = activeSocket as WASocket & {
-    resyncAppState?: unknown;
-    requestSync?: unknown;
-  };
-  const hasResyncAppState = typeof runtimeSocket.resyncAppState === "function";
-  const hasRequestSync = typeof runtimeSocket.requestSync === "function";
 
   console.log("[catalog] sync-whatsapp-catalog requested", {
-    mode: "event-driven",
+    mode: "resync-app-state",
     syncFullHistory: CATALOG_BOOTSTRAP_MODE,
-    hasResyncAppState,
-    hasRequestSync,
+    forceSnapshot,
+    collections: CATALOG_APP_STATE_COLLECTIONS,
     chats: chatCount,
     contacts: contactCount,
     labels: labelCount,
     associations: associationCount
   });
 
+  const resyncAppState =
+    typeof activeSocket.resyncAppState === "function"
+      ? activeSocket.resyncAppState.bind(activeSocket)
+      : null;
+
+  if (!resyncAppState) {
+    console.warn("[catalog] app-state resync unavailable; Baileys socket does not expose resyncAppState", {
+      collections: CATALOG_APP_STATE_COLLECTIONS
+    });
+
+    return {
+      ok: false,
+      mode: "resync-app-state" as const,
+      forceSnapshot,
+      counts: {
+        chats: chatCount,
+        contacts: contactCount,
+        labels: labelCount,
+        associations: associationCount
+      },
+      message: "Socket Baileys conectado nao expoe resyncAppState."
+    };
+  }
+
+  let snapshotReset: { cleared: number } | null = null;
+
+  if (forceSnapshot) {
+    try {
+      snapshotReset = await clearCatalogAppStateVersionsForSnapshot(activeSocket);
+    } catch (error) {
+      console.warn("[catalog] force snapshot app-state reset failed; continuing with resync", {
+        error: sanitizeErrorMessage(error)
+      });
+    }
+  }
+
+  console.log("[catalog] app-state resync requested", {
+    collections: CATALOG_APP_STATE_COLLECTIONS,
+    isInitialSync: true,
+    forceSnapshot
+  });
+
+  try {
+    await resyncAppState(CATALOG_APP_STATE_COLLECTIONS, true);
+
+    console.log("[catalog] app-state resync finished", {
+      collections: CATALOG_APP_STATE_COLLECTIONS,
+      forceSnapshot,
+      snapshotReset
+    });
+  } catch (error) {
+    const message = sanitizeErrorMessage(error);
+
+    console.error("[catalog] app-state resync failed", {
+      error: message,
+      forceSnapshot,
+      snapshotReset
+    });
+
+    return {
+      ok: false,
+      mode: "resync-app-state" as const,
+      forceSnapshot,
+      snapshotReset,
+      counts: {
+        chats: chatCount,
+        contacts: contactCount,
+        labels: labelCount,
+        associations: associationCount
+      },
+      message
+    };
+  }
+
   return {
     ok: true,
-    mode: "event-driven" as const,
+    mode: "resync-app-state" as const,
+    forceSnapshot,
+    snapshotReset,
     counts: {
       chats: chatCount,
       contacts: contactCount,
       labels: labelCount,
       associations: associationCount
     },
-    hasResyncAppState,
-    hasRequestSync,
     message:
-      "Sincronizacao de catalogo ativada. O Baileys entrega chats, contatos, labels e associacoes por eventos; nenhum historico de mensagens sera salvo."
+      "Resync de catalogo/app-state solicitado. O Baileys deve entregar chats, contatos, labels e associacoes por eventos; nenhum historico pesado de mensagens sera salvo."
   };
 }
 
