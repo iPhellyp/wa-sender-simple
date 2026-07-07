@@ -86,7 +86,7 @@ export async function upsertWhatsappLabels(labels: LabelEditEvent[]) {
     }
   }
 
-  console.log("[sync] labels edit", counters);
+  console.log("[catalog] labels saved", counters);
   return counters;
 }
 
@@ -138,6 +138,8 @@ export async function syncLabelsAssociation(event: LabelAssociationEvent) {
   const counters = {
     associations: 1,
     processed: 0,
+    x1Saved: 0,
+    groupsSkipped: 0,
     skipped: 0,
     removed: 0,
     failed: 0
@@ -166,8 +168,10 @@ export async function syncLabelsAssociation(event: LabelAssociationEvent) {
     if (shouldIgnoreJidForX1Only(jid)) {
       counters.skipped = 1;
       if (isGroupJid(jid)) {
+        counters.groupsSkipped = 1;
         recordX1GroupSkips("labels");
       }
+      console.log("[catalog] associations saved", counters);
       return counters;
     }
 
@@ -184,11 +188,14 @@ export async function syncLabelsAssociation(event: LabelAssociationEvent) {
       await removeWhatsappLabelAssociation(chat.id, label.id);
       counters.removed = 1;
       counters.processed = 1;
+      counters.x1Saved = 1;
+      console.log("[catalog] associations saved", counters);
       return counters;
     }
 
     await upsertWhatsappLabelAssociation(jid, label.id, chat.id);
     counters.processed = 1;
+    counters.x1Saved = 1;
   } catch (error) {
     counters.failed = 1;
     console.warn("[sync] labels association failed", {
@@ -196,7 +203,7 @@ export async function syncLabelsAssociation(event: LabelAssociationEvent) {
     });
   }
 
-  console.log("[sync] labels association", counters);
+  console.log("[catalog] associations saved", counters);
   return counters;
 }
 

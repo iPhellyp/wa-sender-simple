@@ -7,7 +7,7 @@ import type {
 } from "@whiskeysockets/baileys";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../prisma/client";
-import { cleanDisplayName, isBetterDisplayName } from "../whatsapp/display-name";
+import { cleanDisplayName, isBetterDisplayName, pickBestDisplayName } from "../whatsapp/display-name";
 import {
   FAST_LABEL_SENDER_MODE,
   isBroadcastOrNewsletterJid,
@@ -55,6 +55,23 @@ function compactText(text: string | null | undefined) {
 
 function safeLogMessageId(messageId: string) {
   return messageId.length > 12 ? `${messageId.slice(0, 8)}...` : messageId;
+}
+
+function stringField(source: object, key: string) {
+  const value = (source as Record<string, unknown>)[key];
+
+  return typeof value === "string" ? value : null;
+}
+
+function getNameCandidates(source: object, options: { includeSubject?: boolean } = {}) {
+  return [
+    stringField(source, "name"),
+    stringField(source, "notify"),
+    stringField(source, "pushName"),
+    stringField(source, "verifiedName"),
+    stringField(source, "shortName"),
+    options.includeSubject ? stringField(source, "subject") : null
+  ];
 }
 
 const hiddenMessageTypes = new Set([
@@ -373,6 +390,10 @@ function getBaileysMessageJid(message: WAMessage | WAMessageUpdate) {
   return normalizeChatJid(message.key.remoteJid);
 }
 
+function getBaileysContactJid(contact: Partial<Contact>) {
+  return normalizeChatJid(contact.jid ?? contact.id ?? contact.lid);
+}
+
 function splitX1Chats<T extends Partial<Chat>>(chats: T[]) {
   const allowed: T[] = [];
   let groupSkipped = 0;
@@ -409,6 +430,24 @@ function splitX1Messages<T extends WAMessage | WAMessageUpdate>(messages: T[]) {
   return { allowed, groupSkipped };
 }
 
+function splitX1Contacts<T extends Partial<Contact>>(contacts: T[]) {
+  const allowed: T[] = [];
+  let groupSkipped = 0;
+
+  for (const contact of contacts) {
+    const jid = getBaileysContactJid(contact);
+
+    if (jid && shouldIgnoreJidForX1Only(jid)) {
+      groupSkipped += 1;
+      continue;
+    }
+
+    allowed.push(contact);
+  }
+
+  return { allowed, groupSkipped };
+}
+
 export async function upsertChatFromBaileys(chat: Partial<Chat>) {
   const jid = normalizeChatJid(chat.id ?? chat.newJid ?? chat.oldJid);
 
@@ -423,8 +462,9 @@ export async function upsertChatFromBaileys(chat: Partial<Chat>) {
     return false;
   }
 
-  const name = cleanDisplayName(chat.name, jid);
+  const isGroup = isGroupJid(jid);
   const unreadCount = typeof chat.unreadCount === "number" ? chat.unreadCount : undefined;
+  const incomingName = pickBestDisplayName(null, getNameCandidates(chat, { includeSubject: !isGroup }), jid);
   const lastMessageAt =
     getMessageTimestamp(chat.conversationTimestamp) ??
     getMessageTimestamp(chat.lastMsgTimestamp) ??
@@ -438,6 +478,7 @@ export async function upsertChatFromBaileys(chat: Partial<Chat>) {
       lastMessageAt: true
     }
   });
+  const name = pickBestDisplayName(existingChat?.name, [incomingName], jid);
   const shouldUpdateName = isBetterDisplayName(existingChat?.name, name, jid);
   const shouldUpdateLastMessageAt = Boolean(
     lastMessageAt && (!existingChat?.lastMessageAt || lastMessageAt >= existingChat.lastMessageAt)
@@ -449,14 +490,14 @@ export async function upsertChatFromBaileys(chat: Partial<Chat>) {
     },
     update: {
       ...(shouldUpdateName ? { name } : {}),
-      isGroup: isGroupJid(jid),
+      isGroup,
       ...(unreadCount !== undefined ? { unreadCount } : {}),
       ...(shouldUpdateLastMessageAt ? { lastMessageAt } : {})
     },
     create: {
       jid,
       name,
-      isGroup: isGroupJid(jid),
+      isGroup,
       unreadCount: unreadCount ?? 0,
       lastMessageAt
     }
@@ -479,8 +520,25 @@ export async function upsertContactFromBaileys(contact: Partial<Contact>) {
     return false;
   }
 
-  const name = cleanDisplayName(contact.name ?? contact.verifiedName ?? contact.notify, jid);
-  const pushName = cleanDisplayName(contact.notify, jid);
+  const incomingName = pickBestDisplayName(null, getNameCandidates(contact), jid);
+  const incomingPushName = pickBestDisplayName(null, [
+    stringField(contact, "pushName"),
+    stringField(contact, "notify"),
+    stringField(contact, "shortName")
+  ], jid);
+  const existingContact = await prisma.whatsappContact.findUnique({
+    where: {
+      jid
+    },
+    select: {
+      name: true,
+      pushName: true
+    }
+  });
+  const name = pickBestDisplayName(existingContact?.name, [incomingName], jid);
+  const pushName = pickBestDisplayName(existingContact?.pushName, [incomingPushName, incomingName], jid);
+  const shouldUpdateName = isBetterDisplayName(existingContact?.name, name, jid);
+  const shouldUpdatePushName = isBetterDisplayName(existingContact?.pushName, pushName, jid);
 
   await prisma.whatsappContact.upsert({
     where: {
@@ -488,8 +546,8 @@ export async function upsertContactFromBaileys(contact: Partial<Contact>) {
     },
     update: {
       phone: extractPhoneFromJid(jid),
-      ...(name ? { name } : {}),
-      ...(pushName ? { pushName } : {}),
+      ...(shouldUpdateName ? { name } : {}),
+      ...(shouldUpdatePushName ? { pushName } : {}),
       ...(contact.verifiedName !== undefined ? { isBusiness: Boolean(contact.verifiedName) } : {})
     },
     create: {
@@ -731,6 +789,10 @@ export async function updateMessageFromBaileys(messageUpdate: WAMessageUpdate) {
     return false;
   }
 
+  if (FAST_LABEL_SENDER_MODE) {
+    return false;
+  }
+
   const timestamp = getMessageTimestamp(messageUpdate.update.messageTimestamp);
   const messageType = extractMessageType(messageUpdate.update.message);
   const text = extractMessageText(messageUpdate.update.message);
@@ -758,9 +820,10 @@ export async function syncMessagingHistorySet(event: BaileysEventMap["messaging-
   const syncType = event.syncType ?? null;
   const progress = (event as { progress?: number | null }).progress ?? null;
   const x1Chats = splitX1Chats(event.chats);
+  const x1Contacts = splitX1Contacts(event.contacts);
   const x1Messages = splitX1Messages(event.messages);
 
-  console.log("[history] messaging-history.set received", {
+  console.log("[catalog] history set received", {
     syncType,
     progress,
     chats: event.chats.length,
@@ -772,23 +835,29 @@ export async function syncMessagingHistorySet(event: BaileysEventMap["messaging-
     recordX1GroupSkips("chats", x1Chats.groupSkipped);
   }
 
+  if (x1Contacts.groupSkipped > 0) {
+    recordX1GroupSkips("contacts", x1Contacts.groupSkipped);
+  }
+
   if (x1Messages.groupSkipped > 0) {
     recordX1GroupSkips("messages", x1Messages.groupSkipped);
   }
 
   const chatsResult = await settleInBatches(x1Chats.allowed, upsertChatFromBaileys);
-  console.log("[history] chats persisted", {
+  console.log("[catalog] chats saved", {
     syncType,
-    count: chatsResult.processed,
+    processed: chatsResult.processed,
+    skippedGroups: x1Chats.groupSkipped,
     skipped: chatsResult.skipped,
     failed: chatsResult.failed,
     ...(chatsResult.firstError ? { firstError: chatsResult.firstError } : {})
   });
 
-  const contactsResult = await settleInBatches(event.contacts, upsertContactFromBaileys);
-  console.log("[history] contacts persisted", {
+  const contactsResult = await settleInBatches(x1Contacts.allowed, upsertContactFromBaileys);
+  console.log("[catalog] contacts saved", {
     syncType,
-    count: contactsResult.processed,
+    processed: contactsResult.processed,
+    skippedGroups: x1Contacts.groupSkipped,
     skipped: contactsResult.skipped,
     failed: contactsResult.failed,
     ...(contactsResult.firstError ? { firstError: contactsResult.firstError } : {})
@@ -797,9 +866,9 @@ export async function syncMessagingHistorySet(event: BaileysEventMap["messaging-
   const messagesResult = await settleInBatches(x1Messages.allowed, (message) =>
     upsertMessageFromBaileys(message, { log: true, logScope: "history" })
   );
-  console.log("[history] messages persisted", {
+  console.log("[catalog] message metadata processed", {
     syncType,
-    count: messagesResult.processed,
+    processed: messagesResult.processed,
     skipped: messagesResult.skipped,
     failed: messagesResult.failed,
     ...(messagesResult.firstError ? { firstError: messagesResult.firstError } : {})
@@ -842,18 +911,30 @@ export async function syncChatsUpdate(chats: BaileysEventMap["chats.update"]) {
 }
 
 export async function syncContactsUpsert(contacts: BaileysEventMap["contacts.upsert"]) {
+  const x1Contacts = splitX1Contacts(contacts);
+
+  if (x1Contacts.groupSkipped > 0) {
+    recordX1GroupSkips("contacts", x1Contacts.groupSkipped);
+  }
+
   logSyncResult(
     "contacts upsert",
     { contacts: contacts.length },
-    await settleInBatches(contacts, upsertContactFromBaileys)
+    await settleInBatches(x1Contacts.allowed, upsertContactFromBaileys)
   );
 }
 
 export async function syncContactsUpdate(contacts: BaileysEventMap["contacts.update"]) {
+  const x1Contacts = splitX1Contacts(contacts);
+
+  if (x1Contacts.groupSkipped > 0) {
+    recordX1GroupSkips("contacts", x1Contacts.groupSkipped);
+  }
+
   logSyncResult(
     "contacts update",
     { contacts: contacts.length },
-    await settleInBatches(contacts, upsertContactFromBaileys)
+    await settleInBatches(x1Contacts.allowed, upsertContactFromBaileys)
   );
 }
 

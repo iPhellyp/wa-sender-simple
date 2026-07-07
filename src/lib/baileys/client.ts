@@ -14,6 +14,7 @@ import QRCode from "qrcode";
 import { WhatsappStatus, type Prisma } from "@prisma/client";
 import { prisma } from "../prisma/client";
 import { normalizeBrazilPhone, toWhatsappJid } from "../phone/normalize";
+import { CATALOG_BOOTSTRAP_MODE } from "../whatsapp/jid";
 import { extractMessageText, isOptOutMessage } from "./opt-out";
 import {
   syncChatsUpdate,
@@ -45,9 +46,11 @@ let lastTerminalErrorAt: number | null = null;
 let lastResetSucceededAt: number | null = null;
 let resetInProgress = false;
 let cleanPairingProfileIndex = 0;
+let catalogBootstrapTimer: ReturnType<typeof setTimeout> | null = null;
 
 const MAX_GENERAL_RECONNECT_ATTEMPTS = 5;
 const TRANSIENT_RECONNECT_BACKOFF_MS = [2_000, 5_000, 15_000] as const;
+const CATALOG_BOOTSTRAP_WINDOW_MS = 3 * 60_000;
 const TERMINAL_COOLDOWN_MS = 15_000;
 const TRANSIENT_RECONNECT_EXHAUSTED_MESSAGE =
   "Reconexao automatica esgotada apos queda transitoria do socket WhatsApp.";
@@ -134,6 +137,32 @@ function resetReconnectCounters() {
   status515RestartCount = 0;
   generalReconnectCount = 0;
   transientReconnectCount = 0;
+}
+
+function clearCatalogBootstrapTimer() {
+  if (catalogBootstrapTimer) {
+    clearTimeout(catalogBootstrapTimer);
+    catalogBootstrapTimer = null;
+  }
+}
+
+function startCatalogBootstrapWindow(reason: string) {
+  if (!CATALOG_BOOTSTRAP_MODE) {
+    return;
+  }
+
+  clearCatalogBootstrapTimer();
+  console.log("[catalog] bootstrap started", {
+    reason,
+    windowMs: CATALOG_BOOTSTRAP_WINDOW_MS
+  });
+  catalogBootstrapTimer = setTimeout(() => {
+    catalogBootstrapTimer = null;
+    console.log("[catalog] bootstrap finished/idle", {
+      reason
+    });
+  }, CATALOG_BOOTSTRAP_WINDOW_MS);
+  (catalogBootstrapTimer as { unref?: () => void }).unref?.();
 }
 
 function getCleanPairingProfile() {
@@ -521,6 +550,7 @@ async function createSocket(options: {
   const sessionDir = getSessionDir();
   clearReconnectTimer();
   hasReceivedQr = false;
+  const shouldSyncCatalogHistory = CATALOG_BOOTSTRAP_MODE && !isCleanPairing;
   console.log("[baileys] creating socket");
   console.log("[baileys] session dir:", sessionDir);
 
@@ -576,7 +606,10 @@ async function createSocket(options: {
       versionSource: cleanPairingProfile.versionMode
     });
   } else {
-    console.log("[baileys] normal socket mode enabled", { sessionFiles: sessionFileCount });
+    console.log("[baileys] normal socket mode enabled", {
+      sessionFiles: sessionFileCount,
+      syncFullHistory: shouldSyncCatalogHistory
+    });
     const { version, isLatest, error: versionError } = await fetchLatestBaileysVersion();
 
     console.log("[baileys] fetched latest version", {
@@ -596,8 +629,8 @@ async function createSocket(options: {
     printQRInTerminal: false,
     logger: P({ level: process.env.BAILEYS_LOG_LEVEL ?? "silent" }),
     browser: cleanPairingProfile ? cleanPairingProfile.browser() : Browsers.macOS("Desktop"),
-    syncFullHistory: !isCleanPairing,
-    shouldSyncHistoryMessage: () => !isCleanPairing,
+    syncFullHistory: shouldSyncCatalogHistory,
+    shouldSyncHistoryMessage: () => shouldSyncCatalogHistory,
     markOnlineOnConnect: false,
     ...socketModeOptions
   });
@@ -689,6 +722,7 @@ async function createSocket(options: {
           connectedPhone,
           lastError: null
         });
+        startCatalogBootstrapWindow("connection-open");
         console.log("[baileys] connected", {
           connectedPhone: connectedPhone ? "present" : "unknown"
         });
@@ -1271,6 +1305,80 @@ export async function requestWhatsappHistorySync() {
     canUseOnDemandHistory: false,
     message:
       "Historico verificado. O sistema salva eventos do WhatsApp em tempo real; fetchMessageHistory exige cursor de mensagem antiga e nao foi disparado automaticamente."
+  };
+}
+
+export async function requestWhatsappCatalogSync() {
+  let activeSocket: WASocket;
+
+  try {
+    activeSocket = await getConnectedSocket();
+  } catch (error) {
+    const message = sanitizeErrorMessage(error);
+    console.log("[catalog] sync-whatsapp-catalog skipped; not connected", {
+      error: message
+    });
+
+    return {
+      ok: false,
+      mode: "event-driven" as const,
+      message
+    };
+  }
+
+  startCatalogBootstrapWindow("manual-sync-catalog");
+
+  const [chatCount, contactCount, labelCount, associationCount] = await Promise.all([
+    prisma.whatsappChat.count({
+      where: {
+        isGroup: false
+      }
+    }),
+    prisma.whatsappContact.count(),
+    prisma.whatsappLabel.count({
+      where: {
+        deleted: false
+      }
+    }),
+    prisma.whatsappChatLabel.count({
+      where: {
+        chat: {
+          isGroup: false
+        }
+      }
+    })
+  ]);
+  const runtimeSocket = activeSocket as WASocket & {
+    resyncAppState?: unknown;
+    requestSync?: unknown;
+  };
+  const hasResyncAppState = typeof runtimeSocket.resyncAppState === "function";
+  const hasRequestSync = typeof runtimeSocket.requestSync === "function";
+
+  console.log("[catalog] sync-whatsapp-catalog requested", {
+    mode: "event-driven",
+    syncFullHistory: CATALOG_BOOTSTRAP_MODE,
+    hasResyncAppState,
+    hasRequestSync,
+    chats: chatCount,
+    contacts: contactCount,
+    labels: labelCount,
+    associations: associationCount
+  });
+
+  return {
+    ok: true,
+    mode: "event-driven" as const,
+    counts: {
+      chats: chatCount,
+      contacts: contactCount,
+      labels: labelCount,
+      associations: associationCount
+    },
+    hasResyncAppState,
+    hasRequestSync,
+    message:
+      "Sincronizacao de catalogo ativada. O Baileys entrega chats, contatos, labels e associacoes por eventos; nenhum historico de mensagens sera salvo."
   };
 }
 

@@ -8,11 +8,13 @@ export const DISCONNECT_WHATSAPP_JOB = "disconnect-whatsapp";
 export const RESET_WHATSAPP_JOB = "reset-whatsapp";
 export const SEND_MANUAL_MESSAGE_JOB = "send-manual-message";
 export const SYNC_WHATSAPP_HISTORY_JOB = "sync-whatsapp-history";
+export const SYNC_WHATSAPP_CATALOG_JOB = "sync-whatsapp-catalog";
 
 const CONNECT_WHATSAPP_JOB_ID = "connect-whatsapp";
 const DISCONNECT_WHATSAPP_JOB_ID = "disconnect-whatsapp";
 const RESET_WHATSAPP_JOB_ID = "reset-whatsapp";
 const SYNC_WHATSAPP_HISTORY_JOB_ID = "sync-whatsapp-history";
+const SYNC_WHATSAPP_CATALOG_JOB_ID = "sync-whatsapp-catalog";
 
 export type SendManualMessageJobData = {
   chatId: string;
@@ -117,6 +119,21 @@ export async function enqueueWhatsappHistorySync() {
     {
       attempts: 1,
       jobId: SYNC_WHATSAPP_HISTORY_JOB_ID,
+      removeOnComplete: true,
+      removeOnFail: 100
+    }
+  );
+
+  return job.id ?? null;
+}
+
+export async function enqueueWhatsappCatalogSync() {
+  const job = await getCampaignQueue().add(
+    SYNC_WHATSAPP_CATALOG_JOB,
+    {},
+    {
+      attempts: 1,
+      jobId: SYNC_WHATSAPP_CATALOG_JOB_ID,
       removeOnComplete: true,
       removeOnFail: 100
     }

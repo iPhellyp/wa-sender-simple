@@ -146,6 +146,24 @@ export function isBetterDisplayName(
   return getDisplayNameScore(cleanCandidate, jid) > getDisplayNameScore(current, jid);
 }
 
+export function pickBestDisplayName(
+  current: string | null | undefined,
+  candidates: Array<string | null | undefined>,
+  jid?: string | null
+) {
+  let best = cleanDisplayName(current, jid);
+
+  for (const candidate of candidates) {
+    const cleanCandidate = cleanDisplayName(candidate, jid);
+
+    if (isBetterDisplayName(best, cleanCandidate, jid)) {
+      best = cleanCandidate;
+    }
+  }
+
+  return best;
+}
+
 export function getWhatsappDisplayName(source: DisplayNameSource) {
   const chatName = cleanDisplayName(source.chatName, source.jid);
 

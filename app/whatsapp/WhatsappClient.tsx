@@ -39,6 +39,8 @@ export function WhatsappClient() {
   const [session, setSession] = useState<WhatsappSession | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [catalogBusy, setCatalogBusy] = useState(false);
+  const [catalogMessage, setCatalogMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   async function loadStatus() {
@@ -78,6 +80,29 @@ export function WhatsappClient() {
       setError(actionError instanceof Error ? actionError.message : "Erro inesperado");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function syncCatalogNow() {
+    setCatalogBusy(true);
+    setCatalogMessage(null);
+    setError(null);
+
+    try {
+      const response = await fetch("/api/whatsapp/sync-catalog", {
+        method: "POST"
+      });
+      const data = (await response.json()) as { message?: string; error?: string };
+
+      if (!response.ok || data.error) {
+        throw new Error(data.error ?? "Falha ao sincronizar catalogo");
+      }
+
+      setCatalogMessage(data.message ?? "Enviado para sincronizacao. Aguarde 1 a 3 minutos.");
+    } catch (syncError) {
+      setError(syncError instanceof Error ? syncError.message : "Erro inesperado");
+    } finally {
+      setCatalogBusy(false);
     }
   }
 
@@ -199,6 +224,26 @@ export function WhatsappClient() {
       <div className="message">
         A atualizacao automatica da inbox usa polling. Se novas mensagens nao aparecerem,
         verifique os logs do worker.
+      </div>
+
+      <div className="card grid">
+        <div className="button-row" style={{ justifyContent: "space-between" }}>
+          <div>
+            <strong>Sincronizar catalogo agora</strong>
+            <div className="muted">
+              Carrega contatos, nomes e etiquetas sem salvar historico de mensagens.
+            </div>
+          </div>
+          <button
+            className="button"
+            disabled={catalogBusy || session?.status === "qr"}
+            type="button"
+            onClick={() => void syncCatalogNow()}
+          >
+            {catalogBusy ? "Enviando..." : "Sincronizar catalogo agora"}
+          </button>
+        </div>
+        {catalogMessage ? <div className="message success">{catalogMessage}</div> : null}
       </div>
 
       {error ? <div className="message error">{error}</div> : null}

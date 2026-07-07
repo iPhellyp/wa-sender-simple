@@ -1,5 +1,6 @@
 export const WHATSAPP_X1_ONLY_MODE = true;
 export const FAST_LABEL_SENDER_MODE = true;
+export const CATALOG_BOOTSTRAP_MODE = true;
 
 const X1_GROUP_SKIP_LOG_INTERVAL_MS = 60_000;
 const x1GroupSkipCounts = {

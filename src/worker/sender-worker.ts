@@ -8,6 +8,7 @@ import {
   RESET_WHATSAPP_JOB,
   SEND_MANUAL_MESSAGE_JOB,
   SEND_RECIPIENT_JOB,
+  SYNC_WHATSAPP_CATALOG_JOB,
   SYNC_WHATSAPP_HISTORY_JOB,
   enqueueRecipient,
   type SendManualMessageJobData
@@ -17,6 +18,7 @@ import {
   disconnectBaileys,
   isBaileysStartSkippedError,
   markWhatsappError,
+  requestWhatsappCatalogSync,
   requestWhatsappHistorySync,
   resetBaileysSession,
   sendWhatsappMessage,
@@ -544,6 +546,18 @@ const worker = new Worker(
 
       const result = await requestWhatsappHistorySync();
       console.log("[worker] sync-whatsapp-history finished", {
+        ok: result.ok,
+        mode: result.mode
+      });
+
+      return;
+    }
+
+    if (job.name === SYNC_WHATSAPP_CATALOG_JOB) {
+      console.log("[worker] sync-whatsapp-catalog job received");
+
+      const result = await requestWhatsappCatalogSync();
+      console.log("[worker] sync-whatsapp-catalog finished", {
         ok: result.ok,
         mode: result.mode
       });
