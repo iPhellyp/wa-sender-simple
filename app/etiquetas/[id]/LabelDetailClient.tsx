@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import { appendInstanceIdToHref, getStoredActiveInstanceId } from "@/src/lib/client/active-instance";
 
 type LabelDetailResponse = {
   label: {
@@ -77,12 +78,17 @@ function sendStatusClass(status: string) {
 }
 
 export function LabelDetailClient({ labelId }: { labelId: string }) {
+  const [activeInstanceId, setActiveInstanceId] = useState("");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [data, setData] = useState<LabelDetailResponse | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setActiveInstanceId(getStoredActiveInstanceId());
+  }, []);
 
   useEffect(() => {
     void (async () => {
@@ -94,6 +100,9 @@ export function LabelDetailClient({ labelId }: { labelId: string }) {
         params.set("limit", "50");
         if (search.trim()) {
           params.set("search", search.trim());
+        }
+        if (activeInstanceId) {
+          params.set("instanceId", activeInstanceId);
         }
 
         const response = await fetch(`/api/etiquetas/${labelId}?${params.toString()}`, {
@@ -113,15 +122,15 @@ export function LabelDetailClient({ labelId }: { labelId: string }) {
         setLoading(false);
       }
     })();
-  }, [labelId, page, search]);
+  }, [activeInstanceId, labelId, page, search]);
 
   const conversations = useMemo(() => data?.conversations ?? [], [data]);
   const selected = conversations.filter((conversation) => selectedIds.has(conversation.chatId));
   const exceedsQueryLimit = selected.length > MAX_QUERY_CHAT_IDS;
   const selectedCampaignHref =
     selected.length > 0 && !exceedsQueryLimit
-      ? `/campanhas?chatIds=${selected.map((item) => item.chatId).join(",")}`
-      : "/campanhas";
+      ? appendInstanceIdToHref(`/campanhas?chatIds=${selected.map((item) => item.chatId).join(",")}`, activeInstanceId)
+      : appendInstanceIdToHref("/campanhas", activeInstanceId);
 
   function toggle(chatId: string) {
     setSelectedIds((current) => {
@@ -148,10 +157,10 @@ export function LabelDetailClient({ labelId }: { labelId: string }) {
   return (
     <section className="grid">
       <div className="button-row">
-        <Link className="button secondary" href="/etiquetas">
+        <Link className="button secondary" href={appendInstanceIdToHref("/etiquetas", activeInstanceId)}>
           Voltar
         </Link>
-        <Link className="button" href={`/campanhas?labelId=${labelId}`}>
+        <Link className="button" href={appendInstanceIdToHref(`/campanhas?labelId=${labelId}`, activeInstanceId)}>
           Criar campanha com a etiqueta
         </Link>
       </div>
@@ -274,10 +283,16 @@ export function LabelDetailClient({ labelId }: { labelId: string }) {
                   {conversation.lastMessageText ?? "Sem mensagem salva"}
                 </span>
                 <span className="conversation-card-footer">
-                  <Link className="button secondary compact-button" href={`/conversas/${conversation.chatId}`}>
+                  <Link
+                    className="button secondary compact-button"
+                    href={appendInstanceIdToHref(`/conversas/${conversation.chatId}`, activeInstanceId)}
+                  >
                     Abrir contato
                   </Link>
-                  <Link className="button secondary compact-button" href={`/campanhas?chatIds=${conversation.chatId}`}>
+                  <Link
+                    className="button secondary compact-button"
+                    href={appendInstanceIdToHref(`/campanhas?chatIds=${conversation.chatId}`, activeInstanceId)}
+                  >
                     Campanha
                   </Link>
                   {conversation.error ? <span className="send-error">{conversation.error}</span> : null}

@@ -3,6 +3,7 @@ import { getWhatsappInstanceRuntimeStatus } from "@/src/lib/baileys/instance-man
 import { enqueueWhatsappHistorySync } from "@/src/lib/queue/campaign-queue";
 import {
   DEFAULT_WHATSAPP_INSTANCE_ID,
+  isWhatsappInstanceNotFoundError,
   requireWhatsappInstance
 } from "@/src/lib/server/whatsapp-instances";
 
@@ -42,7 +43,11 @@ export async function POST(request: NextRequest) {
       jobId,
       message: "Verificacao de historico enfileirada."
     });
-  } catch {
+  } catch (error) {
+    if (isWhatsappInstanceNotFoundError(error)) {
+      return NextResponse.json({ ok: false, error: "Instancia nao encontrada" }, { status: 404 });
+    }
+
     return NextResponse.json(
       { ok: false, error: "Erro ao enfileirar verificacao de historico" },
       { status: 500 }

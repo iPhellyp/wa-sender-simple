@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { enqueueWhatsappCatalogSync } from "@/src/lib/queue/campaign-queue";
 import { getWhatsappInstanceRuntimeStatus } from "@/src/lib/baileys/instance-manager";
-import { requireWhatsappInstance } from "@/src/lib/server/whatsapp-instances";
+import {
+  isWhatsappInstanceNotFoundError,
+  requireWhatsappInstance
+} from "@/src/lib/server/whatsapp-instances";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -20,7 +23,18 @@ async function getRequestPayload(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   const payload = await getRequestPayload(request);
-  const instance = await requireWhatsappInstance(payload.instanceId);
+  let instance;
+
+  try {
+    instance = await requireWhatsappInstance(payload.instanceId);
+  } catch (error) {
+    if (isWhatsappInstanceNotFoundError(error)) {
+      return NextResponse.json({ error: "Instancia nao encontrada" }, { status: 404 });
+    }
+
+    throw error;
+  }
+
   const session = await getWhatsappInstanceRuntimeStatus(instance.id);
 
   if (session.status === "qr") {

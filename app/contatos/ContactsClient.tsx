@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { FormEvent, useEffect, useMemo, useState } from "react";
+import { getStoredActiveInstanceId } from "@/src/lib/client/active-instance";
 
 type ContactSendStatus = "sent" | "failed" | "pending" | "never_sent";
 
@@ -75,7 +76,7 @@ function formatDate(value: string | null) {
 
 export function ContactsClient() {
   const searchParams = useSearchParams();
-  const activeInstanceId = searchParams.get("instanceId") ?? "";
+  const activeInstanceId = searchParams.get("instanceId") ?? getStoredActiveInstanceId();
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [origins, setOrigins] = useState<string[]>([]);
   const [labels, setLabels] = useState<WhatsappLabel[]>([]);

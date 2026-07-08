@@ -1979,6 +1979,11 @@ button:disabled {
   padding: 14px;
 }
 
+.instance-card.active {
+  border-color: rgba(22, 163, 74, 0.55);
+  box-shadow: 0 0 0 1px rgba(22, 163, 74, 0.18);
+}
+
 .instance-card-header {
   align-items: flex-start;
   display: flex;

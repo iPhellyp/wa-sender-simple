@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { appendInstanceIdToHref, getStoredActiveInstanceId } from "@/src/lib/client/active-instance";
 
 type LabelSummary = {
   id: string;
@@ -81,14 +82,21 @@ function statusClass(status: string) {
 }
 
 export function LabelsClient() {
+  const [activeInstanceId, setActiveInstanceId] = useState("");
   const [data, setData] = useState<LabelsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    setActiveInstanceId(getStoredActiveInstanceId());
+  }, []);
+
+  useEffect(() => {
     void (async () => {
       try {
-        const response = await fetch("/api/etiquetas", { cache: "no-store" });
+        const params = new URLSearchParams();
+        if (activeInstanceId) params.set("instanceId", activeInstanceId);
+        const response = await fetch(`/api/etiquetas?${params.toString()}`, { cache: "no-store" });
         const payload = (await response.json()) as LabelsResponse & { error?: string };
 
         if (!response.ok) {
@@ -102,7 +110,7 @@ export function LabelsClient() {
         setLoading(false);
       }
     })();
-  }, []);
+  }, [activeInstanceId]);
 
   if (loading) {
     return <div className="card">Carregando segmentos...</div>;
@@ -182,18 +190,21 @@ export function LabelsClient() {
               )}
 
               <div className="button-row">
-                <Link className="button secondary" href={`/etiquetas/${label.id}`}>
+                <Link className="button secondary" href={appendInstanceIdToHref(`/etiquetas/${label.id}`, activeInstanceId)}>
                   Abrir contatos
                 </Link>
-                <Link className="button" href={`/campanhas?labelId=${label.id}`}>
+                <Link className="button" href={appendInstanceIdToHref(`/campanhas?labelId=${label.id}`, activeInstanceId)}>
                   Criar campanha
                 </Link>
                 {label.lastCampaign ? (
-                  <Link className="button secondary" href={`/envios?campaign=${label.lastCampaign.id}`}>
+                  <Link
+                    className="button secondary"
+                    href={appendInstanceIdToHref(`/envios?campaign=${label.lastCampaign.id}`, activeInstanceId)}
+                  >
                     Ver historico
                   </Link>
                 ) : (
-                  <Link className="button secondary" href="/envios">
+                  <Link className="button secondary" href={appendInstanceIdToHref("/envios", activeInstanceId)}>
                     Ver envios
                   </Link>
                 )}

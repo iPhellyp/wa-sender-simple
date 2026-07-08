@@ -1,4 +1,5 @@
 import { prisma } from "../prisma/client";
+import { cookies } from "next/headers";
 
 export const WHATSAPP_INSTANCE_ROLES = [
   "SALES",
@@ -10,6 +11,18 @@ export const WHATSAPP_INSTANCE_ROLES = [
 ] as const;
 
 export const DEFAULT_WHATSAPP_INSTANCE_ID = "default";
+export const ACTIVE_INSTANCE_COOKIE_NAME = "wa_sender_active_instance_id";
+
+export class WhatsappInstanceNotFoundError extends Error {
+  constructor(readonly instanceId: string) {
+    super("Instancia nao encontrada");
+    this.name = "WhatsappInstanceNotFoundError";
+  }
+}
+
+export function isWhatsappInstanceNotFoundError(error: unknown): error is WhatsappInstanceNotFoundError {
+  return error instanceof WhatsappInstanceNotFoundError;
+}
 
 export type WhatsappInstanceRoleValue = (typeof WHATSAPP_INSTANCE_ROLES)[number];
 
@@ -103,23 +116,53 @@ export async function requireWhatsappInstance(instanceId?: string | null) {
     if (instance) {
       return instance;
     }
+
+    throw new WhatsappInstanceNotFoundError(normalizedInstanceId);
   }
 
   return getDefaultWhatsappInstance();
 }
 
+function pickSearchInstanceId(
+  searchParams?: URLSearchParams | Record<string, string | string[] | undefined> | null
+) {
+  if (searchParams instanceof URLSearchParams) {
+    return searchParams.get("instanceId")?.trim() ?? "";
+  }
+
+  if (searchParams) {
+    const value = searchParams.instanceId;
+    return (Array.isArray(value) ? value[0] : value)?.trim() ?? "";
+  }
+
+  return "";
+}
+
+export async function getActiveInstanceIdFromCookie() {
+  const cookieStore = await cookies();
+  return cookieStore.get(ACTIVE_INSTANCE_COOKIE_NAME)?.value.trim() ?? "";
+}
+
 export async function getActiveInstanceIdFromSearchOrDefault(
   searchParams?: URLSearchParams | Record<string, string | string[] | undefined> | null
 ) {
-  let instanceId: string | null = null;
+  const urlInstanceId = pickSearchInstanceId(searchParams);
 
-  if (searchParams instanceof URLSearchParams) {
-    instanceId = searchParams.get("instanceId");
-  } else if (searchParams) {
-    const value = searchParams.instanceId;
-    instanceId = Array.isArray(value) ? value[0] ?? null : value ?? null;
+  if (urlInstanceId) {
+    const instance = await requireWhatsappInstance(urlInstanceId);
+    return instance.id;
   }
 
-  const instance = await requireWhatsappInstance(instanceId);
+  const cookieInstanceId = await getActiveInstanceIdFromCookie();
+
+  if (cookieInstanceId) {
+    const instance = await getWhatsappInstanceById(cookieInstanceId);
+
+    if (instance) {
+      return instance.id;
+    }
+  }
+
+  const instance = await getDefaultWhatsappInstance();
   return instance.id;
 }

@@ -2,13 +2,17 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AppShell } from "@/app/components/AppShell";
+import { InstanceNotFoundMessage } from "@/app/components/InstanceNotFoundMessage";
 import { prisma } from "@/src/lib/prisma/client";
 import {
   getWhatsappDisplayName,
   getWhatsappIdentityLabel
 } from "@/src/lib/whatsapp/display-name";
 import { getWhatsappInstanceRuntimeStatus } from "@/src/lib/baileys/instance-manager";
-import { getActiveInstanceIdFromSearchOrDefault } from "@/src/lib/server/whatsapp-instances";
+import {
+  getActiveInstanceIdFromSearchOrDefault,
+  isWhatsappInstanceNotFoundError
+} from "@/src/lib/server/whatsapp-instances";
 import { ConversationMessagesClient } from "./ConversationMessagesClient";
 
 export const runtime = "nodejs";
@@ -36,9 +40,23 @@ function formatDate(value: Date | null) {
 export default async function ConversationDetailPage({ params, searchParams }: ConversationDetailPageProps) {
   const { id } = await params;
   const resolvedSearchParams = await searchParams;
-  const instanceId = await getActiveInstanceIdFromSearchOrDefault(
-    new URLSearchParams(resolvedSearchParams?.instanceId ? { instanceId: resolvedSearchParams.instanceId } : {})
-  );
+  let instanceId: string;
+
+  try {
+    instanceId = await getActiveInstanceIdFromSearchOrDefault(
+      new URLSearchParams(resolvedSearchParams?.instanceId ? { instanceId: resolvedSearchParams.instanceId } : {})
+    );
+  } catch (error) {
+    if (isWhatsappInstanceNotFoundError(error)) {
+      return (
+        <AppShell title="Conversa">
+          <InstanceNotFoundMessage />
+        </AppShell>
+      );
+    }
+
+    throw error;
+  }
   const [chat, whatsappSession] = await Promise.all([
     prisma.whatsappChat.findFirst({
       where: {

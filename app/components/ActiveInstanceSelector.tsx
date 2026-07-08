@@ -2,6 +2,12 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
+import {
+  appendInstanceIdToHref,
+  getInstanceIdFromUrl,
+  getStoredActiveInstanceId,
+  setStoredActiveInstanceId
+} from "@/src/lib/client/active-instance";
 
 type InstanceSummary = {
   id: string;
@@ -12,22 +18,19 @@ type InstanceSummary = {
   isDefault: boolean;
 };
 
-function readInstanceIdFromUrl() {
-  if (typeof window === "undefined") {
-    return "";
-  }
-
-  return new URLSearchParams(window.location.search).get("instanceId") ?? "";
-}
-
 export function ActiveInstanceSelector() {
   const router = useRouter();
   const pathname = usePathname();
   const [instances, setInstances] = useState<InstanceSummary[]>([]);
-  const [urlInstanceId, setUrlInstanceId] = useState("");
+  const [activeInstanceId, setActiveInstanceId] = useState("");
 
   useEffect(() => {
-    setUrlInstanceId(readInstanceIdFromUrl());
+    const urlInstanceId = getInstanceIdFromUrl();
+    const storedInstanceId = getStoredActiveInstanceId();
+    const resolvedInstanceId = urlInstanceId || storedInstanceId;
+
+    setActiveInstanceId(resolvedInstanceId);
+
   }, [pathname]);
 
   useEffect(() => {
@@ -39,23 +42,26 @@ export function ActiveInstanceSelector() {
   }, []);
 
   const activeId = useMemo(() => {
-    return urlInstanceId || instances.find((instance) => instance.isDefault)?.id || "";
-  }, [instances, urlInstanceId]);
+    return activeInstanceId || instances.find((instance) => instance.isDefault)?.id || "";
+  }, [activeInstanceId, instances]);
 
   const activeInstance = instances.find((instance) => instance.id === activeId) ?? null;
+  const urlInstanceId = getInstanceIdFromUrl();
+  const hasInvalidUrlInstance = Boolean(urlInstanceId && instances.length > 0 && !activeInstance);
+
+  useEffect(() => {
+    const validUrlInstance = instances.find((instance) => instance.id === urlInstanceId);
+
+    if (validUrlInstance) {
+      setStoredActiveInstanceId(validUrlInstance.id);
+      setActiveInstanceId(validUrlInstance.id);
+    }
+  }, [instances, urlInstanceId]);
 
   function changeInstance(instanceId: string) {
-    const params = new URLSearchParams(typeof window !== "undefined" ? window.location.search : "");
-
-    if (instanceId) {
-      params.set("instanceId", instanceId);
-    } else {
-      params.delete("instanceId");
-    }
-
-    const query = params.toString();
-    setUrlInstanceId(instanceId);
-    router.push(query ? `${pathname}?${query}` : pathname);
+    setStoredActiveInstanceId(instanceId);
+    setActiveInstanceId(instanceId);
+    router.push(appendInstanceIdToHref(`${pathname}${typeof window !== "undefined" ? window.location.search : ""}`, instanceId));
   }
 
   if (instances.length === 0) {
@@ -66,7 +72,9 @@ export function ActiveInstanceSelector() {
     <div className="instance-switcher">
       <span>
         <strong>Instancia ativa</strong>
-        {activeInstance ? (
+        {hasInvalidUrlInstance ? (
+          <small>Instancia nao encontrada</small>
+        ) : activeInstance ? (
           <small>
             {activeInstance.roleLabel} | {activeInstance.status}
           </small>
@@ -75,6 +83,7 @@ export function ActiveInstanceSelector() {
       <select
         className="select compact-select"
         value={activeId}
+        aria-invalid={hasInvalidUrlInstance}
         onChange={(event) => changeInstance(event.target.value)}
       >
         {instances.map((instance) => (

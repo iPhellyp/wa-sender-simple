@@ -1,6 +1,7 @@
 ﻿import { Suspense } from "react";
 import Link from "next/link";
 import { AppShell } from "@/app/components/AppShell";
+import { getActiveInstanceIdFromSearchOrDefault } from "@/src/lib/server/whatsapp-instances";
 import { EnviosClient } from "./EnviosClient";
 
 type EnviosPageProps = {
@@ -15,8 +16,7 @@ export default async function EnviosPage({ searchParams }: EnviosPageProps) {
   const resolved = await searchParams;
   const rawCampaign = resolved?.campaign ?? resolved?.campaignId;
   const selectedCampaignId = Array.isArray(rawCampaign) ? rawCampaign[0] : rawCampaign;
-  const rawInstanceId = resolved?.instanceId;
-  const instanceId = Array.isArray(rawInstanceId) ? rawInstanceId[0] : rawInstanceId;
+  const instanceId = await getActiveInstanceIdFromSearchOrDefault(resolved);
 
   return (
     <AppShell

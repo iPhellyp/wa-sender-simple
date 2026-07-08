@@ -1,7 +1,11 @@
 import Link from "next/link";
 import { AppShell } from "@/app/components/AppShell";
+import { InstanceNotFoundMessage } from "@/app/components/InstanceNotFoundMessage";
 import { prisma } from "@/src/lib/prisma/client";
-import { getActiveInstanceIdFromSearchOrDefault } from "@/src/lib/server/whatsapp-instances";
+import {
+  getActiveInstanceIdFromSearchOrDefault,
+  isWhatsappInstanceNotFoundError
+} from "@/src/lib/server/whatsapp-instances";
 import { CampaignsClient } from "./CampaignsClient";
 
 type ChatPreview = {
@@ -33,7 +37,24 @@ function pickSingle(value: string | string[] | undefined) {
 
 export default async function CampaignsPage({ searchParams }: CampaignsPageProps) {
   const resolvedSearchParams = await searchParams;
-  const instanceId = await getActiveInstanceIdFromSearchOrDefault(resolvedSearchParams);
+  let instanceId: string;
+
+  try {
+    instanceId = await getActiveInstanceIdFromSearchOrDefault(resolvedSearchParams);
+  } catch (error) {
+    if (isWhatsappInstanceNotFoundError(error)) {
+      return (
+        <AppShell
+          title="Nova campanha"
+          subtitle="Escolha o publico, escreva a mensagem e revise antes de enviar."
+        >
+          <InstanceNotFoundMessage />
+        </AppShell>
+      );
+    }
+
+    throw error;
+  }
   const labelId = pickSingle(resolvedSearchParams?.labelId)?.trim() ?? "";
   const chatIds = (pickSingle(resolvedSearchParams?.chatIds) ?? "")
     .split(",")

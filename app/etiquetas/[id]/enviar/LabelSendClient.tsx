@@ -1,7 +1,8 @@
 ﻿"use client";
 
 import Link from "next/link";
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
+import { appendInstanceIdToHref, getStoredActiveInstanceId } from "@/src/lib/client/active-instance";
 
 type AudienceResponse = {
   label: { id: string; name: string };
@@ -23,6 +24,7 @@ type AudienceResponse = {
 };
 
 export function LabelSendClient({ labelId }: { labelId: string }) {
+  const [activeInstanceId, setActiveInstanceId] = useState("");
   const [name, setName] = useState("");
   const [message, setMessage] = useState("");
   const excludeGroups = true;
@@ -34,6 +36,10 @@ export function LabelSendClient({ labelId }: { labelId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [campaignId, setCampaignId] = useState<string | null>(null);
+
+  useEffect(() => {
+    setActiveInstanceId(getStoredActiveInstanceId());
+  }, []);
 
   async function previewAudience() {
     setBusy(true);
@@ -47,6 +53,7 @@ export function LabelSendClient({ labelId }: { labelId: string }) {
         maxRecipients: String(maxRecipients),
         limit: "50"
       });
+      if (activeInstanceId) params.set("instanceId", activeInstanceId);
       const response = await fetch(`/api/etiquetas/${labelId}/audience?${params.toString()}`);
       const data = (await response.json()) as AudienceResponse;
 
@@ -93,7 +100,8 @@ export function LabelSendClient({ labelId }: { labelId: string }) {
           excludeAlreadySentDays,
           maxRecipients,
           intervalMinutes,
-          startNow
+          startNow,
+          instanceId: activeInstanceId || undefined
         })
       });
       const data = (await response.json()) as {
@@ -123,11 +131,11 @@ export function LabelSendClient({ labelId }: { labelId: string }) {
   return (
     <section className="grid">
       <div className="button-row">
-        <Link className="button secondary" href={`/etiquetas/${labelId}`}>
+        <Link className="button secondary" href={appendInstanceIdToHref(`/etiquetas/${labelId}`, activeInstanceId)}>
           Voltar
         </Link>
         {campaignId ? (
-          <Link className="button" href={`/envios?campaign=${campaignId}`}>
+          <Link className="button" href={appendInstanceIdToHref(`/envios?campaign=${campaignId}`, activeInstanceId)}>
             Abrir envio
           </Link>
         ) : null}

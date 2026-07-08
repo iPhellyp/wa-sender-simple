@@ -1,12 +1,16 @@
 ﻿import { CampaignRecipientStatus } from "@prisma/client";
 import { AppShell } from "@/app/components/AppShell";
+import { InstanceNotFoundMessage } from "@/app/components/InstanceNotFoundMessage";
 import { ButtonLink } from "@/app/components/ui/ButtonLink";
 import { EmptyState } from "@/app/components/ui/EmptyState";
 import { SectionCard } from "@/app/components/ui/SectionCard";
 import { StatCard } from "@/app/components/ui/StatCard";
 import { StatusBadge, statusToneFromValue } from "@/app/components/ui/StatusBadge";
 import { prisma } from "@/src/lib/prisma/client";
-import { getActiveInstanceIdFromSearchOrDefault } from "@/src/lib/server/whatsapp-instances";
+import {
+  getActiveInstanceIdFromSearchOrDefault,
+  isWhatsappInstanceNotFoundError
+} from "@/src/lib/server/whatsapp-instances";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -46,7 +50,21 @@ type DashboardPageProps = {
 
 export default async function DashboardPage({ searchParams }: DashboardPageProps) {
   const resolvedSearchParams = await searchParams;
-  const instanceId = await getActiveInstanceIdFromSearchOrDefault(resolvedSearchParams);
+  let instanceId: string;
+
+  try {
+    instanceId = await getActiveInstanceIdFromSearchOrDefault(resolvedSearchParams);
+  } catch (error) {
+    if (isWhatsappInstanceNotFoundError(error)) {
+      return (
+        <AppShell title="Dashboard" subtitle="Visao operacional da instancia ativa.">
+          <InstanceNotFoundMessage />
+        </AppShell>
+      );
+    }
+
+    throw error;
+  }
   const startOfToday = new Date();
   startOfToday.setHours(0, 0, 0, 0);
 
@@ -346,13 +364,13 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
 
         <SectionCard title="Acoes rapidas" description="Atalhos para as rotinas operacionais mais comuns.">
           <div className="quick-actions-grid">
-            <ButtonLink href="/conversas" variant="secondary">
+            <ButtonLink href={`/conversas?instanceId=${instanceId}`} variant="secondary">
               Ver conversas
             </ButtonLink>
-            <ButtonLink href="/campanhas" variant="secondary">
+            <ButtonLink href={`/campanhas?instanceId=${instanceId}`} variant="secondary">
               Criar campanha
             </ButtonLink>
-            <ButtonLink href="/contatos" variant="secondary">
+            <ButtonLink href={`/contatos?instanceId=${instanceId}`} variant="secondary">
               Importar contatos
             </ButtonLink>
           </div>
@@ -386,7 +404,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
               <EmptyState
                 title="Nenhuma campanha criada"
                 description="Crie uma campanha manual ou por etiqueta para comecar."
-                actions={<ButtonLink href="/campanhas">Criar campanha</ButtonLink>}
+                actions={<ButtonLink href={`/campanhas?instanceId=${instanceId}`}>Criar campanha</ButtonLink>}
               />
             )}
           </SectionCard>

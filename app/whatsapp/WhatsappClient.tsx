@@ -5,6 +5,10 @@ import { useSearchParams } from "next/navigation";
 import { ButtonLink } from "@/app/components/ui/ButtonLink";
 import { SectionCard } from "@/app/components/ui/SectionCard";
 import { StatusBadge, statusToneFromValue } from "@/app/components/ui/StatusBadge";
+import {
+  getStoredActiveInstanceId,
+  setStoredActiveInstanceId
+} from "@/src/lib/client/active-instance";
 
 type WhatsappSession = {
   id: string;
@@ -49,7 +53,7 @@ function formatDateTime(value: string | null | undefined) {
 
 export function WhatsappClient() {
   const searchParams = useSearchParams();
-  const activeInstanceId = searchParams.get("instanceId") ?? "";
+  const activeInstanceId = searchParams.get("instanceId") ?? getStoredActiveInstanceId();
   const [session, setSession] = useState<WhatsappSession | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -69,6 +73,9 @@ export function WhatsappClient() {
       }
 
       setSession(data);
+      if (data.instanceId) {
+        setStoredActiveInstanceId(data.instanceId);
+      }
       setError(null);
     } catch (statusError) {
       setError(statusError instanceof Error ? statusError.message : "Erro inesperado");
@@ -77,15 +84,47 @@ export function WhatsappClient() {
     }
   }
 
-  async function postAction(path: string) {
+  async function postAction(path: string, options: { dangerous?: "disconnect" | "reset" } = {}) {
+    const instanceName = session?.instanceName ?? session?.instanceId ?? activeInstanceId;
+    const instanceId = session?.instanceId ?? activeInstanceId;
+
+    if (!instanceId) {
+      setError("Instancia ativa ausente. Abra /instancias e escolha uma instancia.");
+      return;
+    }
+
+    if (options.dangerous === "disconnect") {
+      const confirmed = window.confirm(`Essa acao afeta apenas a instancia ${instanceName}. Desconectar agora?`);
+
+      if (!confirmed) {
+        return;
+      }
+    }
+
+    if (options.dangerous === "reset") {
+      const expected = instanceId === "default" ? "RESETAR PRINCIPAL" : instanceName;
+      const typed = window.prompt(
+        `Resetar sessao remove a sessao local e exige novo QR. Essa acao afeta apenas a instancia ${instanceName}.\nDigite ${expected} para confirmar.`
+      );
+
+      if (typed !== expected) {
+        setError("Confirmacao invalida. Reset cancelado.");
+        return;
+      }
+    }
+
     setBusy(true);
     setError(null);
 
     try {
       const params = new URLSearchParams();
-      if (activeInstanceId) params.set("instanceId", activeInstanceId);
+      params.set("instanceId", instanceId);
       const response = await fetch(`${path}?${params.toString()}`, {
-        method: "POST"
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ instanceId })
       });
 
       const data = (await response.json()) as WhatsappSession;
@@ -209,7 +248,7 @@ export function WhatsappClient() {
                 className="button secondary"
                 disabled={busy}
                 type="button"
-                onClick={() => void postAction("/api/whatsapp/disconnect")}
+                onClick={() => void postAction("/api/whatsapp/disconnect", { dangerous: "disconnect" })}
               >
                 Desconectar esta instancia
               </button>
@@ -295,7 +334,7 @@ export function WhatsappClient() {
             className="button danger"
             disabled={busy}
             type="button"
-            onClick={() => void postAction("/api/whatsapp/reset-session")}
+            onClick={() => void postAction("/api/whatsapp/reset-session", { dangerous: "reset" })}
           >
             Resetar esta instancia
           </button>

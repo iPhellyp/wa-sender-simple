@@ -2,6 +2,11 @@
 
 import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
+import {
+  appendInstanceIdToHref,
+  getStoredActiveInstanceId,
+  setStoredActiveInstanceId
+} from "@/src/lib/client/active-instance";
 
 type InstanceSummary = {
   id: string;
@@ -43,6 +48,7 @@ export function InstancesClient() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [activeInstanceId, setActiveInstanceId] = useState("");
 
   async function loadInstances() {
     const response = await fetch("/api/instances", { cache: "no-store" });
@@ -57,6 +63,7 @@ export function InstancesClient() {
   }
 
   useEffect(() => {
+    setActiveInstanceId(getStoredActiveInstanceId());
     void loadInstances().catch((loadError) => {
       setError(loadError instanceof Error ? loadError.message : "Erro inesperado");
     });
@@ -124,13 +131,39 @@ export function InstancesClient() {
     }
   }
 
-  async function postAction(instanceId: string, action: "make-default" | "disconnect" | "reset") {
+  function useInstance(instance: InstanceSummary) {
+    setStoredActiveInstanceId(instance.id);
+    setActiveInstanceId(instance.id);
+    setMessage(`Instancia ativa alterada para ${instance.name}.`);
+  }
+
+  async function postAction(instance: InstanceSummary, action: "make-default" | "disconnect" | "reset") {
+    if (action === "disconnect") {
+      const confirmed = window.confirm(`Essa acao afeta apenas a instancia ${instance.name}. Desconectar agora?`);
+
+      if (!confirmed) {
+        return;
+      }
+    }
+
+    if (action === "reset") {
+      const expected = instance.isDefault ? "RESETAR PRINCIPAL" : instance.name;
+      const typed = window.prompt(
+        `Resetar sessao remove a sessao local e exige novo QR. Essa acao afeta apenas a instancia ${instance.name}.\nDigite ${expected} para confirmar.`
+      );
+
+      if (typed !== expected) {
+        setError("Confirmacao invalida. Reset cancelado.");
+        return;
+      }
+    }
+
     setBusy(true);
     setError(null);
     setMessage(null);
 
     try {
-      const response = await fetch(`/api/instances/${instanceId}/${action}`, {
+      const response = await fetch(`/api/instances/${instance.id}/${action}`, {
         method: "POST"
       });
       const data = (await response.json()) as { error?: string; message?: string };
@@ -201,13 +234,17 @@ export function InstancesClient() {
 
       <section className="instance-grid">
         {instances.map((instance) => (
-          <article className="instance-card" key={instance.id}>
+          <article className={`instance-card ${activeInstanceId === instance.id ? "active" : ""}`} key={instance.id}>
             <div className="instance-card-header">
               <div>
                 <strong>{instance.name}</strong>
                 <span>{instance.phone ?? "Telefone nao conectado"}</span>
               </div>
-              <span className={`status-badge ${statusClass(instance.status)}`}>{instance.status}</span>
+              <div className="button-row">
+                {activeInstanceId === instance.id ? <span className="status-badge info">ativa</span> : null}
+                {instance.isDefault ? <span className="status-badge success">Principal</span> : null}
+                <span className={`status-badge ${statusClass(instance.status)}`}>{instance.status}</span>
+              </div>
             </div>
 
             <div className="meta-list compact">
@@ -251,17 +288,29 @@ export function InstancesClient() {
             </div>
 
             <div className="button-row">
+              <button
+                className="button compact-button"
+                disabled={busy}
+                type="button"
+                onClick={() => useInstance(instance)}
+              >
+                Usar esta instancia
+              </button>
               {!instance.isDefault ? (
                 <button
                   className="button secondary compact-button"
                   disabled={busy}
                   type="button"
-                  onClick={() => void postAction(instance.id, "make-default")}
+                  onClick={() => void postAction(instance, "make-default")}
                 >
                   Tornar padrao
                 </button>
               ) : null}
-              <Link className="button secondary compact-button" href={`/whatsapp?instanceId=${instance.id}`}>
+              <Link
+                className="button secondary compact-button"
+                href={appendInstanceIdToHref("/whatsapp", instance.id)}
+                onClick={() => useInstance(instance)}
+              >
                 Abrir WhatsApp
               </Link>
               <button
@@ -284,7 +333,7 @@ export function InstancesClient() {
                 className="button secondary compact-button"
                 disabled={busy}
                 type="button"
-                onClick={() => void postAction(instance.id, "disconnect")}
+                onClick={() => void postAction(instance, "disconnect")}
               >
                 Desconectar
               </button>
@@ -292,7 +341,7 @@ export function InstancesClient() {
                 className="button danger compact-button"
                 disabled={busy}
                 type="button"
-                onClick={() => void postAction(instance.id, "reset")}
+                onClick={() => void postAction(instance, "reset")}
               >
                 Resetar
               </button>

@@ -4,28 +4,29 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
+import { appendInstanceIdToHref, getStoredActiveInstanceId } from "@/src/lib/client/active-instance";
 
 type NavLinkProps = {
   href: string;
   children: ReactNode;
 };
 
-function readInstanceIdFromUrl() {
-  if (typeof window === "undefined") {
-    return "";
-  }
-
-  return new URLSearchParams(window.location.search).get("instanceId") ?? "";
-}
-
 export function NavLink({ href, children }: NavLinkProps) {
   const pathname = usePathname();
   const [instanceId, setInstanceId] = useState("");
   const isActive = pathname === href || (href !== "/dashboard" && pathname.startsWith(`${href}/`));
-  const resolvedHref = instanceId ? `${href}?instanceId=${encodeURIComponent(instanceId)}` : href;
+  const resolvedHref = appendInstanceIdToHref(href, instanceId);
 
   useEffect(() => {
-    setInstanceId(readInstanceIdFromUrl());
+    setInstanceId(getStoredActiveInstanceId());
+
+    function handleActiveInstanceChanged(event: Event) {
+      const detail = (event as CustomEvent<{ instanceId?: string }>).detail;
+      setInstanceId(detail?.instanceId ?? getStoredActiveInstanceId());
+    }
+
+    window.addEventListener("wa-sender-active-instance-changed", handleActiveInstanceChanged);
+    return () => window.removeEventListener("wa-sender-active-instance-changed", handleActiveInstanceChanged);
   }, [pathname]);
 
   return (

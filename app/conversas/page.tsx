@@ -1,6 +1,7 @@
-﻿import Link from "next/link";
+import Link from "next/link";
 import type { Prisma } from "@prisma/client";
 import { AppShell } from "@/app/components/AppShell";
+import { InstanceNotFoundMessage } from "@/app/components/InstanceNotFoundMessage";
 import { StatCard } from "@/app/components/ui/StatCard";
 import { prisma } from "@/src/lib/prisma/client";
 import { getWhatsappInstanceRuntimeStatus } from "@/src/lib/baileys/instance-manager";
@@ -9,7 +10,10 @@ import {
   getWhatsappIdentityLabel
 } from "@/src/lib/whatsapp/display-name";
 import { getLastSendByJids, getSendJidSets } from "@/src/lib/labels/send-stats";
-import { getActiveInstanceIdFromSearchOrDefault } from "@/src/lib/server/whatsapp-instances";
+import {
+  getActiveInstanceIdFromSearchOrDefault,
+  isWhatsappInstanceNotFoundError
+} from "@/src/lib/server/whatsapp-instances";
 import { CatalogSelectionClient, type CatalogConversationItem } from "./CatalogSelectionClient";
 import { StartConversationForm } from "./StartConversationForm";
 import { SyncHistoryButton } from "./SyncHistoryButton";
@@ -221,6 +225,7 @@ function buildHref(options: {
   sort: ConversationSort;
   page?: number;
   limit: number;
+  instanceId?: string;
 }) {
   const params = new URLSearchParams();
 
@@ -250,6 +255,10 @@ function buildHref(options: {
 
   if (options.limit !== DEFAULT_PAGE_SIZE) {
     params.set("limit", String(options.limit));
+  }
+
+  if (options.instanceId) {
+    params.set("instanceId", options.instanceId);
   }
 
   const suffix = params.toString();
@@ -600,7 +609,24 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
   const page = getPageValue(resolvedSearchParams);
   const limit = getLimitValue(resolvedSearchParams);
   const skip = (page - 1) * limit;
-  const instanceId = await getActiveInstanceIdFromSearchOrDefault(resolvedSearchParams);
+  let instanceId: string;
+
+  try {
+    instanceId = await getActiveInstanceIdFromSearchOrDefault(resolvedSearchParams);
+  } catch (error) {
+    if (isWhatsappInstanceNotFoundError(error)) {
+      return (
+        <AppShell
+          title="Conversas"
+          subtitle="Contatos individuais sincronizados do WhatsApp. Grupos, broadcasts e newsletters sao ignorados."
+        >
+          <InstanceNotFoundMessage />
+        </AppShell>
+      );
+    }
+
+    throw error;
+  }
   const [matchedContactJids, jidSets] = await Promise.all([
     findMatchingContactJids(query, instanceId),
     getSendJidSets(instanceId)
@@ -824,7 +850,7 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
             {(Object.keys(filterLabels) as ConversationFilter[]).map((filter) => (
               <Link
                 className={type === filter ? "active" : ""}
-                href={buildHref({ type: filter, query, labelId, sendStatus, sort, limit })}
+                href={buildHref({ type: filter, query, labelId, sendStatus, sort, limit, instanceId })}
                 key={filter}
               >
                 {filterLabels[filter]}
@@ -833,6 +859,7 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
             ))}
           </nav>
           <form action="/conversas" className="catalog-filter-form" method="get">
+            <input name="instanceId" type="hidden" value={instanceId} />
             <input
               className="input"
               defaultValue={query}
@@ -906,7 +933,7 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
             {page > 1 ? (
               <Link
                 className="button secondary"
-                href={buildHref({ type, query, labelId, sendStatus, sort, page: page - 1, limit })}
+                href={buildHref({ type, query, labelId, sendStatus, sort, page: page - 1, limit, instanceId })}
               >
                 Anterior
               </Link>
@@ -921,7 +948,7 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
             {page < totalPages ? (
               <Link
                 className="button secondary"
-                href={buildHref({ type, query, labelId, sendStatus, sort, page: page + 1, limit })}
+                href={buildHref({ type, query, labelId, sendStatus, sort, page: page + 1, limit, instanceId })}
               >
                 Proxima
               </Link>
