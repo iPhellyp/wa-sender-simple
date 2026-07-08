@@ -23,6 +23,10 @@ type EnvioSummary = {
 type RecipientDetail = {
   id: string;
   jid: string | null;
+  rawJid?: string | null;
+  displayName: string;
+  displayPhone: string | null;
+  displaySubtitle: string;
   messageFinal: string;
   status: string;
   skippedReason: string | null;
@@ -482,9 +486,9 @@ export function EnviosClient({ selectedCampaignId }: { selectedCampaignId?: stri
                         <tr key={recipient.id}>
                           <td>
                             <div className="identity-cell">
-                              <strong>{recipient.contact?.name ?? recipient.jid ?? recipient.id}</strong>
+                              <strong>{recipient.displayName || "Contato sem numero resolvido"}</strong>
                               <span className="muted">
-                                {recipient.contact?.phoneNormalized ?? recipient.jid ?? "-"}
+                                {recipient.displayPhone || recipient.displaySubtitle || "-"}
                               </span>
                               {recipient.error ? <span className="send-error">{recipient.error}</span> : null}
                             </div>

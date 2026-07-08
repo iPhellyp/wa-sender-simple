@@ -24,6 +24,8 @@ type ChatPreview = {
   id: string;
   jid: string;
   name: string | null;
+  displayName?: string;
+  identityLabel?: string;
 };
 
 type ContactPreview = {
@@ -134,6 +136,21 @@ function campaignAudienceLabel(mode: string) {
   return mode;
 }
 
+function safeWhatsappPreviewName(name: string | null | undefined, jid: string | null | undefined) {
+  const text = name?.trim() ?? "";
+  const normalizedJid = jid?.trim().toLowerCase() ?? "";
+
+  if (text && !text.includes("@")) {
+    return text;
+  }
+
+  if (normalizedJid.endsWith("@lid")) {
+    return "Contato sem numero resolvido";
+  }
+
+  return jid ?? "Contato WhatsApp";
+}
+
 function getPendingCount(counts: Record<string, number>) {
   return (counts.pending ?? 0) + (counts.scheduled ?? 0) + (counts.sending ?? 0);
 }
@@ -150,8 +167,13 @@ export function CampaignsClient({
     : prefillContext?.chatIds.length
       ? "catalog"
       : "contacts";
+  const activeInstanceId = prefillContext?.instanceId ?? "";
   const [step, setStep] = useState(0);
   const [contacts, setContacts] = useState<ContactOption[]>([]);
+  const [catalogChats, setCatalogChats] = useState<ChatPreview[]>(prefillContext?.chatPreview ?? []);
+  const [selectedCatalogChatIds, setSelectedCatalogChatIds] = useState<Set<string>>(
+    new Set(prefillContext?.chatPreview.map((chat) => chat.id) ?? [])
+  );
   const [campaigns, setCampaigns] = useState<CampaignSummary[]>([]);
   const [selectedContacts, setSelectedContacts] = useState<Set<string>>(
     new Set(prefillContext?.contactPreview.map((contact) => contact.id) ?? [])
@@ -186,13 +208,12 @@ export function CampaignsClient({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const messageTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const previousInstanceIdRef = useRef(activeInstanceId);
 
   const selectableContacts = useMemo(
     () => contacts.filter((contact) => !contact.optedOut),
     [contacts]
   );
-  const catalogChats = prefillContext?.chatPreview ?? [];
-  const activeInstanceId = prefillContext?.instanceId ?? "";
   const prefilledContacts = prefillContext?.contactPreview ?? [];
   const removedPrefillContacts = Math.max(
     0,
@@ -203,7 +224,7 @@ export function CampaignsClient({
     audienceMode === "label"
       ? (labelAudience?.eligible ?? 0)
       : audienceMode === "catalog"
-        ? catalogChats.length
+        ? selectedCatalogChatIds.size
         : selectedContacts.size;
   const securityConfirmed = confirmedAudience && confirmedMessage && confirmedGroups;
   const canCreate =
@@ -263,6 +284,57 @@ export function CampaignsClient({
     setContacts(data.contacts);
   }
 
+  async function loadCatalogChats() {
+    const loaded: ChatPreview[] = [];
+    let page = 1;
+    let totalPages = 1;
+
+    do {
+      const params = new URLSearchParams({
+        type: "contacts",
+        limit: "100",
+        page: String(page)
+      });
+      if (activeInstanceId) params.set("instanceId", activeInstanceId);
+      const response = await fetch(`/api/conversas?${params.toString()}`, { cache: "no-store" });
+      const data = (await response.json()) as {
+        chats?: Array<{
+          id: string;
+          jid: string;
+          displayName?: string;
+          identityLabel?: string;
+        }>;
+        pagination?: {
+          totalPages?: number;
+        };
+      };
+
+      loaded.push(
+        ...(data.chats ?? []).map((chat) => ({
+          id: chat.id,
+          jid: chat.jid,
+          name: chat.displayName ?? null,
+          displayName: chat.displayName,
+          identityLabel: chat.identityLabel
+        }))
+      );
+      totalPages = Math.max(1, Number(data.pagination?.totalPages ?? 1));
+      page += 1;
+    } while (page <= totalPages && page <= 50);
+
+    setCatalogChats(loaded);
+    setSelectedCatalogChatIds((current) => {
+      const validIds = new Set(loaded.map((chat) => chat.id));
+      const next = new Set(Array.from(current).filter((id) => validIds.has(id)));
+
+      if (next.size > 0) {
+        return next;
+      }
+
+      return new Set(loaded.map((chat) => chat.id));
+    });
+  }
+
   async function loadCampaigns() {
     const params = new URLSearchParams();
     if (activeInstanceId) params.set("instanceId", activeInstanceId);
@@ -282,7 +354,7 @@ export function CampaignsClient({
   async function refresh() {
     setLoading(true);
     try {
-      await Promise.all([loadContacts(), loadCampaigns()]);
+      await Promise.all([loadContacts(), loadCatalogChats(), loadCampaigns()]);
       if (selectedCampaignId) await loadRecipients(selectedCampaignId);
     } finally {
       setLoading(false);
@@ -290,10 +362,22 @@ export function CampaignsClient({
   }
 
   useEffect(() => {
+    if (previousInstanceIdRef.current !== activeInstanceId) {
+      previousInstanceIdRef.current = activeInstanceId;
+      setSelectedContacts(new Set());
+      setSelectedCatalogChatIds(new Set());
+      setSelectedCampaignId(null);
+      setRecipients([]);
+      setLabelAudience(null);
+      setCreatedCampaignId(null);
+      setCreatedMessage(null);
+      setPreviewMessage("");
+    }
+
     void refresh().catch((loadError) => {
       setError(loadError instanceof Error ? loadError.message : "Erro inesperado");
     });
-  }, []);
+  }, [activeInstanceId]);
 
   useEffect(() => {
     if (audienceMode !== "label" || !selectedLabelId) {
@@ -319,13 +403,22 @@ export function CampaignsClient({
     return () => {
       cancelled = true;
     };
-  }, [audienceMode, selectedLabelId]);
+  }, [audienceMode, selectedLabelId, activeInstanceId]);
 
   function toggleContact(contactId: string) {
     setSelectedContacts((current) => {
       const next = new Set(current);
       if (next.has(contactId)) next.delete(contactId);
       else next.add(contactId);
+      return next;
+    });
+  }
+
+  function toggleCatalogChat(chatId: string) {
+    setSelectedCatalogChatIds((current) => {
+      const next = new Set(current);
+      if (next.has(chatId)) next.delete(chatId);
+      else next.add(chatId);
       return next;
     });
   }
@@ -379,7 +472,7 @@ export function CampaignsClient({
                 maxRecipients: batchLimit,
                 instanceId: activeInstanceId,
                 contactIds: audienceMode === "contacts" ? Array.from(selectedContacts) : [],
-                chatIds: audienceMode === "catalog" ? catalogChats.map((chat) => chat.id) : []
+                chatIds: audienceMode === "catalog" ? Array.from(selectedCatalogChatIds) : []
               })
             });
       const data = await response.json();
@@ -533,7 +626,9 @@ export function CampaignsClient({
                     onClick={() => setAudienceMode("catalog")}
                   >
                     <strong>Contatos WhatsApp</strong>
-                    <span>{catalogChats.length} selecionados</span>
+                    <span>
+                      {selectedCatalogChatIds.size} de {catalogChats.length} selecionados
+                    </span>
                   </button>
                   <button
                     className={`audience-card ${audienceMode === "contacts" ? "active" : ""}`}
@@ -569,7 +664,8 @@ export function CampaignsClient({
                     <ul className="list-plain">
                       {(labelAudience?.recipientsPreview ?? []).map((recipient) => (
                         <li key={recipient.chatId}>
-                          {recipient.name ?? recipient.jid} <span className="muted">({recipient.jidType})</span>
+                          {safeWhatsappPreviewName(recipient.name, recipient.jid)}{" "}
+                          <span className="muted">({recipient.jidType})</span>
                         </li>
                       ))}
                     </ul>
@@ -578,18 +674,57 @@ export function CampaignsClient({
 
                 {audienceMode === "catalog" ? (
                   <div className="data-card compact">
-                    <strong>Contatos WhatsApp selecionados</strong>
+                    <div className="table-toolbar">
+                      <div>
+                        <strong>Contatos WhatsApp</strong>
+                        <span className="muted">
+                          {selectedCatalogChatIds.size} de {catalogChats.length} selecionados
+                        </span>
+                      </div>
+                      <div className="button-row">
+                        <button
+                          className="button secondary compact-button"
+                          type="button"
+                          onClick={() => setSelectedCatalogChatIds(new Set(catalogChats.map((chat) => chat.id)))}
+                        >
+                          Selecionar todos
+                        </button>
+                        <button
+                          className="button secondary compact-button"
+                          type="button"
+                          onClick={() => setSelectedCatalogChatIds(new Set())}
+                        >
+                          Limpar
+                        </button>
+                      </div>
+                    </div>
                     <ul className="list-plain">
                       {catalogChats.length === 0 ? (
-                        <li>Nenhum contato veio selecionado das conversas.</li>
+                        <li>Nenhum contato WhatsApp encontrado para esta instancia.</li>
                       ) : (
-                        catalogChats.slice(0, 8).map((chat) => (
+                        catalogChats.slice(0, 100).map((chat) => (
                           <li key={chat.id}>
-                            {chat.name ?? chat.jid} <span className="muted">{chat.jid}</span>
+                            <label className="contact-option">
+                              <input
+                                checked={selectedCatalogChatIds.has(chat.id)}
+                                type="checkbox"
+                                onChange={() => toggleCatalogChat(chat.id)}
+                              />
+                              <span>
+                                <strong>{chat.displayName ?? chat.name ?? "Contato WhatsApp"}</strong>
+                                <br />
+                                <span className="muted">{chat.identityLabel ?? chat.jid}</span>
+                              </span>
+                            </label>
                           </li>
                         ))
                       )}
                     </ul>
+                    {catalogChats.length > 100 ? (
+                      <div className="message compact">
+                        Mostrando 100 de {catalogChats.length}. Use Selecionar todos para incluir toda a base WhatsApp.
+                      </div>
+                    ) : null}
                   </div>
                 ) : null}
 
