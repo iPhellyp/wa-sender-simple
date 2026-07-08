@@ -22,6 +22,9 @@ type InstanceSummary = {
   lastError: string | null;
   displayName: string | null;
   profilePictureUrl: string | null;
+  hasSessionFiles?: boolean;
+  sessionFilesCount?: number;
+  isRecoverableSession?: boolean;
 };
 
 type InstancesResponse = {
@@ -353,6 +356,10 @@ export function InstancesClient() {
                 <span>{formatDate(instance.lastSyncAt)}</span>
               </div>
               <div className="meta-row">
+                <span>Sessao salva</span>
+                <span>{instance.hasSessionFiles ? `Sim (${instance.sessionFilesCount ?? 0})` : "Nao"}</span>
+              </div>
+              <div className="meta-row">
                 <span>Erro recente</span>
                 <span>{instance.lastError ?? "-"}</span>
               </div>
@@ -397,7 +404,11 @@ export function InstancesClient() {
                 type="button"
                 onClick={() => void postWhatsappAction(instance.id, "reconnect")}
               >
-                {busyInstanceId === instance.id ? "Aguarde..." : "Conectar/Recarregar QR"}
+                {busyInstanceId === instance.id
+                  ? "Aguarde..."
+                  : instance.hasSessionFiles
+                    ? "Retomar sessao"
+                    : "Gerar QR"}
               </button>
               <button
                 className="button secondary compact-button"

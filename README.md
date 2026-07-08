@@ -6,8 +6,11 @@ Sistema WhatsApp multi-numero para contatos, conversas, etiquetas, campanhas e e
 
 - Login admin por `ADMIN_PASSWORD`.
 - Multi-instancia WhatsApp com QR por numero.
+- Estado zero instancias: o sistema pode ficar sem numeros cadastrados ate o operador criar a primeira instancia.
 - Instancia ativa persistente por URL, localStorage e cookie.
+- Retomada de sessao salva apos deploy/restart sem exigir QR quando a pasta Baileys ainda existe.
 - Importacao Excel de contatos e mensagens.
+- Listas/origens de importacao com remocao segura do vinculo sem apagar contatos.
 - Contatos, opt-out e campanhas originais.
 - Envio serializado via worker BullMQ.
 - Inbox `/conversas`.
@@ -17,6 +20,7 @@ Sistema WhatsApp multi-numero para contatos, conversas, etiquetas, campanhas e e
 - Labels/envio por etiqueta por instancia.
 - `/envios` para auditoria operacional.
 - Reset, desconexao e delete de instancia com confirmacao.
+- Campanhas com spintax simples, variaveis, preview, envio de teste, delay avancado, limite de lote e lock por instancia.
 
 ## Rotas principais
 
@@ -32,9 +36,15 @@ Sistema WhatsApp multi-numero para contatos, conversas, etiquetas, campanhas e e
 ## Avisos operacionais
 
 - Confira sempre a instancia ativa antes de enviar.
+- Use `Retomar sessao` quando ja existe sessao salva e o painel ficou desconectado apos deploy/restart.
+- Use `Gerar QR` apenas quando nao existe sessao local para a instancia.
+- Use `Resetar sessao` somente quando for necessario apagar a sessao local e parear de novo.
 - Comece campanhas com baixo volume e aumente gradualmente.
+- Nao rode campanhas simultaneas no mesmo numero.
+- Respeite opt-out, consentimento e qualidade da base.
 - O worker precisa estar rodando para gerar QR, sincronizar eventos e enviar mensagens.
 - Baileys nao e API oficial do WhatsApp; sessao, QR e envio podem falhar por mudancas externas.
+- O produto melhora controle operacional e entregabilidade, mas nao promete antiban nem disparo ilimitado.
 
 ## Variaveis de ambiente
 

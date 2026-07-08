@@ -14,8 +14,30 @@ export async function POST(
 ) {
   const { id } = await context.params;
   const instanceId = await getActiveInstanceIdFromSearchOrDefault(request.nextUrl.searchParams);
+  const activeCampaign = await prisma.campaign.findFirst({
+    where: {
+      instanceId,
+      id: {
+        not: id
+      },
+      status: CampaignStatus.running
+    },
+    select: {
+      id: true
+    }
+  });
 
-  await prisma.campaign.updateMany({
+  if (activeCampaign) {
+    return NextResponse.json(
+      {
+        error:
+          "Ja existe uma campanha ativa nesta instancia. Pause, cancele ou aguarde finalizar."
+      },
+      { status: 409 }
+    );
+  }
+
+  const campaign = await prisma.campaign.updateMany({
     where: {
       id,
       instanceId,
@@ -25,6 +47,10 @@ export async function POST(
       status: CampaignStatus.running
     }
   });
+
+  if (campaign.count === 0) {
+    return NextResponse.json({ error: "Campanha pausada nao encontrada" }, { status: 404 });
+  }
 
   await schedulePendingRecipients(id);
 

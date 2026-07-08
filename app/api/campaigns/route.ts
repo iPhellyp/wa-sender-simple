@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { CampaignRecipientStatus, CampaignStatus } from "@prisma/client";
+import { renderCampaignMessage } from "@/src/lib/campaigns/message-template";
 import { buildCampaignDedupeKey } from "@/src/lib/labels/audience";
 import { prisma } from "@/src/lib/prisma/client";
 import { getActiveInstanceIdFromSearchOrDefault } from "@/src/lib/server/whatsapp-instances";
@@ -16,6 +17,14 @@ function countRecipientsByStatus(
     accumulator[recipient.status] = (accumulator[recipient.status] ?? 0) + 1;
     return accumulator;
   }, {});
+}
+
+function serializeAdvancedSettings(value: unknown) {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  return `settings:${JSON.stringify(value)}`;
 }
 
 export async function GET(request: NextRequest) {
@@ -61,6 +70,8 @@ export async function POST(request: NextRequest) {
     name?: string;
     defaultMessage?: string | null;
     intervalMinutes?: number;
+    maxRecipients?: number;
+    advancedSettings?: unknown;
     contactIds?: string[];
     chatIds?: string[];
     instanceId?: string;
@@ -71,7 +82,13 @@ export async function POST(request: NextRequest) {
   const name = String(payload.name ?? "").trim();
   const defaultMessage = String(payload.defaultMessage ?? "").trim();
   const intervalMinutes = Number(payload.intervalMinutes ?? 0);
-  const contactIds = Array.isArray(payload.contactIds) ? payload.contactIds : [];
+  const maxRecipients = Number(payload.maxRecipients ?? 0);
+  const requestedMaxRecipients =
+    Number.isInteger(maxRecipients) && maxRecipients > 0 ? Math.min(maxRecipients, 500) : null;
+  const advancedSettings = serializeAdvancedSettings(payload.advancedSettings);
+  const contactIds = Array.isArray(payload.contactIds)
+    ? Array.from(new Set(payload.contactIds.map((id) => String(id).trim()).filter(Boolean)))
+    : [];
   const chatIds = Array.isArray(payload.chatIds) ? payload.chatIds : [];
   const uniqueChatIds = Array.from(new Set(chatIds.map((id) => String(id).trim()).filter(Boolean)));
 
@@ -115,6 +132,7 @@ export async function POST(request: NextRequest) {
       },
       select: {
         id: true,
+        name: true,
         jid: true
       }
     });
@@ -137,13 +155,17 @@ export async function POST(request: NextRequest) {
         targetMode: "chatIds",
         excludeGroups: true,
         dedupeKey,
-        maxRecipients: chats.length,
+        maxRecipients: requestedMaxRecipients ?? chats.length,
+        sendWindowStart: advancedSettings,
         recipients: {
-          create: chats.map((chat) => ({
+          create: chats.slice(0, requestedMaxRecipients ?? chats.length).map((chat) => ({
             instanceId,
             chatId: chat.id,
             jid: chat.jid,
-            messageFinal: defaultMessage,
+            messageFinal: renderCampaignMessage(defaultMessage, {
+              name: chat.name,
+              source: "contatos-whatsapp"
+            }),
             dedupeKey: buildCampaignDedupeKey(dedupeKey, chat.jid)
           }))
         }
@@ -168,15 +190,18 @@ export async function POST(request: NextRequest) {
       createdAt: "asc"
     }
   });
+  const uniqueContactsByPhone = Array.from(
+    new Map(contacts.map((contact) => [contact.phoneNormalized, contact])).values()
+  ).slice(0, requestedMaxRecipients ?? contacts.length);
 
-  if (contacts.length === 0) {
+  if (uniqueContactsByPhone.length === 0) {
     return NextResponse.json(
       { error: "Nenhum contato valido selecionado ou todos estao opt-out" },
       { status: 400 }
     );
   }
 
-  if (!defaultMessage && contacts.some((contact) => !contact.message?.trim())) {
+  if (!defaultMessage && uniqueContactsByPhone.some((contact) => !contact.message?.trim())) {
     return NextResponse.json(
       {
         error:
@@ -192,11 +217,13 @@ export async function POST(request: NextRequest) {
       name,
       defaultMessage: defaultMessage || null,
       intervalMinutes,
+      maxRecipients: requestedMaxRecipients,
+      sendWindowStart: advancedSettings,
       recipients: {
-        create: contacts.map((contact) => ({
+        create: uniqueContactsByPhone.map((contact) => ({
           instanceId,
           contactId: contact.id,
-          messageFinal: defaultMessage || contact.message?.trim() || ""
+          messageFinal: renderCampaignMessage(defaultMessage || contact.message?.trim() || "", contact)
         }))
       }
     },

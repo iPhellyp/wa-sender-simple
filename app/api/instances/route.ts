@@ -49,6 +49,9 @@ export async function GET() {
         ...instance,
         displayName: runtimeStatus?.displayName ?? null,
         profilePictureUrl: runtimeStatus?.profilePictureUrl ?? null,
+        hasSessionFiles: runtimeStatus?.hasSessionFiles ?? false,
+        sessionFilesCount: runtimeStatus?.sessionFilesCount ?? 0,
+        isRecoverableSession: runtimeStatus?.isRecoverableSession ?? false,
         lastError: lastErrorByInstanceId.get(instance.id) ?? null,
         roleLabel: WHATSAPP_INSTANCE_ROLE_LABELS[instance.role]
       };

@@ -28,9 +28,25 @@ O produto nao trata essa instancia como superior. Todas as instancias devem cone
 
 Para a instancia tecnica inicial, o manager delega ao client legado para preservar compatibilidade. Para as demais, o manager le o runtime em memoria e o registro `WhatsappSession` da propria instancia.
 
+O status tambem expoe metadados de sessao quando possivel: `hasSessionFiles`, `sessionFilesCount`, `hasCredsJson`, `lastOpenAt` e `isRecoverableSession`.
+
+Quando o socket fecha com status 428 e existe sessao local, o sistema trata como queda recuperavel:
+
+1. nao apaga arquivos;
+2. nao limpa `connectedPhone`;
+3. nao gera QR automaticamente;
+4. agenda retomada leve em 5s, 15s e 30s;
+5. se esgotar, mostra sessao salva e permite `Retomar sessao`.
+
+`Gerar QR` e usado apenas quando nao ha sessao local. `Resetar sessao` e a acao destrutiva que remove a sessao e pode exigir QR novo.
+
 ## Campanhas e envio manual
 
 Campanhas usam `campaign.instanceId`. O worker envia pelo socket da mesma instancia e falha com erro claro se ela nao estiver conectada.
+
+Antes de iniciar ou retomar campanha, o backend bloqueia outra campanha `running` na mesma instancia. A mensagem esperada e: `Ja existe uma campanha ativa nesta instancia. Pause, cancele ou aguarde finalizar.`
+
+Configuracoes avancadas de campanha sao mantidas sem migration usando campos existentes: `maxRecipients` para limite de lote e payload interno em `sendWindowStart` para delay/pausa. O worker verifica o fim do lote antes de aplicar pausa.
 
 Envio manual de conversa busca `WhatsappChat` por `id + instanceId`, enfileira `send-manual-message` com `instanceId` e persiste a mensagem outbound no mesmo escopo.
 
@@ -112,6 +128,18 @@ Na Fase 5, o produto permite zero instancias: deletar a ultima instancia deixa o
 1. Campanha criada em uma instancia nao aparece nem envia pela outra.
 2. Envio usa `campaign.instanceId`.
 3. Sem conexao na instancia correta, falha claro.
+4. Duas campanhas simultaneas no mesmo `instanceId` devem ser bloqueadas.
+5. Campanha com `{Oi|Ola}, {{nome}}` nao deve enviar placeholders crus.
+6. Limite de lote deve encerrar antes de aplicar pausa.
+
+### Retomada de sessao
+
+1. Manter numero conectado no celular.
+2. Reiniciar/deployar app e worker.
+3. Abrir `/whatsapp`.
+4. Confirmar `Sessao salva`.
+5. Clicar `Retomar sessao`.
+6. Confirmar reconexao sem QR.
 
 ### URL invalida
 

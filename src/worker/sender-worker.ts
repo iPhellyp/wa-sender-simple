@@ -464,6 +464,14 @@ async function processRecipient(recipientId: string) {
         error: null
       }
     });
+    await prisma.campaign.update({
+      where: {
+        id: recipient.campaignId
+      },
+      data: {
+        updatedAt: new Date()
+      }
+    }).catch(() => undefined);
 
     if (resolvedRecipientJid) {
       await prisma.sendLog.create({
@@ -502,6 +510,14 @@ async function processRecipient(recipientId: string) {
         error: errorMessage
       }
     });
+    await prisma.campaign.update({
+      where: {
+        id: recipient.campaignId
+      },
+      data: {
+        updatedAt: new Date()
+      }
+    }).catch(() => undefined);
 
     if (resolvedRecipientJid) {
       await prisma.sendLog.create({

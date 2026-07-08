@@ -6,7 +6,7 @@ import makeWASocket, {
   useMultiFileAuthState,
   type WASocket
 } from "@whiskeysockets/baileys";
-import { mkdir, rm } from "fs/promises";
+import { mkdir, readdir, rm } from "fs/promises";
 import { join, resolve } from "path";
 import P from "pino";
 import QRCode from "qrcode";
@@ -47,6 +47,9 @@ import { syncLabelsAssociation, syncLabelsEdit } from "./labels-sync";
 import { extractMessageText, isOptOutMessage } from "./opt-out";
 
 const CATALOG_APP_STATE_COLLECTIONS = ALL_WA_PATCH_NAMES;
+const RECOVERABLE_SESSION_MESSAGE =
+  "Sessao salva, aguardando retomada. Clique em Retomar sessao se nao reconectar automaticamente.";
+const RECOVERABLE_RECONNECT_BACKOFF_MS = [5_000, 15_000, 30_000] as const;
 const runtimeByInstanceId = new Map<string, WhatsappRuntime>();
 const startPromiseByInstanceId = new Map<string, Promise<WASocket>>();
 
@@ -63,6 +66,8 @@ export type WhatsappRuntime = {
   startedAt: Date | null;
   lastOpenAt: Date | null;
   lastSyncRequestedAt: Date | null;
+  reconnectAttempts: number;
+  reconnectTimer: ReturnType<typeof setTimeout> | null;
 };
 
 function getBaseSessionDir() {
@@ -77,6 +82,41 @@ export function getBaileysSessionDirForInstance(instance: Pick<WhatsappInstance,
   }
 
   return join(baseDir, instance.sessionKey);
+}
+
+async function getBaileysSessionFilesInfoForInstance(
+  instance: Pick<WhatsappInstance, "id" | "sessionKey">
+) {
+  const sessionDir = resolve(getBaileysSessionDirForInstance(instance));
+  await mkdir(sessionDir, { recursive: true });
+
+  async function scanDir(dir: string): Promise<{ count: number; hasCredsJson: boolean }> {
+    const entries = await readdir(dir, { withFileTypes: true });
+    let count = 0;
+    let hasCredsJson = false;
+
+    for (const entry of entries) {
+      const fullPath = join(dir, entry.name);
+
+      if (entry.isDirectory()) {
+        const child = await scanDir(fullPath);
+        count += child.count;
+        hasCredsJson = hasCredsJson || child.hasCredsJson;
+      } else if (entry.isFile()) {
+        count += 1;
+        hasCredsJson = hasCredsJson || entry.name === "creds.json";
+      }
+    }
+
+    return { count, hasCredsJson };
+  }
+
+  const result = await scanDir(sessionDir);
+  return {
+    sessionDir,
+    sessionFilesCount: result.count,
+    hasCredsJson: result.hasCredsJson
+  };
 }
 
 function getSessionIdForInstance(instanceId: string) {
@@ -159,7 +199,9 @@ function getRuntime(instance: Pick<WhatsappInstance, "id" | "sessionKey" | "stat
     lastError: null,
     startedAt: null,
     lastOpenAt: null,
-    lastSyncRequestedAt: null
+    lastSyncRequestedAt: null,
+    reconnectAttempts: 0,
+    reconnectTimer: null
   };
   runtimeByInstanceId.set(instance.id, runtime);
   return runtime;
@@ -180,6 +222,93 @@ export async function getWhatsappRuntime(instanceId: string) {
 
 function getDisconnectStatusCode(error: unknown) {
   return (error as { output?: { statusCode?: number } } | undefined)?.output?.statusCode ?? null;
+}
+
+async function scheduleRecoverableReconnect(
+  instance: WhatsappInstance,
+  runtime: WhatsappRuntime,
+  options: {
+    statusCode: number | null;
+    lastError: string | null;
+    sessionInfo: {
+      sessionDir: string;
+      sessionFilesCount: number;
+      hasCredsJson: boolean;
+    };
+  }
+) {
+  if (runtime.reconnectTimer) {
+    console.log("[instance-manager] recoverable reconnect already scheduled", {
+      instanceId: instance.id,
+      statusCode: options.statusCode
+    });
+    return;
+  }
+
+  if (runtime.reconnectAttempts >= RECOVERABLE_RECONNECT_BACKOFF_MS.length) {
+    runtime.status = WhatsappStatus.disconnected;
+    runtime.qrCode = null;
+    runtime.lastError = RECOVERABLE_SESSION_MESSAGE;
+    await updateInstanceSession(instance.id, {
+      status: WhatsappStatus.disconnected,
+      qrCode: null,
+      lastError: RECOVERABLE_SESSION_MESSAGE
+    });
+    console.log("[instance-manager] recoverable reconnect exhausted", {
+      action: "resume_session",
+      instanceId: instance.id,
+      statusCode: options.statusCode,
+      attempts: runtime.reconnectAttempts,
+      sessionDir: options.sessionInfo.sessionDir,
+      sessionFilesCount: options.sessionInfo.sessionFilesCount,
+      hasCredsJson: options.sessionInfo.hasCredsJson,
+      isRecoverable: true
+    });
+    return;
+  }
+
+  const attempt = runtime.reconnectAttempts + 1;
+  const delayMs =
+    RECOVERABLE_RECONNECT_BACKOFF_MS[runtime.reconnectAttempts] ??
+    RECOVERABLE_RECONNECT_BACKOFF_MS[RECOVERABLE_RECONNECT_BACKOFF_MS.length - 1];
+  runtime.reconnectAttempts = attempt;
+  runtime.status = WhatsappStatus.connecting;
+  runtime.qrCode = null;
+  runtime.lastError = RECOVERABLE_SESSION_MESSAGE;
+  await updateInstanceSession(instance.id, {
+    status: WhatsappStatus.connecting,
+    qrCode: null,
+    lastError: RECOVERABLE_SESSION_MESSAGE
+  });
+
+  console.log("[instance-manager] recoverable close; scheduling reconnect", {
+    action: "resume_session",
+    instanceId: instance.id,
+    statusCode: options.statusCode,
+    attempt,
+    delayMs,
+    sessionDir: options.sessionInfo.sessionDir,
+    sessionFilesCount: options.sessionInfo.sessionFilesCount,
+    hasCredsJson: options.sessionInfo.hasCredsJson,
+    isRecoverable: true
+  });
+
+  runtime.reconnectTimer = setTimeout(() => {
+    runtime.reconnectTimer = null;
+    console.log("[instance-manager] recoverable reconnect attempt", {
+      action: "resume_session",
+      instanceId: instance.id,
+      statusCode: options.statusCode,
+      attempt
+    });
+    void startSecondaryWhatsappInstance(instance).catch((error) => {
+      console.warn("[instance-manager] recoverable reconnect failed", {
+        instanceId: instance.id,
+        attempt,
+        error: errorMessage(error)
+      });
+    });
+  }, delayMs);
 }
 
 async function handleIncomingOptOutMessages(
@@ -238,8 +367,13 @@ async function startSecondaryWhatsappInstance(instance: WhatsappInstance) {
     return existingStart;
   }
 
+  if (runtime.socket && runtime.status === WhatsappStatus.connected) {
+    return runtime.socket;
+  }
+
   const startPromise = (async () => {
     const sessionDir = resolve(getBaileysSessionDirForInstance(instance));
+    const sessionInfo = await getBaileysSessionFilesInfoForInstance(instance);
     if (runtime.socket && runtime.status !== WhatsappStatus.connected) {
       runtime.socket.end(new Error("Restarting instance connection"));
       runtime.socket = null;
@@ -255,8 +389,12 @@ async function startSecondaryWhatsappInstance(instance: WhatsappInstance) {
     await mkdir(sessionDir, { recursive: true });
 
     console.log("[instance-manager] starting instance", {
+      action: sessionInfo.sessionFilesCount > 0 ? "resume_session" : "generate_qr",
       instanceId: instance.id,
-      sessionKey: instance.sessionKey
+      sessionKey: instance.sessionKey,
+      sessionDir: sessionInfo.sessionDir,
+      sessionFilesCount: sessionInfo.sessionFilesCount,
+      hasCredsJson: sessionInfo.hasCredsJson
     });
 
     const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
@@ -328,6 +466,11 @@ async function startSecondaryWhatsappInstance(instance: WhatsappInstance) {
           runtime.qrCode = null;
           runtime.lastError = null;
           runtime.lastOpenAt = new Date();
+          runtime.reconnectAttempts = 0;
+          if (runtime.reconnectTimer) {
+            clearTimeout(runtime.reconnectTimer);
+            runtime.reconnectTimer = null;
+          }
           await updateInstanceSession(instance.id, {
             status: WhatsappStatus.connected,
             qrCode: null,
@@ -352,11 +495,23 @@ async function startSecondaryWhatsappInstance(instance: WhatsappInstance) {
 
         if (update.connection === "close") {
           const statusCode = getDisconnectStatusCode(update.lastDisconnect?.error);
+          const sessionInfo = await getBaileysSessionFilesInfoForInstance(instance);
+          const hasSavedSession = sessionInfo.hasCredsJson || sessionInfo.sessionFilesCount > 0;
           runtime.socket = null;
-          runtime.status = WhatsappStatus.disconnected;
           runtime.lastError = update.lastDisconnect?.error
             ? errorMessage(update.lastDisconnect.error)
             : null;
+
+          if (statusCode === 428 && hasSavedSession) {
+            await scheduleRecoverableReconnect(instance, runtime, {
+              statusCode,
+              lastError: runtime.lastError,
+              sessionInfo
+            });
+            return;
+          }
+
+          runtime.status = WhatsappStatus.disconnected;
           await updateInstanceSession(instance.id, {
             status: WhatsappStatus.disconnected,
             qrCode: null,
@@ -364,7 +519,11 @@ async function startSecondaryWhatsappInstance(instance: WhatsappInstance) {
           });
           console.log("[instance-manager] socket closed", {
             instanceId: instance.id,
-            statusCode
+            statusCode,
+            sessionDir: sessionInfo.sessionDir,
+            sessionFilesCount: sessionInfo.sessionFilesCount,
+            hasCredsJson: sessionInfo.hasCredsJson,
+            isRecoverable: false
           });
 
           if (statusCode && statusCode !== DisconnectReason.loggedOut) {
@@ -419,6 +578,11 @@ export async function disconnectWhatsappInstance(instanceId?: string | null) {
   }
 
   const runtime = getRuntime(instance);
+  if (runtime.reconnectTimer) {
+    clearTimeout(runtime.reconnectTimer);
+    runtime.reconnectTimer = null;
+  }
+  runtime.reconnectAttempts = 0;
   runtime.socket?.end(new Error("Manual disconnect"));
   runtime.socket = null;
   runtime.status = WhatsappStatus.disconnected;
@@ -481,6 +645,8 @@ export async function getWhatsappInstanceRuntimeStatus(instanceId?: string | nul
 
   const runtime = getRuntime(instance);
   const session = await ensureWhatsappSessionForInstance(instance.id);
+  const sessionInfo = await getBaileysSessionFilesInfoForInstance(instance);
+  const hasSessionFiles = sessionInfo.sessionFilesCount > 0;
 
   return {
     id: session.id,
@@ -490,13 +656,22 @@ export async function getWhatsappInstanceRuntimeStatus(instanceId?: string | nul
     status: runtime.status ?? session.status,
     qrCode: runtime.qrCode ?? session.qrCode,
     hasQrCode: Boolean(runtime.qrCode ?? session.qrCode),
+    hasQr: Boolean(runtime.qrCode ?? session.qrCode),
+    hasSessionFiles,
+    sessionFilesCount: sessionInfo.sessionFilesCount,
+    hasCredsJson: sessionInfo.hasCredsJson,
     connectedPhone: runtime.connectedPhone ?? session.connectedPhone ?? instance.phone,
     displayName: runtime.displayName,
     profilePictureUrl: runtime.profilePictureUrl,
     lastError: runtime.lastError ?? session.lastError,
     updatedAt: session.updatedAt.toISOString(),
+    lastOpenAt: runtime.lastOpenAt?.toISOString() ?? null,
     lastConnectedAt: instance.lastConnectedAt?.toISOString() ?? null,
-    lastSyncAt: instance.lastSyncAt?.toISOString() ?? null
+    lastSyncAt: instance.lastSyncAt?.toISOString() ?? null,
+    isRecoverableSession:
+      hasSessionFiles &&
+      (runtime.status ?? session.status) !== WhatsappStatus.connected &&
+      !Boolean(runtime.qrCode ?? session.qrCode)
   };
 }
 

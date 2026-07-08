@@ -1,5 +1,6 @@
 ﻿import { NextRequest, NextResponse } from "next/server";
 import { CampaignStatus } from "@prisma/client";
+import { renderCampaignMessage } from "@/src/lib/campaigns/message-template";
 import { prisma } from "@/src/lib/prisma/client";
 import {
   ABSOLUTE_MAX_RECIPIENTS,
@@ -12,6 +13,14 @@ import { getActiveInstanceIdFromSearchOrDefault } from "@/src/lib/server/whatsap
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+function serializeAdvancedSettings(value: unknown) {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  return `settings:${JSON.stringify(value)}`;
+}
 
 export async function POST(
   request: NextRequest,
@@ -30,6 +39,7 @@ export async function POST(
     maxRecipients?: number;
     sendWindowStart?: string | null;
     sendWindowEnd?: string | null;
+    advancedSettings?: unknown;
     startNow?: boolean;
     instanceId?: string;
   };
@@ -97,6 +107,28 @@ export async function POST(
     );
   }
 
+  if (payload.startNow === true) {
+    const activeCampaign = await prisma.campaign.findFirst({
+      where: {
+        instanceId,
+        status: CampaignStatus.running
+      },
+      select: {
+        id: true
+      }
+    });
+
+    if (activeCampaign) {
+      return NextResponse.json(
+        {
+          error:
+            "Ja existe uma campanha ativa nesta instancia. Pause, cancele ou aguarde finalizar."
+        },
+        { status: 409 }
+      );
+    }
+  }
+
   const dedupeKey = `label:${labelId}:${Date.now()}`;
   const campaign = await prisma.campaign.create({
     data: {
@@ -111,14 +143,18 @@ export async function POST(
       excludeAlreadySentDays,
       dedupeKey,
       maxRecipients,
-      sendWindowStart: payload.sendWindowStart?.trim() || null,
+      sendWindowStart: serializeAdvancedSettings(payload.advancedSettings) ?? payload.sendWindowStart?.trim() ?? null,
       sendWindowEnd: payload.sendWindowEnd?.trim() || null,
       recipients: {
         create: audience.eligibleRecipients.map((recipient) => ({
           instanceId,
           chatId: recipient.chatId,
           jid: recipient.jid,
-          messageFinal: message,
+          messageFinal: renderCampaignMessage(message, {
+            name: recipient.name,
+            phoneNormalized: recipient.phoneNormalized,
+            source: audience.label.name
+          }),
           dedupeKey: buildCampaignDedupeKey(dedupeKey, recipient.jid)
         }))
       }

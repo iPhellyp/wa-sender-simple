@@ -16,3 +16,11 @@
 - Nao prometa disparo ilimitado.
 - Use spintax com responsabilidade para evitar mensagens identicas.
 - Sempre envie campanha teste pequena antes de aumentar volume.
+- Use linguagem de entregabilidade, reputacao e consentimento.
+- Evite links na primeira mensagem quando possivel.
+- Nao envie para quem pediu sair, parar, remover ou cancelar.
+- Use opt-out e listas de bloqueio.
+- Nao compre lista fria.
+- Nao rode duas campanhas no mesmo numero ao mesmo tempo.
+- Nao prometa antiban; nenhum sistema externo controla decisoes do WhatsApp.
+- Se houver muitas falhas ou respostas negativas, pause a campanha e revise base/conteudo.

@@ -55,12 +55,14 @@ let lastAutoCatalogSyncAt = 0;
 let lastAutoCatalogSyncPhone: string | null = null;
 
 const MAX_GENERAL_RECONNECT_ATTEMPTS = 5;
-const TRANSIENT_RECONNECT_BACKOFF_MS = [2_000, 5_000, 15_000] as const;
+const TRANSIENT_RECONNECT_BACKOFF_MS = [5_000, 15_000, 30_000] as const;
 const CATALOG_BOOTSTRAP_WINDOW_MS = 3 * 60_000;
 const AUTO_CATALOG_SYNC_COOLDOWN_MS = 10 * 60_000;
 const TERMINAL_COOLDOWN_MS = 15_000;
 const TRANSIENT_RECONNECT_EXHAUSTED_MESSAGE =
   "Reconexao automatica esgotada apos queda transitoria do socket WhatsApp.";
+const RECOVERABLE_SESSION_MESSAGE =
+  "Sessao salva, aguardando retomada. Clique em Retomar sessao se nao reconectar automaticamente.";
 const TERMINAL_SESSION_MESSAGE =
   "Conexao WhatsApp encerrada ou removida no celular. Use Resetar sessao e Reconectar para gerar novo QR.";
 const QR_SAFE_428_MESSAGE =
@@ -444,28 +446,45 @@ function getSafeSessionDir() {
   return sessionDir;
 }
 
-async function countSessionFiles() {
+async function getSessionFilesInfo() {
   const sessionDir = getSafeSessionDir();
   await mkdir(sessionDir, { recursive: true });
 
-  async function countInDir(dir: string): Promise<number> {
+  async function scanDir(dir: string): Promise<{ count: number; hasCredsJson: boolean }> {
     const entries = await readdir(dir, { withFileTypes: true });
     let count = 0;
+    let hasCredsJson = false;
 
     for (const entry of entries) {
       const fullPath = join(dir, entry.name);
 
       if (entry.isDirectory()) {
-        count += await countInDir(fullPath);
+        const child = await scanDir(fullPath);
+        count += child.count;
+        hasCredsJson = hasCredsJson || child.hasCredsJson;
       } else if (entry.isFile()) {
         count += 1;
+        hasCredsJson = hasCredsJson || entry.name === "creds.json";
       }
     }
 
-    return count;
+    return {
+      count,
+      hasCredsJson
+    };
   }
 
-  return countInDir(sessionDir);
+  const result = await scanDir(sessionDir);
+  return {
+    sessionDir,
+    sessionFilesCount: result.count,
+    hasCredsJson: result.hasCredsJson
+  };
+}
+
+async function countSessionFiles() {
+  const info = await getSessionFilesInfo();
+  return info.sessionFilesCount;
 }
 
 async function clearSessionDir() {
@@ -507,6 +526,11 @@ async function scheduleTransientReconnect(options: {
   statusCode: number | undefined;
   lastError: string;
   currentConnectedPhone: string | null;
+  sessionInfo?: {
+    sessionDir: string;
+    sessionFilesCount: number;
+    hasCredsJson: boolean;
+  };
 }) {
   if (manualDisconnectRequested || resetInProgress) {
     console.log("[baileys] transient reconnect skipped after manual disconnect", {
@@ -534,7 +558,10 @@ async function scheduleTransientReconnect(options: {
     console.log("[baileys] transient reconnect exhausted", {
       statusCode: options.statusCode,
       attempts: transientReconnectCount,
-      lastError: options.lastError
+      lastError: options.lastError,
+      sessionDir: options.sessionInfo?.sessionDir,
+      sessionFilesCount: options.sessionInfo?.sessionFilesCount,
+      hasCredsJson: options.sessionInfo?.hasCredsJson
     });
     return;
   }
@@ -553,14 +580,22 @@ async function scheduleTransientReconnect(options: {
   });
 
   console.log("[baileys] transient close; scheduling reconnect", {
+    action: "resume_session",
+    instanceId: DEFAULT_WHATSAPP_INSTANCE_ID,
     statusCode: options.statusCode,
     attempt,
-    delayMs
+    delayMs,
+    sessionDir: options.sessionInfo?.sessionDir,
+    sessionFilesCount: options.sessionInfo?.sessionFilesCount,
+    hasCredsJson: options.sessionInfo?.hasCredsJson,
+    isRecoverable: true
   });
 
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
     console.log("[baileys] transient reconnect attempt", {
+      action: "resume_session",
+      instanceId: DEFAULT_WHATSAPP_INSTANCE_ID,
       statusCode: options.statusCode,
       attempt
     });
@@ -876,9 +911,21 @@ async function createSocket(options: {
           (pairingPending || isDbPairingPendingNow) && hasStoredPairingQr;
         const shouldRestartInPairingMode =
           isCleanPairing || pairingPending || isDbPairingPendingNow;
+        const sessionInfo = await getSessionFilesInfo();
+        const hasSavedSession = sessionInfo.hasCredsJson || sessionInfo.sessionFilesCount > 0;
         const wasConnected =
           currentSession.status === WhatsappStatus.connected ||
           Boolean(currentSession.connectedPhone);
+
+        if (statusCode === 428 && hasSavedSession && !shouldPreserveQrDuringPairing && !isCleanPairing) {
+          await scheduleTransientReconnect({
+            statusCode,
+            lastError: RECOVERABLE_SESSION_MESSAGE,
+            currentConnectedPhone: currentSession.connectedPhone,
+            sessionInfo
+          });
+          return;
+        }
 
         if (statusCode === 428 || isTerminalSessionStatusCode(statusCode)) {
           if (statusCode === 428 && shouldPreserveQrDuringPairing) {
@@ -1014,7 +1061,8 @@ async function createSocket(options: {
           await scheduleTransientReconnect({
             statusCode,
             lastError: lastDisconnectError ?? "Queda transitoria do socket",
-            currentConnectedPhone: currentSession.connectedPhone
+            currentConnectedPhone: currentSession.connectedPhone,
+            sessionInfo
           });
           return;
         }
@@ -1085,7 +1133,7 @@ async function createSocket(options: {
         await saveWhatsappSession({
           status: WhatsappStatus.disconnected,
           qrCode: null,
-          connectedPhone: null,
+          connectedPhone: currentSession.connectedPhone,
           lastError
         });
         console.warn("[baileys] connection closed", {
@@ -1099,7 +1147,7 @@ async function createSocket(options: {
           await saveWhatsappSession({
             status: WhatsappStatus.error,
             qrCode: null,
-            connectedPhone: null,
+            connectedPhone: currentSession.connectedPhone,
             lastError: "Limite de reconexao automatico atingido."
           });
           console.log("[baileys] connection terminated; reconnect disabled", {
@@ -1155,8 +1203,15 @@ export async function startBaileysConnection(options: { resetRetry?: boolean } =
     return socket;
   }
 
-  const sessionFileCount = await countSessionFiles();
-  console.log("[baileys] session files before start", { files: sessionFileCount });
+  const sessionInfo = await getSessionFilesInfo();
+  const sessionFileCount = sessionInfo.sessionFilesCount;
+  console.log("[baileys] session files before start", {
+    action: sessionFileCount > 0 ? "resume_session" : "generate_qr",
+    instanceId: DEFAULT_WHATSAPP_INSTANCE_ID,
+    sessionDir: sessionInfo.sessionDir,
+    sessionFilesCount: sessionInfo.sessionFilesCount,
+    hasCredsJson: sessionInfo.hasCredsJson
+  });
   const dbSession = await getWhatsappStatus();
   const hasConnectedPhone = Boolean(dbSession.connectedPhone);
   const isDbPairingPending = isPairingPendingSession(dbSession);
@@ -1219,7 +1274,7 @@ export async function startBaileysConnection(options: { resetRetry?: boolean } =
       await saveWhatsappSession({
         status: WhatsappStatus.error,
         qrCode: null,
-        connectedPhone: shouldResetRetry ? null : dbSession.connectedPhone,
+        connectedPhone: shouldUseQrSafeMode ? null : dbSession.connectedPhone,
         lastError
       });
       throw error;
@@ -1253,41 +1308,58 @@ export async function getWhatsappStatus() {
 
 export async function getWhatsappStatusPayload() {
   const session = await getWhatsappStatus();
+  const sessionInfo = await getSessionFilesInfo();
+  const hasSessionFiles = sessionInfo.sessionFilesCount > 0;
+  const isRecoverableSession =
+    hasSessionFiles &&
+    session.status !== WhatsappStatus.connected &&
+    !session.qrCode;
 
   return {
     id: session.id,
     status: session.status,
     qrCode: session.qrCode,
     hasQrCode: Boolean(session.qrCode),
+    hasQr: Boolean(session.qrCode),
+    hasSessionFiles,
+    sessionFilesCount: sessionInfo.sessionFilesCount,
+    hasCredsJson: sessionInfo.hasCredsJson,
     connectedPhone: session.connectedPhone,
+    displayName: null,
+    profilePictureUrl: null,
+    lastOpenAt: null,
     lastError: session.lastError,
-    updatedAt: session.updatedAt
+    updatedAt: session.updatedAt,
+    isRecoverableSession
   };
 }
 
 export async function markWhatsappConnecting() {
+  const session = await getWhatsappStatus();
   await saveWhatsappSession({
     status: WhatsappStatus.connecting,
     qrCode: null,
-    connectedPhone: null,
+    connectedPhone: session.connectedPhone,
     lastError: null
   });
 }
 
 export async function markWhatsappDisconnected() {
+  const session = await getWhatsappStatus();
   await saveWhatsappSession({
     status: WhatsappStatus.disconnected,
     qrCode: null,
-    connectedPhone: null,
+    connectedPhone: session.connectedPhone,
     lastError: null
   });
 }
 
 export async function markWhatsappError(lastError: string) {
+  const session = await getWhatsappStatus();
   await saveWhatsappSession({
     status: WhatsappStatus.error,
     qrCode: null,
-    connectedPhone: null,
+    connectedPhone: session.connectedPhone,
     lastError
   });
 }
@@ -1302,15 +1374,15 @@ export async function disconnectBaileys() {
   startPromise = null;
 
   if (socket) {
-    await socket.logout().catch(() => undefined);
-    socket.end(new Error("Disconnect manual"));
+    socket.end(new Error("Disconnect socket manual"));
     socket = null;
   }
 
+  const session = await getWhatsappStatus();
   await saveWhatsappSession({
     status: WhatsappStatus.disconnected,
     qrCode: null,
-    connectedPhone: null,
+    connectedPhone: session.connectedPhone,
     lastError: null
   });
 }

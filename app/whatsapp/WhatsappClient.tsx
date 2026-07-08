@@ -15,6 +15,10 @@ type WhatsappSession = {
   status: string;
   qrCode: string | null;
   hasQrCode: boolean;
+  hasQr?: boolean;
+  hasSessionFiles?: boolean;
+  sessionFilesCount?: number;
+  hasCredsJson?: boolean;
   connectedPhone: string | null;
   lastError: string | null;
   updatedAt: string;
@@ -23,9 +27,11 @@ type WhatsappSession = {
   instanceRole?: string;
   displayName?: string | null;
   profilePictureUrl?: string | null;
+  lastOpenAt?: string | null;
   lastConnectedAt?: string | null;
   lastSyncAt?: string | null;
   latestMessageAt?: string | null;
+  isRecoverableSession?: boolean;
   message?: string;
   error?: string;
 };
@@ -195,6 +201,9 @@ export function WhatsappClient() {
   const reconnectDisabled = busy || (session?.status === "qr" && session.hasQrCode);
   const status = session?.status ?? "disconnected";
   const statusTone = statusToneFromValue(status);
+  const hasSessionFiles = Boolean(session?.hasSessionFiles || session?.hasCredsJson);
+  const canResumeSession = Boolean(session?.isRecoverableSession || (hasSessionFiles && status !== "connected" && status !== "qr"));
+  const primaryConnectionLabel = canResumeSession ? "Retomar sessao" : "Gerar QR";
 
   return (
     <section className="whatsapp-page">
@@ -243,6 +252,10 @@ export function WhatsappClient() {
                 <span>{formatDateTime(session?.lastConnectedAt)}</span>
               </div>
               <div className="meta-row">
+                <span>Ultima abertura do socket</span>
+                <span>{formatDateTime(session?.lastOpenAt)}</span>
+              </div>
+              <div className="meta-row">
                 <span>Ultima sincronizacao</span>
                 <span>{formatDateTime(session?.lastSyncAt)}</span>
               </div>
@@ -258,6 +271,10 @@ export function WhatsappClient() {
                 <span>QR disponivel</span>
                 <span>{session?.hasQrCode ? "Sim" : "Nao"}</span>
               </div>
+              <div className="meta-row">
+                <span>Sessao salva</span>
+                <span>{hasSessionFiles ? `Sim (${session?.sessionFilesCount ?? 0} arquivos)` : "Nao"}</span>
+              </div>
             </div>
 
             <div className="whatsapp-actions">
@@ -267,7 +284,7 @@ export function WhatsappClient() {
                 type="button"
                 onClick={() => void postAction("/api/whatsapp/reconnect")}
               >
-                Conectar/Reconectar esta instancia
+                {primaryConnectionLabel}
               </button>
               <button
                 className="button secondary"
@@ -275,14 +292,18 @@ export function WhatsappClient() {
                 type="button"
                 onClick={() => void postAction("/api/whatsapp/disconnect", { dangerous: "disconnect" })}
               >
-                Desconectar esta instancia
+                Desconectar socket
               </button>
             </div>
           </div>
         </SectionCard>
 
         <SectionCard title="Operacao" description="Use esta tela para gerar QR, acompanhar status, sincronizar e gerenciar a sessao.">
-          <div className="message">Confira sempre a instancia ativa antes de operar.</div>
+          <div className="message">
+            {hasSessionFiles
+              ? "Sessao local encontrada. Use Retomar sessao antes de resetar ou pedir novo QR."
+              : "Sem sessao local. Use Gerar QR para parear esta instancia."}
+          </div>
           <ButtonLink href={`/instancias${activeInstanceId ? `?instanceId=${activeInstanceId}` : ""}`}>
             Ver instancias
           </ButtonLink>
@@ -294,8 +315,8 @@ export function WhatsappClient() {
         description="A sincronizacao de contatos e etiquetas ocorre automaticamente ao conectar o WhatsApp."
       >
         <div className="message">
-          Use manutencao avancada apenas se o suporte pedir. Desconectar ou resetar limpa os dados
-          operacionais apenas desta instancia.
+          Use manutencao avancada apenas se o suporte pedir. Desconectar fecha o socket sem apagar a
+          sessao. Resetar remove a sessao local e pode exigir QR novo.
         </div>
         {catalogMessage ? <div className="message success">{catalogMessage}</div> : null}
       </SectionCard>
@@ -310,12 +331,20 @@ export function WhatsappClient() {
         <div className="message">
           Reconectando com a sessao atual. Nao e necessario resetar nem ler QR agora.
         </div>
+      ) : canResumeSession ? (
+        <div className="message">
+          Sessao salva encontrada. Clique em Retomar sessao para reabrir o socket sem QR.
+        </div>
       ) : session?.status === "connecting" ? (
         <div className="message">Aguardando QR Code. Isso pode levar alguns segundos.</div>
       ) : null}
 
       {session && session.status !== "connected" && session.status !== "qr" && !session.qrCode ? (
-        <div className="message">QR ainda nao gerado. Clique em reconectar e aguarde alguns segundos.</div>
+        <div className="message">
+          {hasSessionFiles
+            ? "QR nao sera gerado automaticamente enquanto existir sessao salva."
+            : "QR ainda nao gerado. Clique em Gerar QR e aguarde alguns segundos."}
+        </div>
       ) : null}
 
       {!qrRecoveryMessage && session?.status === "error" && session.lastError ? (

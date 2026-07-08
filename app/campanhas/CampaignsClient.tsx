@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import { renderCampaignMessage } from "@/src/lib/campaigns/message-template";
 
 type ContactOption = {
   id: string;
@@ -123,29 +124,6 @@ function getPendingCount(counts: Record<string, number>) {
   return (counts.pending ?? 0) + (counts.scheduled ?? 0) + (counts.sending ?? 0);
 }
 
-function applySpintax(value: string) {
-  return value.replace(/\{([^{}|]+(?:\|[^{}|]+)+)\}/g, (_match, group: string) => {
-    const options = group.split("|").map((item) => item.trim()).filter(Boolean);
-    return options[Math.floor(Math.random() * options.length)] ?? "";
-  });
-}
-
-function renderVariables(value: string, sample: { name?: string; phoneNormalized?: string; source?: string } | null) {
-  const variables: Record<string, string> = {
-    nome: sample?.name ?? "Nome",
-    telefone: sample?.phoneNormalized ?? "559999999999",
-    email: "",
-    cidade: "",
-    estado: "",
-    origem: sample?.source ?? "lista",
-    lista: sample?.source ?? "lista"
-  };
-
-  return value.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_match, key: string) => {
-    return variables[key.toLowerCase()] ?? "";
-  });
-}
-
 export function CampaignsClient({
   prefillContext,
   labels
@@ -177,6 +155,8 @@ export function CampaignsClient({
   const [pauseEvery, setPauseEvery] = useState(25);
   const [pauseMinutes, setPauseMinutes] = useState(10);
   const [batchLimit, setBatchLimit] = useState(100);
+  const [testPhone, setTestPhone] = useState("");
+  const [testBusy, setTestBusy] = useState(false);
   const [previewMessage, setPreviewMessage] = useState("");
   const [audienceMode, setAudienceMode] = useState<AudienceMode>(initialMode);
   const [selectedLabelId, setSelectedLabelId] = useState(prefillContext?.labelId ?? labels[0]?.id ?? "");
@@ -228,7 +208,7 @@ export function CampaignsClient({
   }
 
   function generatePreview() {
-    setPreviewMessage(renderVariables(applySpintax(message), sampleContact));
+    setPreviewMessage(renderCampaignMessage(message, sampleContact));
   }
 
   async function loadContacts() {
@@ -322,7 +302,17 @@ export function CampaignsClient({
         name: name.trim(),
         defaultMessage: message.trim(),
         message: message.trim(),
-        intervalMinutes
+        intervalMinutes,
+        advancedSettings: {
+          delayMode,
+          fixedSeconds,
+          fixedMinutes,
+          minDelaySeconds,
+          maxDelaySeconds,
+          pauseEvery,
+          pauseMinutes,
+          batchLimit
+        }
       };
       const response =
         audienceMode === "label"
@@ -334,6 +324,8 @@ export function CampaignsClient({
                 name: body.name,
                 message: body.message,
                 intervalMinutes,
+                advancedSettings: body.advancedSettings,
+                maxRecipients: batchLimit,
                 startNow: false
               })
             })
@@ -344,6 +336,8 @@ export function CampaignsClient({
                 name: body.name,
                 defaultMessage: body.defaultMessage,
                 intervalMinutes,
+                advancedSettings: body.advancedSettings,
+                maxRecipients: batchLimit,
                 instanceId: activeInstanceId,
                 contactIds: audienceMode === "contacts" ? Array.from(selectedContacts) : [],
                 chatIds: audienceMode === "catalog" ? catalogChats.map((chat) => chat.id) : []
@@ -382,6 +376,35 @@ export function CampaignsClient({
       setError(actionError instanceof Error ? actionError.message : "Erro inesperado");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function sendTestMessage() {
+    setTestBusy(true);
+    setError(null);
+
+    try {
+      const response = await fetch("/api/campaigns/test-message", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          instanceId: activeInstanceId,
+          phone: testPhone,
+          message,
+          sampleName: sampleContact?.name ?? "Teste"
+        })
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(String(data.error ?? "Erro ao enviar teste"));
+      }
+
+      setCreatedMessage(String(data.message ?? "Mensagem de teste enviada."));
+    } catch (testError) {
+      setError(testError instanceof Error ? testError.message : "Erro inesperado");
+    } finally {
+      setTestBusy(false);
     }
   }
 
@@ -602,6 +625,26 @@ export function CampaignsClient({
                     <span className="muted">Variaveis: {"{{nome}}"}, {"{{telefone}}"}, {"{{origem}}"}, {"{{lista}}"}</span>
                   </div>
                 </div>
+                <div className="filter-bar">
+                  <div className="field">
+                    <label htmlFor="test-phone">Telefone de teste</label>
+                    <input
+                      className="input"
+                      id="test-phone"
+                      placeholder="DDD + numero"
+                      value={testPhone}
+                      onChange={(event) => setTestPhone(event.target.value)}
+                    />
+                  </div>
+                  <button
+                    className="button secondary"
+                    disabled={testBusy || !message.trim() || !testPhone.trim()}
+                    type="button"
+                    onClick={() => void sendTestMessage()}
+                  >
+                    {testBusy ? "Enviando..." : "Enviar teste para meu numero"}
+                  </button>
+                </div>
                 <div className="field">
                   <label htmlFor="delay-mode">Delay seguro</label>
                   <select
@@ -789,7 +832,7 @@ export function CampaignsClient({
             </div>
           </div>
           <div className="message-preview">
-            {previewMessage || (message.trim() ? renderVariables(applySpintax(message), sampleContact) : "Digite a mensagem para visualizar o envio.")}
+            {previewMessage || (message.trim() ? renderCampaignMessage(message, sampleContact) : "Digite a mensagem para visualizar o envio.")}
           </div>
         </aside>
       </section>

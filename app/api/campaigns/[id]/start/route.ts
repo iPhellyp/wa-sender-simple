@@ -37,6 +37,29 @@ export async function POST(
     );
   }
 
+  const activeCampaign = await prisma.campaign.findFirst({
+    where: {
+      instanceId,
+      id: {
+        not: campaign.id
+      },
+      status: CampaignStatus.running
+    },
+    select: {
+      id: true
+    }
+  });
+
+  if (activeCampaign) {
+    return NextResponse.json(
+      {
+        error:
+          "Ja existe uma campanha ativa nesta instancia. Pause, cancele ou aguarde finalizar."
+      },
+      { status: 409 }
+    );
+  }
+
   await prisma.campaign.update({
     where: {
       id
