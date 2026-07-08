@@ -20,8 +20,19 @@ export class WhatsappInstanceNotFoundError extends Error {
   }
 }
 
+export class NoWhatsappInstanceError extends Error {
+  constructor() {
+    super("Nenhuma instancia cadastrada");
+    this.name = "NoWhatsappInstanceError";
+  }
+}
+
 export function isWhatsappInstanceNotFoundError(error: unknown): error is WhatsappInstanceNotFoundError {
-  return error instanceof WhatsappInstanceNotFoundError;
+  return error instanceof WhatsappInstanceNotFoundError || error instanceof NoWhatsappInstanceError;
+}
+
+export function isNoWhatsappInstanceError(error: unknown): error is NoWhatsappInstanceError {
+  return error instanceof NoWhatsappInstanceError;
 }
 
 export type WhatsappInstanceRoleValue = (typeof WHATSAPP_INSTANCE_ROLES)[number];
@@ -96,7 +107,30 @@ export async function ensureDefaultWhatsappInstance() {
 }
 
 export async function getDefaultWhatsappInstance() {
-  return ensureDefaultWhatsappInstance();
+  const defaultInstance = await prisma.whatsappInstance.findFirst({
+    where: {
+      isDefault: true
+    },
+    orderBy: {
+      createdAt: "asc"
+    }
+  });
+
+  if (defaultInstance) {
+    return defaultInstance;
+  }
+
+  const firstInstance = await prisma.whatsappInstance.findFirst({
+    orderBy: {
+      createdAt: "asc"
+    }
+  });
+
+  if (firstInstance) {
+    return firstInstance;
+  }
+
+  throw new NoWhatsappInstanceError();
 }
 
 export async function getWhatsappInstanceById(instanceId: string) {

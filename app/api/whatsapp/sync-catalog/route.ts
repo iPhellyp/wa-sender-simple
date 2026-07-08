@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { enqueueWhatsappCatalogSync } from "@/src/lib/queue/campaign-queue";
 import { getWhatsappInstanceRuntimeStatus } from "@/src/lib/baileys/instance-manager";
 import {
+  isNoWhatsappInstanceError,
   isWhatsappInstanceNotFoundError,
   requireWhatsappInstance
 } from "@/src/lib/server/whatsapp-instances";
@@ -30,6 +31,10 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     if (isWhatsappInstanceNotFoundError(error)) {
       return NextResponse.json({ error: "Instancia nao encontrada" }, { status: 404 });
+    }
+
+    if (isNoWhatsappInstanceError(error)) {
+      return NextResponse.json({ error: "Crie uma instancia antes de sincronizar" }, { status: 404 });
     }
 
     throw error;

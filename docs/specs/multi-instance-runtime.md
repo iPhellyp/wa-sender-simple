@@ -58,7 +58,8 @@ A limpeza operacional recebe `instanceId` e nao toca outras instancias.
 
 Reset e desconexao exigem `instanceId` explicito nas rotas perigosas e confirmacao visual na UI.
 
-Delete de instancia exige o nome exato da instancia, bloqueia a ultima instancia, bloqueia instancia conectada/conectando/QR e remove apenas dados com o `instanceId` selecionado.
+Delete de instancia exige o nome exato da instancia, bloqueia instancia conectada/conectando/QR e remove apenas dados com o `instanceId` selecionado.
+Na Fase 5, o produto permite zero instancias: deletar a ultima instancia deixa o sistema em estado vazio e nao recria default automaticamente.
 
 ## Smoke test final
 
@@ -98,7 +99,7 @@ Delete de instancia exige o nome exato da instancia, bloqueia a ultima instancia
 4. Cancelar confirmacao nao executa acao.
 5. Delete exige digitar o nome exato da instancia.
 6. Delete de instancia conectada deve pedir desconectar antes.
-7. Delete da ultima instancia deve ser bloqueado.
+7. Delete da ultima instancia deve deixar o sistema sem instancias e sem recriar default automaticamente.
 
 ### Envio
 

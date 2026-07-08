@@ -3,6 +3,7 @@ import { getWhatsappInstanceRuntimeStatus } from "@/src/lib/baileys/instance-man
 import { enqueueWhatsappHistorySync } from "@/src/lib/queue/campaign-queue";
 import {
   DEFAULT_WHATSAPP_INSTANCE_ID,
+  isNoWhatsappInstanceError,
   isWhatsappInstanceNotFoundError,
   requireWhatsappInstance
 } from "@/src/lib/server/whatsapp-instances";
@@ -46,6 +47,10 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     if (isWhatsappInstanceNotFoundError(error)) {
       return NextResponse.json({ ok: false, error: "Instancia nao encontrada" }, { status: 404 });
+    }
+
+    if (isNoWhatsappInstanceError(error)) {
+      return NextResponse.json({ ok: false, error: "Crie uma instancia antes de sincronizar" }, { status: 404 });
     }
 
     return NextResponse.json(

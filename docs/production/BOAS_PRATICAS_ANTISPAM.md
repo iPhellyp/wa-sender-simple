@@ -14,3 +14,5 @@
 - Use intervalos entre envios.
 - Monitore falhas, bloqueios e respostas.
 - Nao prometa disparo ilimitado.
+- Use spintax com responsabilidade para evitar mensagens identicas.
+- Sempre envie campanha teste pequena antes de aumentar volume.

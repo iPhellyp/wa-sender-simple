@@ -105,6 +105,7 @@ export function ContactsClient() {
   const [showImportPanel, setShowImportPanel] = useState(false);
   const [result, setResult] = useState<ImportResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [listMessage, setListMessage] = useState<string | null>(null);
 
   const eligibleVisibleContacts = useMemo(
     () => contacts.filter((contact) => !contact.optedOut),
@@ -183,6 +184,12 @@ export function ContactsClient() {
     const formData = new FormData();
     formData.append("file", file);
     formData.append("importLabel", String(new FormData(form).get("importLabel") ?? ""));
+    formData.append("listName", String(new FormData(form).get("listName") ?? ""));
+    formData.append("importOrigin", String(new FormData(form).get("importOrigin") ?? ""));
+    formData.append("description", String(new FormData(form).get("description") ?? ""));
+    formData.append("responsible", String(new FormData(form).get("responsible") ?? ""));
+    formData.append("tags", String(new FormData(form).get("tags") ?? ""));
+    formData.append("createAutoLabel", String(new FormData(form).get("createAutoLabel") ?? ""));
     if (activeInstanceId) formData.append("instanceId", activeInstanceId);
 
     try {
@@ -282,6 +289,45 @@ export function ContactsClient() {
     }
   }
 
+  async function deleteList(listName: string) {
+    const typed = window.prompt(
+      `Essa acao remove a lista/origem dos contatos e preserva os contatos. Digite o nome da lista para confirmar: ${listName}`
+    );
+
+    if (typed !== listName) {
+      setError("Confirmacao invalida. Lista preservada.");
+      return;
+    }
+
+    setListMessage(null);
+    setError(null);
+
+    try {
+      const response = await fetch("/api/contacts/lists", {
+        method: "DELETE",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          instanceId: activeInstanceId || undefined,
+          listName,
+          confirmationName: typed
+        })
+      });
+      const data = (await response.json()) as { error?: string; message?: string; updated?: number };
+
+      if (!response.ok || data.error) {
+        throw new Error(data.error ?? "Erro ao apagar lista");
+      }
+
+      setListMessage(`${data.message ?? "Lista apagada."} Registros atualizados: ${data.updated ?? 0}.`);
+      await loadContacts();
+      await loadLabels();
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : "Erro inesperado");
+    }
+  }
+
   useEffect(() => {
     void loadContacts();
   }, [source, optedOut, sendStatus, search, page, pageSize, activeInstanceId]);
@@ -315,13 +361,45 @@ export function ContactsClient() {
         <section className="data-card compact" id="contact-import-panel">
           <form className="filter-bar import-panel" onSubmit={(event) => void handleImport(event)}>
             <div className="field">
+              <label htmlFor="listName">Nome da lista</label>
+              <input className="input" id="listName" name="listName" placeholder="Ex: Leads Meta Julho" required />
+            </div>
+            <div className="field">
+              <label htmlFor="importOrigin">Origem</label>
+              <select className="select" id="importOrigin" name="importOrigin" defaultValue="planilha manual">
+                <option value="Meta Ads">Meta Ads</option>
+                <option value="cliente antigo">Cliente antigo</option>
+                <option value="evento">Evento</option>
+                <option value="planilha manual">Planilha manual</option>
+                <option value="Shopee">Shopee</option>
+                <option value="Mercado Livre">Mercado Livre</option>
+                <option value="outro">Outro</option>
+              </select>
+            </div>
+            <div className="field">
+              <label htmlFor="responsible">Responsavel</label>
+              <input className="input" id="responsible" name="responsible" placeholder="Nome do responsavel" />
+            </div>
+            <div className="field">
+              <label htmlFor="tags">Tags iniciais</label>
+              <input className="input" id="tags" name="tags" placeholder="Ex: quente, julho, curso" />
+            </div>
+            <div className="field">
+              <label htmlFor="description">Descricao/observacao</label>
+              <input className="input" id="description" name="description" placeholder="Contexto da lista" />
+            </div>
+            <div className="field">
               <label htmlFor="importLabel">Etiqueta da importacao</label>
-              <input className="input" id="importLabel" name="importLabel" placeholder="Opcional" />
+              <input className="input" id="importLabel" name="importLabel" placeholder="Opcional; se vazio usa nome da lista" />
             </div>
             <div className="field">
               <label htmlFor="file">Planilha XLS/XLSX</label>
               <input className="input" id="file" name="file" type="file" accept=".xls,.xlsx" />
             </div>
+            <label className="checkbox-row">
+              <input name="createAutoLabel" type="checkbox" value="true" defaultChecked />
+              <span>Criar etiqueta automatica com o nome da lista quando possivel</span>
+            </label>
             <button className="button" disabled={importing} type="submit">
               {importing ? "Importando..." : "Importar"}
             </button>
@@ -336,6 +414,7 @@ export function ContactsClient() {
       ) : null}
 
       {error ? <div className="message error compact">{error}</div> : null}
+      {listMessage ? <div className="message compact">{listMessage}</div> : null}
       {bulkMessage ? <div className="message compact">{bulkMessage}</div> : null}
       {hasSelectionOverflow ? (
         <div className="message warning compact">
@@ -396,6 +475,11 @@ export function ContactsClient() {
               </option>
             ))}
           </select>
+          {source ? (
+            <button className="button danger" type="button" onClick={() => void deleteList(source)}>
+              Apagar lista
+            </button>
+          ) : null}
           <select
             className="select"
             value={optedOut}

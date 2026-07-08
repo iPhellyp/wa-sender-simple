@@ -21,6 +21,8 @@ type WhatsappSession = {
   instanceId?: string;
   instanceName?: string;
   instanceRole?: string;
+  displayName?: string | null;
+  profilePictureUrl?: string | null;
   lastConnectedAt?: string | null;
   lastSyncAt?: string | null;
   latestMessageAt?: string | null;
@@ -178,6 +180,16 @@ export function WhatsappClient() {
     return <div className="card">Carregando...</div>;
   }
 
+  if (error === "Crie uma instancia para conectar o WhatsApp") {
+    return (
+      <div className="empty-state compact">
+        <strong>Crie uma instancia para conectar o WhatsApp</strong>
+        <span>Depois de criar a primeira instancia, abra esta tela para gerar o QR.</span>
+        <ButtonLink href="/instancias">Criar primeira instancia</ButtonLink>
+      </div>
+    );
+  }
+
   const qrRecoveryMessage = getQrRecoveryMessage(session);
   const isTransientReconnect = isTransientReconnectStatus(session);
   const reconnectDisabled = busy || (session?.status === "qr" && session.hasQrCode);
@@ -189,7 +201,7 @@ export function WhatsappClient() {
       <div className="whatsapp-health-grid">
         <SectionCard
           title="Saude da conexao"
-          description="Status, QR e telefone da instancia ativa selecionada."
+          description="Conecte e gerencie o WhatsApp desta instancia."
         >
           <div className="health-panel">
             <div className="health-status">
@@ -201,6 +213,19 @@ export function WhatsappClient() {
             </div>
 
             <div className="meta-list">
+              <div className="meta-row">
+                <span>Perfil WhatsApp</span>
+                <span className="instance-title">
+                  {session?.profilePictureUrl ? (
+                    <img className="instance-photo" src={session.profilePictureUrl} alt="" />
+                  ) : (
+                    <span className="instance-photo fallback">
+                      {(session?.displayName ?? session?.instanceName ?? "W").slice(0, 1).toUpperCase()}
+                    </span>
+                  )}
+                  <span>{session?.displayName ?? "Nome nao disponivel"}</span>
+                </span>
+              </div>
               <div className="meta-row">
                 <span>Instancia ativa</span>
                 <span>{session?.instanceName ?? session?.instanceId ?? "Instancia ativa"}</span>
@@ -256,19 +281,11 @@ export function WhatsappClient() {
           </div>
         </SectionCard>
 
-        <SectionCard
-          title="Contatos individuais"
-          description="O produto opera como base de contatos e sender por etiquetas, nao como inbox pesada."
-          actions={
-            <ButtonLink href={`/conversas${activeInstanceId ? `?instanceId=${activeInstanceId}` : ""}`}>
-              Abrir conversas
-            </ButtonLink>
-          }
-        >
-          <div className="message">
-            Grupos, broadcasts e newsletters sao ignorados para reduzir carga. Contatos individuais
-            @lid e @s.whatsapp.net continuam elegiveis para contatos, etiquetas e campanhas.
-          </div>
+        <SectionCard title="Operacao" description="Use esta tela para gerar QR, acompanhar status, sincronizar e gerenciar a sessao.">
+          <div className="message">Confira sempre a instancia ativa antes de operar.</div>
+          <ButtonLink href={`/instancias${activeInstanceId ? `?instanceId=${activeInstanceId}` : ""}`}>
+            Ver instancias
+          </ButtonLink>
         </SectionCard>
       </div>
 

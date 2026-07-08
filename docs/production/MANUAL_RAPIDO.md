@@ -8,6 +8,8 @@
 4. Clique em `Usar esta instancia`.
 5. Clique em `Abrir WhatsApp`.
 
+Se nao houver nenhuma instancia cadastrada, `/instancias` mostra estado vazio e botao para criar a primeira.
+
 ## Conectar WhatsApp
 
 1. Abra `/whatsapp?instanceId=ID`.
@@ -24,9 +26,17 @@ Use o seletor de instancia ativa no topo ou clique em `Usar esta instancia` em `
 
 1. Abra `/contatos`.
 2. Clique em `Importar contatos`.
-3. Informe uma etiqueta opcional.
+3. Informe nome da lista, origem, responsavel, tags e observacao.
 4. Envie planilha XLS/XLSX.
 5. Confira total, inseridos, atualizados, duplicados e invalidos.
+
+## Apagar lista
+
+1. Abra `/contatos`.
+2. Filtre pela lista/origem.
+3. Clique em `Apagar lista`.
+4. Digite exatamente o nome da lista.
+5. A v1 beta remove o vinculo/origem e preserva os contatos.
 
 ## Enviar mensagem manual
 
@@ -44,6 +54,14 @@ Use o seletor de instancia ativa no topo ou clique em `Usar esta instancia` em `
 5. Revise mensagem e seguranca.
 6. Crie em rascunho e acompanhe em `/envios`.
 
+## Spintax e variaveis
+
+Use spintax simples, por exemplo `{Ola|Oi}, {{nome}}`. Variaveis disponiveis na v1 beta: `{{nome}}`, `{{telefone}}`, `{{origem}}` e `{{lista}}`. Campos extras de planilha ainda exigem evolucao de schema.
+
+## Delay seguro
+
+Use intervalo fixo em segundos/minutos ou faixa aleatoria. Mesmo quando o painel mostra segundos, a v1 beta salva o equivalente em minutos para manter compatibilidade com o schema atual.
+
 ## Deletar instancia
 
 1. Desconecte a instancia antes.
@@ -51,3 +69,5 @@ Use o seletor de instancia ativa no topo ou clique em `Usar esta instancia` em `
 3. Clique em `Deletar`.
 4. Digite exatamente o nome da instancia.
 5. Confirme. Outras instancias nao sao afetadas.
+
+E permitido deletar todas as instancias. Nesse caso, o sistema fica em estado vazio ate uma nova instancia ser criada.

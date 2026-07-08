@@ -62,6 +62,22 @@ export function getCampaignQueue() {
   return queue;
 }
 
+async function removeStaleJob(jobId: string) {
+  const job = await getCampaignQueue().getJob(jobId);
+
+  if (!job) {
+    return;
+  }
+
+  const state = await job.getState();
+
+  if (state === "active") {
+    return;
+  }
+
+  await job.remove().catch(() => undefined);
+}
+
 export async function enqueueRecipient(recipientId: string, delayMs: number, jobKey?: string) {
   const safeDelay = Math.max(0, delayMs);
 
@@ -80,12 +96,14 @@ export async function enqueueRecipient(recipientId: string, delayMs: number, job
 
 export async function enqueueWhatsappConnect(instanceId: string) {
   const normalizedInstanceId = requireInstanceId(instanceId, CONNECT_WHATSAPP_JOB);
+  const jobId = buildJobId(CONNECT_WHATSAPP_JOB, normalizedInstanceId);
+  await removeStaleJob(jobId);
   await getCampaignQueue().add(
     CONNECT_WHATSAPP_JOB,
     { instanceId: normalizedInstanceId },
     {
       attempts: 1,
-      jobId: buildJobId(CONNECT_WHATSAPP_JOB, normalizedInstanceId),
+      jobId,
       removeOnComplete: true,
       removeOnFail: 100
     }
@@ -156,7 +174,7 @@ export async function enqueueWhatsappHistorySync(instanceId: string) {
 }
 
 export async function enqueueWhatsappCatalogSync(data: SyncWhatsappCatalogJobData = {}) {
-  const instanceId = data.instanceId ?? "default";
+  const instanceId = requireInstanceId(data.instanceId, SYNC_WHATSAPP_CATALOG_JOB);
   const job = await getCampaignQueue().add(
     SYNC_WHATSAPP_CATALOG_JOB,
     {

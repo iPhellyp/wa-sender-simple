@@ -988,18 +988,18 @@ button:disabled {
 
 .conversation-grid {
   display: grid;
-  gap: 10px;
+  gap: 8px;
 }
 
 .inbox-conversation-card {
-  align-items: flex-start;
+  align-items: center;
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--radius);
   display: grid;
-  gap: 12px;
-  grid-template-columns: 48px minmax(0, 1fr);
-  padding: 12px 14px;
+  gap: 10px;
+  grid-template-columns: 40px minmax(0, 1fr);
+  padding: 8px 10px;
 }
 
 .inbox-conversation-card:hover {
@@ -1015,9 +1015,9 @@ button:disabled {
   color: var(--primary-dark);
   display: inline-flex;
   font-weight: 800;
-  height: 48px;
+  height: 40px;
   justify-content: center;
-  width: 48px;
+  width: 40px;
 }
 
 .conversation-avatar.group {
@@ -1033,7 +1033,7 @@ button:disabled {
 
 .conversation-card-body {
   display: grid;
-  gap: 8px;
+  gap: 5px;
   min-width: 0;
 }
 
@@ -1055,7 +1055,7 @@ button:disabled {
 
 .conversation-title-block strong {
   color: var(--text);
-  font-size: 16px;
+  font-size: 14px;
   line-height: 1.2;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1075,7 +1075,7 @@ button:disabled {
 .conversation-card-meta,
 .conversation-card-footer {
   color: var(--muted);
-  font-size: 13px;
+  font-size: 12px;
 }
 
 .conversation-time {
@@ -1089,10 +1089,11 @@ button:disabled {
 .conversation-preview {
   color: var(--text);
   display: -webkit-box;
-  line-height: 1.45;
+  font-size: 13px;
+  line-height: 1.35;
   overflow: hidden;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 1;
 }
 
 .conversation-preview.empty {
@@ -1995,6 +1996,29 @@ button:disabled {
   display: grid;
   gap: 3px;
   min-width: 0;
+}
+
+.instance-title {
+  align-items: center;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 40px minmax(0, 1fr);
+}
+
+.instance-photo {
+  border-radius: 999px;
+  height: 40px;
+  object-fit: cover;
+  width: 40px;
+}
+
+.instance-photo.fallback {
+  align-items: center;
+  background: #dff7ef;
+  color: var(--primary-dark);
+  display: inline-flex;
+  font-weight: 800;
+  justify-content: center;
 }
 
 .instance-card-header span {

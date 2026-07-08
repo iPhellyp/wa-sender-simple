@@ -1,4 +1,4 @@
-import { rm } from "fs/promises";
+import { readdir, rm } from "fs/promises";
 import { resolve } from "path";
 import { WhatsappStatus, type WhatsappInstanceRole } from "@prisma/client";
 import { NextRequest, NextResponse } from "next/server";
@@ -11,6 +11,25 @@ import {
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+async function removeInstanceSessionDir(instance: Parameters<typeof getBaileysSessionDirForInstance>[0]) {
+  const sessionDir = resolve(getBaileysSessionDirForInstance(instance));
+
+  if (instance.sessionKey !== "default") {
+    await rm(sessionDir, { recursive: true, force: true });
+    return;
+  }
+
+  const entries = await readdir(sessionDir, { withFileTypes: true }).catch(() => []);
+
+  for (const entry of entries) {
+    if (entry.isDirectory()) {
+      continue;
+    }
+
+    await rm(resolve(sessionDir, entry.name), { recursive: true, force: true });
+  }
+}
 
 export async function PATCH(
   request: NextRequest,
@@ -108,15 +127,6 @@ export async function DELETE(
     return NextResponse.json({ error: "Digite o nome da instancia para confirmar" }, { status: 400 });
   }
 
-  const instanceCount = await prisma.whatsappInstance.count();
-
-  if (instanceCount <= 1) {
-    return NextResponse.json(
-      { error: "Crie outra instancia antes de deletar esta." },
-      { status: 400 }
-    );
-  }
-
   if (
     instance.status === WhatsappStatus.connected ||
     instance.status === WhatsappStatus.connecting ||
@@ -140,15 +150,6 @@ export async function DELETE(
         }
       })
     : null;
-
-  if (instance.isDefault && !replacementDefault) {
-    return NextResponse.json(
-      { error: "Crie outra instancia antes de deletar esta." },
-      { status: 400 }
-    );
-  }
-
-  const sessionDir = resolve(getBaileysSessionDirForInstance(instance));
 
   await prisma.$transaction(async (transaction) => {
     await transaction.sendLog.deleteMany({ where: { instanceId: instance.id } });
@@ -180,7 +181,7 @@ export async function DELETE(
     });
   });
 
-  await rm(sessionDir, { recursive: true, force: true });
+  await removeInstanceSessionDir(instance);
 
   return NextResponse.json({
     ok: true,

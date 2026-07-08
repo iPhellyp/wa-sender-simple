@@ -1,19 +1,17 @@
-﻿import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
+import type { WhatsappInstanceRole } from "@prisma/client";
+import { getWhatsappInstanceRuntimeStatus } from "@/src/lib/baileys/instance-manager";
+import { prisma } from "@/src/lib/prisma/client";
 import {
   WHATSAPP_INSTANCE_ROLE_LABELS,
   buildInstanceSessionKey,
-  ensureDefaultWhatsappInstance,
   isWhatsappInstanceRole
 } from "@/src/lib/server/whatsapp-instances";
-import { prisma } from "@/src/lib/prisma/client";
-import type { WhatsappInstanceRole } from "@prisma/client";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  await ensureDefaultWhatsappInstance();
-
   const instances = await prisma.whatsappInstance.findMany({
     orderBy: [
       {
@@ -35,13 +33,26 @@ export async function GET() {
   const lastErrorByInstanceId = new Map(
     sessions.map((session) => [session.instanceId, session.lastError])
   );
+  const runtimeStatusByInstanceId = new Map(
+    await Promise.all(
+      instances.map(async (instance) => {
+        const status = await getWhatsappInstanceRuntimeStatus(instance.id).catch(() => null);
+        return [instance.id, status] as const;
+      })
+    )
+  );
 
   return NextResponse.json({
-    instances: instances.map((instance) => ({
-      ...instance,
-      lastError: lastErrorByInstanceId.get(instance.id) ?? null,
-      roleLabel: WHATSAPP_INSTANCE_ROLE_LABELS[instance.role]
-    })),
+    instances: instances.map((instance) => {
+      const runtimeStatus = runtimeStatusByInstanceId.get(instance.id);
+      return {
+        ...instance,
+        displayName: runtimeStatus?.displayName ?? null,
+        profilePictureUrl: runtimeStatus?.profilePictureUrl ?? null,
+        lastError: lastErrorByInstanceId.get(instance.id) ?? null,
+        roleLabel: WHATSAPP_INSTANCE_ROLE_LABELS[instance.role]
+      };
+    }),
     roles: WHATSAPP_INSTANCE_ROLE_LABELS
   });
 }
@@ -54,7 +65,8 @@ export async function POST(request: NextRequest) {
   };
   const name = String(payload.name ?? "").trim();
   const role = String(payload.role ?? "GENERAL").trim();
-  const isDefault = payload.isDefault === true;
+  const existingCount = await prisma.whatsappInstance.count();
+  const isDefault = existingCount === 0 || payload.isDefault === true;
 
   if (!name) {
     return NextResponse.json({ error: "Nome obrigatorio" }, { status: 400 });
@@ -91,7 +103,3 @@ export async function POST(request: NextRequest) {
     { status: 201 }
   );
 }
-
-
-
-

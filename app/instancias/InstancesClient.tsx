@@ -20,6 +20,8 @@ type InstanceSummary = {
   lastConnectedAt: string | null;
   lastSyncAt: string | null;
   lastError: string | null;
+  displayName: string | null;
+  profilePictureUrl: string | null;
 };
 
 type InstancesResponse = {
@@ -46,6 +48,7 @@ export function InstancesClient() {
   const [instances, setInstances] = useState<InstanceSummary[]>([]);
   const [roles, setRoles] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
+  const [busyInstanceId, setBusyInstanceId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [activeInstanceId, setActiveInstanceId] = useState("");
@@ -170,6 +173,7 @@ export function InstancesClient() {
     }
 
     setBusy(true);
+    setBusyInstanceId(instance.id);
     setError(null);
     setMessage(null);
 
@@ -189,6 +193,7 @@ export function InstancesClient() {
       setError(actionError instanceof Error ? actionError.message : "Erro inesperado");
     } finally {
       setBusy(false);
+      setBusyInstanceId(null);
     }
   }
 
@@ -203,6 +208,7 @@ export function InstancesClient() {
     }
 
     setBusy(true);
+    setBusyInstanceId(instance.id);
     setError(null);
     setMessage(null);
 
@@ -230,6 +236,8 @@ export function InstancesClient() {
       const nextActiveInstanceId =
         data.nextActiveInstanceId ?? remainingInstances.find((item) => item.id !== instance.id)?.id ?? "";
 
+      setInstances((current) => current.filter((item) => item.id !== instance.id));
+
       if (activeInstanceId === instance.id) {
         setStoredActiveInstanceId(nextActiveInstanceId);
         setActiveInstanceId(nextActiveInstanceId);
@@ -241,11 +249,13 @@ export function InstancesClient() {
       setError(deleteError instanceof Error ? deleteError.message : "Erro inesperado");
     } finally {
       setBusy(false);
+      setBusyInstanceId(null);
     }
   }
 
   async function postWhatsappAction(instanceId: string, action: "reconnect" | "sync-catalog") {
     setBusy(true);
+    setBusyInstanceId(instanceId);
     setError(null);
     setMessage(null);
 
@@ -265,6 +275,7 @@ export function InstancesClient() {
       setError(actionError instanceof Error ? actionError.message : "Erro inesperado");
     } finally {
       setBusy(false);
+      setBusyInstanceId(null);
     }
   }
 
@@ -295,13 +306,32 @@ export function InstancesClient() {
         </form>
       </section>
 
+      {instances.length === 0 ? (
+        <div className="empty-state compact">
+          <strong>Nenhuma instancia cadastrada</strong>
+          <span>Crie a primeira instancia para gerar QR e conectar um numero WhatsApp.</span>
+          <button className="button" type="button" onClick={() => document.getElementById("instance-name")?.focus()}>
+            Criar primeira instancia
+          </button>
+        </div>
+      ) : null}
+
       <section className="instance-grid">
         {instances.map((instance) => (
           <article className={`instance-card ${activeInstanceId === instance.id ? "active" : ""}`} key={instance.id}>
             <div className="instance-card-header">
               <div>
-                <strong>{instance.name}</strong>
-                <span>{instance.phone ?? "Telefone nao conectado"}</span>
+                <div className="instance-title">
+                  {instance.profilePictureUrl ? (
+                    <img className="instance-photo" src={instance.profilePictureUrl} alt="" />
+                  ) : (
+                    <span className="instance-photo fallback">{instance.name.slice(0, 1).toUpperCase()}</span>
+                  )}
+                  <span>
+                    <strong>{instance.name}</strong>
+                    <span>{instance.displayName ?? instance.phone ?? "Telefone nao conectado"}</span>
+                  </span>
+                </div>
               </div>
               <div className="button-row">
                 {activeInstanceId === instance.id ? <span className="status-badge info">ativa</span> : null}
@@ -367,7 +397,7 @@ export function InstancesClient() {
                 type="button"
                 onClick={() => void postWhatsappAction(instance.id, "reconnect")}
               >
-                Conectar/Recarregar QR
+                {busyInstanceId === instance.id ? "Aguarde..." : "Conectar/Recarregar QR"}
               </button>
               <button
                 className="button secondary compact-button"

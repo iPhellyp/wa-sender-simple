@@ -198,7 +198,10 @@ async function requestAutoCatalogSyncAfterOpen(connectedPhone: string | null) {
     connectedPhone: connectedPhone ? "present" : "unknown"
   });
 
-  await enqueueWhatsappCatalogSync({ forceSnapshot: true });
+  await enqueueWhatsappCatalogSync({
+    instanceId: DEFAULT_WHATSAPP_INSTANCE_ID,
+    forceSnapshot: true
+  });
 }
 
 function getCleanPairingProfile() {

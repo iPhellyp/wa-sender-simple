@@ -19,14 +19,14 @@ import {
 import { getRedisConnectionOptions } from "../lib/queue/connection";
 import {
   isBaileysStartSkippedError,
-  markWhatsappError,
-  requestWhatsappHistorySync
+  markWhatsappError
 } from "../lib/baileys/client";
 import {
   applyWhatsappLabelsForInstance,
   disconnectWhatsappInstance,
   reconnectWhatsappInstance,
   requestWhatsappCatalogSyncForInstance,
+  requestWhatsappHistorySyncForInstance,
   resetWhatsappInstance,
   sendWhatsappMessageForInstance,
   sendWhatsappPhoneMessageForInstance
@@ -610,7 +610,7 @@ const worker = new Worker(
       const instanceId = getRequiredJobInstanceId(job.data, SYNC_WHATSAPP_HISTORY_JOB);
       console.log("[worker] sync-whatsapp-history job received", { instanceId });
 
-      const result = await requestWhatsappHistorySync();
+      const result = await requestWhatsappHistorySyncForInstance(instanceId);
       console.log("[worker] sync-whatsapp-history finished", {
         instanceId,
         ok: result.ok,

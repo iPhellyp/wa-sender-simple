@@ -26,6 +26,7 @@ import {
   applyWhatsappLabelToJids as applyWhatsappLabelToJidsDefault,
   disconnectBaileys,
   getWhatsappStatusPayload,
+  requestWhatsappHistorySync,
   requestWhatsappCatalogSync,
   resetBaileysSession,
   sendWhatsappMessageToJid,
@@ -56,6 +57,8 @@ export type WhatsappRuntime = {
   status: WhatsappStatus;
   qrCode: string | null;
   connectedPhone: string | null;
+  displayName: string | null;
+  profilePictureUrl: string | null;
   lastError: string | null;
   startedAt: Date | null;
   lastOpenAt: Date | null;
@@ -151,6 +154,8 @@ function getRuntime(instance: Pick<WhatsappInstance, "id" | "sessionKey" | "stat
     status: instance.status,
     qrCode: null,
     connectedPhone: instance.phone,
+    displayName: null,
+    profilePictureUrl: null,
     lastError: null,
     startedAt: null,
     lastOpenAt: null,
@@ -235,6 +240,10 @@ async function startSecondaryWhatsappInstance(instance: WhatsappInstance) {
 
   const startPromise = (async () => {
     const sessionDir = resolve(getBaileysSessionDirForInstance(instance));
+    if (runtime.socket && runtime.status !== WhatsappStatus.connected) {
+      runtime.socket.end(new Error("Restarting instance connection"));
+      runtime.socket = null;
+    }
     runtime.status = WhatsappStatus.connecting;
     runtime.lastError = null;
     runtime.startedAt = new Date();
@@ -305,9 +314,17 @@ async function startSecondaryWhatsappInstance(instance: WhatsappInstance) {
 
         if (update.connection === "open") {
           const connectedPhone = normalizeChatJid(socket.user?.id)?.split("@")[0] ?? null;
+          const ownJid = normalizeChatJid(socket.user?.id);
+          const displayName = socket.user?.name ?? null;
+          const profilePictureUrl =
+            ownJid && typeof socket.profilePictureUrl === "function"
+              ? await socket.profilePictureUrl(ownJid).catch(() => null)
+              : null;
           const previousPhone = instance.phone;
           runtime.status = WhatsappStatus.connected;
           runtime.connectedPhone = connectedPhone;
+          runtime.displayName = displayName;
+          runtime.profilePictureUrl = profilePictureUrl ?? null;
           runtime.qrCode = null;
           runtime.lastError = null;
           runtime.lastOpenAt = new Date();
@@ -474,6 +491,8 @@ export async function getWhatsappInstanceRuntimeStatus(instanceId?: string | nul
     qrCode: runtime.qrCode ?? session.qrCode,
     hasQrCode: Boolean(runtime.qrCode ?? session.qrCode),
     connectedPhone: runtime.connectedPhone ?? session.connectedPhone ?? instance.phone,
+    displayName: runtime.displayName,
+    profilePictureUrl: runtime.profilePictureUrl,
     lastError: runtime.lastError ?? session.lastError,
     updatedAt: session.updatedAt.toISOString(),
     lastConnectedAt: instance.lastConnectedAt?.toISOString() ?? null,
@@ -553,6 +572,68 @@ export async function sendWhatsappPhoneMessageForInstance(
   message: string
 ) {
   return sendWhatsappMessageForInstance(instanceId, toWhatsappJid(phoneNormalized), message);
+}
+
+export async function requestWhatsappHistorySyncForInstance(instanceId: string) {
+  const instance = await resolveWhatsappInstance(instanceId);
+
+  if (instance.id === DEFAULT_WHATSAPP_INSTANCE_ID) {
+    return requestWhatsappHistorySync();
+  }
+
+  const session = await getWhatsappInstanceRuntimeStatus(instance.id);
+
+  if (session.status !== WhatsappStatus.connected) {
+    console.log("[history] sync-whatsapp-history skipped; not connected", {
+      instanceId: instance.id,
+      status: session.status
+    });
+
+    return {
+      ok: false,
+      mode: "event-driven" as const,
+      message: "WhatsApp nao esta conectado. Reconecte primeiro."
+    };
+  }
+
+  const [chatCount, contactCount, messageCount] = await Promise.all([
+    prisma.whatsappChat.count({
+      where: {
+        instanceId: instance.id
+      }
+    }),
+    prisma.whatsappContact.count({
+      where: {
+        instanceId: instance.id
+      }
+    }),
+    prisma.whatsappMessage.count({
+      where: {
+        instanceId: instance.id
+      }
+    })
+  ]);
+
+  console.log("[history] sync-whatsapp-history requested", {
+    instanceId: instance.id,
+    mode: "event-driven",
+    chats: chatCount,
+    contacts: contactCount,
+    messages: messageCount
+  });
+
+  return {
+    ok: true,
+    mode: "event-driven" as const,
+    counts: {
+      chats: chatCount,
+      contacts: contactCount,
+      messages: messageCount
+    },
+    hasFetchMessageHistory: false,
+    canUseOnDemandHistory: false,
+    message: "Historico verificado para a instancia solicitada."
+  };
 }
 
 export async function requestWhatsappCatalogSyncForInstance(

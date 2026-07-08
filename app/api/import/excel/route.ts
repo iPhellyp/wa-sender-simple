@@ -19,7 +19,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Envie um arquivo .xls ou .xlsx" }, { status: 400 });
     }
 
-    const importLabel = String(formData.get("importLabel") ?? "").trim() || null;
+    const listName = String(formData.get("listName") ?? "").trim();
+    const importOrigin = String(formData.get("importOrigin") ?? "").trim();
+    const importLabel = listName || String(formData.get("importLabel") ?? "").trim() || importOrigin || null;
     const instanceId = await getActiveInstanceIdFromSearchOrDefault({
       instanceId: String(formData.get("instanceId") ?? "").trim() || undefined
     });

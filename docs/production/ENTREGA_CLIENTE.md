@@ -16,6 +16,9 @@ WA Sender Simple e um sistema de envio e gestao WhatsApp multi-numero. Cada inst
 - Pausa, retomada e cancelamento de campanhas.
 - Auditoria de envios.
 - Reset, desconexao e delete de instancia com confirmacao.
+- Estado zero instancias com criacao da primeira instancia.
+- Importacao organizada por lista/origem.
+- Spintax, variaveis basicas e delay seguro em campanhas.
 
 ## Nao incluido ainda
 
@@ -26,6 +29,8 @@ WA Sender Simple e um sistema de envio e gestao WhatsApp multi-numero. Cada inst
 - Funil avancado.
 - Garantia contra bloqueio WhatsApp.
 - Disparo ilimitado.
+- Campos extras persistidos da planilha sem migration.
+- Exclusao destrutiva automatica de contatos de uma lista.
 
 ## Aviso de responsabilidade
 

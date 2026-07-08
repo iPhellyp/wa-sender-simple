@@ -80,6 +80,7 @@ type CampaignPrefillContext = {
 };
 
 type AudienceMode = "label" | "catalog" | "contacts";
+type DelayMode = "fixed_seconds" | "fixed_minutes" | "random_range";
 
 const steps = ["Publico", "Mensagem", "Seguranca", "Revisao"];
 
@@ -122,6 +123,29 @@ function getPendingCount(counts: Record<string, number>) {
   return (counts.pending ?? 0) + (counts.scheduled ?? 0) + (counts.sending ?? 0);
 }
 
+function applySpintax(value: string) {
+  return value.replace(/\{([^{}|]+(?:\|[^{}|]+)+)\}/g, (_match, group: string) => {
+    const options = group.split("|").map((item) => item.trim()).filter(Boolean);
+    return options[Math.floor(Math.random() * options.length)] ?? "";
+  });
+}
+
+function renderVariables(value: string, sample: { name?: string; phoneNormalized?: string; source?: string } | null) {
+  const variables: Record<string, string> = {
+    nome: sample?.name ?? "Nome",
+    telefone: sample?.phoneNormalized ?? "559999999999",
+    email: "",
+    cidade: "",
+    estado: "",
+    origem: sample?.source ?? "lista",
+    lista: sample?.source ?? "lista"
+  };
+
+  return value.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_match, key: string) => {
+    return variables[key.toLowerCase()] ?? "";
+  });
+}
+
 export function CampaignsClient({
   prefillContext,
   labels
@@ -145,6 +169,15 @@ export function CampaignsClient({
   const [name, setName] = useState("");
   const [message, setMessage] = useState("");
   const [intervalMinutes, setIntervalMinutes] = useState(1);
+  const [delayMode, setDelayMode] = useState<DelayMode>("random_range");
+  const [fixedSeconds, setFixedSeconds] = useState(60);
+  const [fixedMinutes, setFixedMinutes] = useState(1);
+  const [minDelaySeconds, setMinDelaySeconds] = useState(30);
+  const [maxDelaySeconds, setMaxDelaySeconds] = useState(90);
+  const [pauseEvery, setPauseEvery] = useState(25);
+  const [pauseMinutes, setPauseMinutes] = useState(10);
+  const [batchLimit, setBatchLimit] = useState(100);
+  const [previewMessage, setPreviewMessage] = useState("");
   const [audienceMode, setAudienceMode] = useState<AudienceMode>(initialMode);
   const [selectedLabelId, setSelectedLabelId] = useState(prefillContext?.labelId ?? labels[0]?.id ?? "");
   const [labelAudience, setLabelAudience] = useState<LabelAudience | null>(null);
@@ -182,6 +215,21 @@ export function CampaignsClient({
     intervalMinutes >= 1 &&
     audienceCount > 0 &&
     securityConfirmed;
+  const sampleContact = prefilledContacts[0] ?? contacts[0] ?? null;
+
+  function updateIntervalFromDelay(nextMode = delayMode) {
+    const seconds =
+      nextMode === "fixed_seconds"
+        ? fixedSeconds
+        : nextMode === "fixed_minutes"
+          ? fixedMinutes * 60
+          : Math.max(minDelaySeconds, maxDelaySeconds);
+    setIntervalMinutes(Math.max(1, Math.ceil(seconds / 60)));
+  }
+
+  function generatePreview() {
+    setPreviewMessage(renderVariables(applySpintax(message), sampleContact));
+  }
 
   async function loadContacts() {
     const params = new URLSearchParams({
@@ -547,17 +595,93 @@ export function CampaignsClient({
                     onChange={(event) => setMessage(event.target.value)}
                   />
                   <span className="muted">{message.length}/4000 caracteres</span>
+                  <div className="button-row">
+                    <button className="button secondary compact-button" type="button" onClick={generatePreview}>
+                      Gerar preview
+                    </button>
+                    <span className="muted">Variaveis: {"{{nome}}"}, {"{{telefone}}"}, {"{{origem}}"}, {"{{lista}}"}</span>
+                  </div>
                 </div>
                 <div className="field">
-                  <label htmlFor="campaign-interval">Intervalo entre envios em minutos</label>
-                  <input
-                    className="input"
-                    id="campaign-interval"
-                    min="1"
-                    type="number"
-                    value={intervalMinutes}
-                    onChange={(event) => setIntervalMinutes(Number(event.target.value))}
-                  />
+                  <label htmlFor="delay-mode">Delay seguro</label>
+                  <select
+                    className="select"
+                    id="delay-mode"
+                    value={delayMode}
+                    onChange={(event) => {
+                      const nextMode = event.target.value as DelayMode;
+                      setDelayMode(nextMode);
+                      updateIntervalFromDelay(nextMode);
+                    }}
+                  >
+                    <option value="fixed_seconds">Fixo em segundos</option>
+                    <option value="fixed_minutes">Fixo em minutos</option>
+                    <option value="random_range">Aleatorio minimo/maximo</option>
+                  </select>
+                </div>
+                {delayMode === "fixed_seconds" ? (
+                  <div className="field">
+                    <label htmlFor="fixed-seconds">Segundos entre envios</label>
+                    <input
+                      className="input"
+                      id="fixed-seconds"
+                      min="10"
+                      type="number"
+                      value={fixedSeconds}
+                      onChange={(event) => {
+                        setFixedSeconds(Number(event.target.value));
+                        setIntervalMinutes(Math.max(1, Math.ceil(Number(event.target.value) / 60)));
+                      }}
+                    />
+                  </div>
+                ) : null}
+                {delayMode === "fixed_minutes" ? (
+                  <div className="field">
+                    <label htmlFor="fixed-minutes">Minutos entre envios</label>
+                    <input
+                      className="input"
+                      id="fixed-minutes"
+                      min="1"
+                      type="number"
+                      value={fixedMinutes}
+                      onChange={(event) => {
+                        setFixedMinutes(Number(event.target.value));
+                        setIntervalMinutes(Math.max(1, Number(event.target.value)));
+                      }}
+                    />
+                  </div>
+                ) : null}
+                {delayMode === "random_range" ? (
+                  <div className="filter-bar">
+                    <div className="field">
+                      <label htmlFor="min-delay">Minimo segundos</label>
+                      <input className="input" id="min-delay" min="10" type="number" value={minDelaySeconds} onChange={(event) => setMinDelaySeconds(Number(event.target.value))} />
+                    </div>
+                    <div className="field">
+                      <label htmlFor="max-delay">Maximo segundos</label>
+                      <input className="input" id="max-delay" min={minDelaySeconds} type="number" value={maxDelaySeconds} onChange={(event) => {
+                        setMaxDelaySeconds(Number(event.target.value));
+                        setIntervalMinutes(Math.max(1, Math.ceil(Number(event.target.value) / 60)));
+                      }} />
+                    </div>
+                  </div>
+                ) : null}
+                <div className="filter-bar">
+                  <div className="field">
+                    <label htmlFor="pause-every">Pausar a cada X mensagens</label>
+                    <input className="input" id="pause-every" min="1" type="number" value={pauseEvery} onChange={(event) => setPauseEvery(Number(event.target.value))} />
+                  </div>
+                  <div className="field">
+                    <label htmlFor="pause-minutes">Tempo da pausa em minutos</label>
+                    <input className="input" id="pause-minutes" min="1" type="number" value={pauseMinutes} onChange={(event) => setPauseMinutes(Number(event.target.value))} />
+                  </div>
+                  <div className="field">
+                    <label htmlFor="batch-limit">Limite do lote</label>
+                    <input className="input" id="batch-limit" min="1" max="500" type="number" value={batchLimit} onChange={(event) => setBatchLimit(Number(event.target.value))} />
+                  </div>
+                </div>
+                <div className="message warning compact">
+                  Comece com 2 a 5 contatos, aumente gradualmente, evite listas frias e mensagens identicas.
                 </div>
               </div>
             ) : null}
@@ -600,6 +724,9 @@ export function CampaignsClient({
                     <li>Publico: {audienceLabel(audienceMode)}</li>
                     <li>Destinatarios: {audienceCount}</li>
                     <li>Intervalo: {intervalMinutes || 0} minuto(s)</li>
+                    <li>Delay: {delayMode === "random_range" ? `${minDelaySeconds}-${maxDelaySeconds}s` : `${intervalMinutes}min equivalente`}</li>
+                    <li>Pausa: {pauseMinutes}min a cada {pauseEvery} mensagens</li>
+                    <li>Limite do lote: {batchLimit}</li>
                     <li>Mensagem: {message.trim() ? "preenchida" : "pendente"}</li>
                     <li>Seguranca: {securityConfirmed ? "confirmada" : "pendente"}</li>
                   </ul>
@@ -662,7 +789,7 @@ export function CampaignsClient({
             </div>
           </div>
           <div className="message-preview">
-            {message.trim() ? message : "Digite a mensagem para visualizar o envio."}
+            {previewMessage || (message.trim() ? renderVariables(applySpintax(message), sampleContact) : "Digite a mensagem para visualizar o envio.")}
           </div>
         </aside>
       </section>

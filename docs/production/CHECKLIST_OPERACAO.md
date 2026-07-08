@@ -12,6 +12,9 @@
 - Enviar mensagem teste.
 - Criar campanha teste com 2 a 5 contatos.
 - Validar relatorio em `/envios`.
+- Testar estado zero instancias em ambiente controlado.
+- Importar uma lista com nome/origem/responsavel.
+- Apagar lista com confirmacao e confirmar que contatos foram preservados.
 
 ## Smoke test final
 
@@ -40,3 +43,15 @@
 23. Confirmar que A e B continuam intactas.
 24. Abrir `/conversas?instanceId=nao-existe`.
 25. Confirmar erro sem dados de outra instancia.
+26. Deletar todas as instancias em ambiente teste.
+27. Confirmar estado vazio e criar nova instancia.
+28. Criar campanha com spintax e variaveis.
+29. Confirmar preview e delay seguro.
+
+## Backlog recomendado
+
+1. Aquecimento de numero por instancia.
+2. Botao `Enviar teste para meu numero` antes de campanha.
+3. Supressao automatica/opt-out centralizado.
+4. Saude da instancia com falhas recentes, taxa de envio e ultima queda.
+5. Duplicidade inteligente entre listas.

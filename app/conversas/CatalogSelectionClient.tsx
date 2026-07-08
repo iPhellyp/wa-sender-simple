@@ -51,10 +51,19 @@ export function CatalogSelectionClient({ items }: { items: CatalogConversationIt
   );
   const hasSelection = selected.length > 0;
   const exceedsQueryLimit = selected.length > MAX_QUERY_CHAT_IDS;
+  const activeInstanceId = useMemo(() => {
+    const href = items[0]?.href ?? "";
+    const query = href.split("?")[1] ?? "";
+    return new URLSearchParams(query).get("instanceId") ?? "";
+  }, [items]);
   const campaignHref =
     hasSelection && !exceedsQueryLimit
-      ? `/campanhas?chatIds=${selected.map((item) => item.id).join(",")}`
-      : "/campanhas";
+      ? `/campanhas?chatIds=${selected.map((item) => item.id).join(",")}${
+          activeInstanceId ? `&instanceId=${activeInstanceId}` : ""
+        }`
+      : activeInstanceId
+        ? `/campanhas?instanceId=${activeInstanceId}`
+        : "/campanhas";
 
   function toggle(id: string) {
     setSelectedIds((current) => {
@@ -165,7 +174,10 @@ export function CatalogSelectionClient({ items }: { items: CatalogConversationIt
                 {item.sentAtLabel ? <span>enviado em {item.sentAtLabel}</span> : null}
                 {item.campaignName ? <span>{item.campaignName}</span> : null}
                 {item.error ? <span className="send-error">{item.error}</span> : null}
-                <Link className="button secondary compact-button" href={`/campanhas?chatIds=${item.id}`}>
+                <Link
+                  className="button secondary compact-button"
+                  href={`/campanhas?chatIds=${item.id}${activeInstanceId ? `&instanceId=${activeInstanceId}` : ""}`}
+                >
                   Campanha
                 </Link>
               </span>

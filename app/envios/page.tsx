@@ -1,7 +1,11 @@
-﻿import { Suspense } from "react";
+import { Suspense } from "react";
 import Link from "next/link";
 import { AppShell } from "@/app/components/AppShell";
-import { getActiveInstanceIdFromSearchOrDefault } from "@/src/lib/server/whatsapp-instances";
+import { InstanceNotFoundMessage } from "@/app/components/InstanceNotFoundMessage";
+import {
+  getActiveInstanceIdFromSearchOrDefault,
+  isWhatsappInstanceNotFoundError
+} from "@/src/lib/server/whatsapp-instances";
 import { EnviosClient } from "./EnviosClient";
 
 type EnviosPageProps = {
@@ -16,14 +20,28 @@ export default async function EnviosPage({ searchParams }: EnviosPageProps) {
   const resolved = await searchParams;
   const rawCampaign = resolved?.campaign ?? resolved?.campaignId;
   const selectedCampaignId = Array.isArray(rawCampaign) ? rawCampaign[0] : rawCampaign;
-  const instanceId = await getActiveInstanceIdFromSearchOrDefault(resolved);
+  let instanceId: string;
+
+  try {
+    instanceId = await getActiveInstanceIdFromSearchOrDefault(resolved);
+  } catch (error) {
+    if (isWhatsappInstanceNotFoundError(error)) {
+      return (
+        <AppShell title="Envios" subtitle="Auditoria de campanhas, destinatarios, falhas e pendencias.">
+          <InstanceNotFoundMessage />
+        </AppShell>
+      );
+    }
+
+    throw error;
+  }
 
   return (
     <AppShell
       title="Envios"
       subtitle="Auditoria de campanhas, destinatarios, falhas e pendencias."
       actions={
-        <Link className="button" href={instanceId ? `/campanhas?instanceId=${instanceId}` : "/campanhas"}>
+        <Link className="button" href={`/campanhas?instanceId=${instanceId}`}>
           Criar campanha
         </Link>
       }
@@ -34,4 +52,3 @@ export default async function EnviosPage({ searchParams }: EnviosPageProps) {
     </AppShell>
   );
 }
-
