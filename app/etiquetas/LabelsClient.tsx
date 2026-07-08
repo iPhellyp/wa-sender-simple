@@ -1,6 +1,7 @@
 ﻿"use client";
 
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { appendInstanceIdToHref, getStoredActiveInstanceId } from "@/src/lib/client/active-instance";
 
@@ -27,6 +28,7 @@ type LabelSummary = {
 };
 
 type LabelsResponse = {
+  instanceId: string;
   metrics: {
     totalLabels: number;
     activeLabels: number;
@@ -82,34 +84,64 @@ function statusClass(status: string) {
 }
 
 export function LabelsClient() {
+  const searchParams = useSearchParams();
   const [activeInstanceId, setActiveInstanceId] = useState("");
   const [data, setData] = useState<LabelsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    setActiveInstanceId(getStoredActiveInstanceId());
-  }, []);
+    setActiveInstanceId(searchParams.get("instanceId") ?? getStoredActiveInstanceId());
+
+    function handleActiveInstanceChanged(event: Event) {
+      const detail = (event as CustomEvent<{ instanceId?: string }>).detail;
+      setActiveInstanceId(detail?.instanceId ?? getStoredActiveInstanceId());
+    }
+
+    window.addEventListener("wa-sender-active-instance-changed", handleActiveInstanceChanged);
+    return () => window.removeEventListener("wa-sender-active-instance-changed", handleActiveInstanceChanged);
+  }, [searchParams]);
 
   useEffect(() => {
+    const controller = new AbortController();
+    const requestedInstanceId = activeInstanceId;
+    setLoading(true);
+    setError(null);
+    setData(null);
+
     void (async () => {
       try {
         const params = new URLSearchParams();
         if (activeInstanceId) params.set("instanceId", activeInstanceId);
-        const response = await fetch(`/api/etiquetas?${params.toString()}`, { cache: "no-store" });
+        params.set("_ts", String(Date.now()));
+        const response = await fetch(`/api/etiquetas?${params.toString()}`, {
+          cache: "no-store",
+          signal: controller.signal
+        });
         const payload = (await response.json()) as LabelsResponse & { error?: string };
 
         if (!response.ok) {
           throw new Error(payload.error ?? "Falha ao carregar etiquetas");
         }
 
+        if (requestedInstanceId && payload.instanceId !== requestedInstanceId) {
+          return;
+        }
+
         setData(payload);
       } catch (loadError) {
+        if (controller.signal.aborted) {
+          return;
+        }
         setError(loadError instanceof Error ? loadError.message : "Erro inesperado");
       } finally {
-        setLoading(false);
+        if (!controller.signal.aborted) {
+          setLoading(false);
+        }
       }
     })();
+
+    return () => controller.abort();
   }, [activeInstanceId]);
 
   if (loading) {

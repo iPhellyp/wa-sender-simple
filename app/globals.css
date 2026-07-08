@@ -991,6 +991,10 @@ button:disabled {
   gap: 8px;
 }
 
+.conversation-grid.compact {
+  gap: 6px;
+}
+
 .inbox-conversation-card {
   align-items: center;
   background: var(--surface);
@@ -1000,6 +1004,11 @@ button:disabled {
   gap: 10px;
   grid-template-columns: 40px minmax(0, 1fr);
   padding: 8px 10px;
+}
+
+.compact-conversation-card {
+  grid-template-columns: 24px 34px minmax(0, 1fr);
+  padding: 7px 9px;
 }
 
 .inbox-conversation-card:hover {
@@ -1035,6 +1044,10 @@ button:disabled {
   display: grid;
   gap: 5px;
   min-width: 0;
+}
+
+.conversation-card-body.compact {
+  gap: 3px;
 }
 
 .conversation-card-top,
@@ -1102,6 +1115,36 @@ button:disabled {
 
 .conversation-card-footer {
   justify-content: flex-start;
+}
+
+.compact-conversation-card .conversation-card-meta,
+.compact-conversation-card .conversation-card-footer {
+  gap: 5px;
+}
+
+.compact-conversation-card .conversation-avatar {
+  font-size: 12px;
+  height: 34px;
+  width: 34px;
+}
+
+.compact-conversation-card .catalog-checkbox {
+  align-items: center;
+  display: inline-flex;
+  justify-content: center;
+  min-height: 24px;
+}
+
+.compact-conversation-card .badge,
+.compact-conversation-card .label-badge,
+.future-tag.compact {
+  font-size: 11px;
+  padding: 2px 6px;
+}
+
+.catalog-selection-bar.compact {
+  gap: 8px;
+  padding: 8px 0;
 }
 
 .future-tag {

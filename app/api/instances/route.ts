@@ -14,6 +14,17 @@ export const dynamic = "force-dynamic";
 const CONNECTING_STALE_MS = 120_000;
 const QR_STALE_MS = 180_000;
 
+function getEffectiveStatus(rawStatus: string, hasConfirmedSession: boolean) {
+  if (
+    hasConfirmedSession &&
+    ["connecting", "disconnected", "error"].includes(rawStatus)
+  ) {
+    return "connected";
+  }
+
+  return rawStatus;
+}
+
 export async function GET() {
   const now = Date.now();
   const instances = await prisma.whatsappInstance.findMany({
@@ -54,7 +65,7 @@ export async function GET() {
     instances: instances.map((instance) => {
       const runtimeStatus = runtimeStatusByInstanceId.get(instance.id);
       const updatedAt = sessionUpdatedAtByInstanceId.get(instance.id) ?? instance.updatedAt;
-      const status = runtimeStatus?.status ?? instance.status;
+      const rawStatus = runtimeStatus?.status ?? instance.status;
       const hasQrCode = runtimeStatus?.hasQrCode ?? false;
       const connectedPhone = runtimeStatus?.connectedPhone ?? instance.phone ?? null;
       const hasRegisteredSession = runtimeStatus?.hasRegisteredSession ?? false;
@@ -64,8 +75,9 @@ export async function GET() {
         hasRegisteredSession ||
         hasMeId ||
         connectedPhone ||
-        status === "connected"
+        rawStatus === "connected"
       );
+      const status = getEffectiveStatus(rawStatus, hasConfirmedSession);
       const isConnectingStale =
         status === "connecting" &&
         !hasQrCode &&
@@ -82,6 +94,7 @@ export async function GET() {
 
       return {
         ...instance,
+        rawStatus,
         status,
         displayName: runtimeStatus?.displayName ?? null,
         profilePictureUrl: runtimeStatus?.profilePictureUrl ?? null,

@@ -121,10 +121,40 @@ function andWhere(...items: Prisma.WhatsappChatWhereInput[]): Prisma.WhatsappCha
   return filters.length > 0 ? { AND: filters } : {};
 }
 
-function getScopeWhere(type: ConversationApiFilter): Prisma.WhatsappChatWhereInput {
-  const x1Only: Prisma.WhatsappChatWhereInput = {
-    isGroup: false
+function getIndividualChatWhere(): Prisma.WhatsappChatWhereInput {
+  return {
+    isGroup: false,
+    jid: {
+      not: "status@broadcast"
+    },
+    AND: [
+      {
+        jid: {
+          not: {
+            endsWith: "@g.us"
+          }
+        }
+      },
+      {
+        jid: {
+          not: {
+            contains: "@broadcast"
+          }
+        }
+      },
+      {
+        jid: {
+          not: {
+            contains: "@newsletter"
+          }
+        }
+      }
+    ]
   };
+}
+
+function getScopeWhere(type: ConversationApiFilter): Prisma.WhatsappChatWhereInput {
+  const x1Only = getIndividualChatWhere();
 
   if (type === "with-message") {
     return andWhere(x1Only, {
@@ -403,6 +433,32 @@ async function findMatchingContactJids(search: string, instanceId: string) {
   const contacts = await prisma.whatsappContact.findMany({
     where: {
       instanceId,
+      jid: {
+        not: "status@broadcast"
+      },
+      AND: [
+        {
+          jid: {
+            not: {
+              endsWith: "@g.us"
+            }
+          }
+        },
+        {
+          jid: {
+            not: {
+              contains: "@broadcast"
+            }
+          }
+        },
+        {
+          jid: {
+            not: {
+              contains: "@newsletter"
+            }
+          }
+        }
+      ],
       OR: filters
     },
     select: {
@@ -451,26 +507,19 @@ export async function GET(request: NextRequest) {
       }),
       prisma.whatsappChat.count({ where }),
       prisma.whatsappChat.count({
-        where: {
-          instanceId,
-          isGroup: false
-        }
+        where: andWhere({ instanceId }, getIndividualChatWhere())
       }),
       prisma.whatsappChat.count({
-        where: {
-          instanceId,
-          isGroup: false,
+        where: andWhere({ instanceId }, getIndividualChatWhere(), {
           lastMessageAt: {
             not: null
           }
-        }
+        })
       }),
       prisma.whatsappChat.count({
-        where: {
-          instanceId,
-          isGroup: false,
+        where: andWhere({ instanceId }, getIndividualChatWhere(), {
           lastMessageAt: null
-        }
+        })
       }),
       prisma.whatsappChat.count({
         where: {

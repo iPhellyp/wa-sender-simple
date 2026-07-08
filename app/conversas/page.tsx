@@ -271,10 +271,40 @@ function andWhere(...items: Prisma.WhatsappChatWhereInput[]): Prisma.WhatsappCha
   return filters.length > 0 ? { AND: filters } : {};
 }
 
-function getScopeWhere(type: ConversationFilter): Prisma.WhatsappChatWhereInput {
-  const x1Only: Prisma.WhatsappChatWhereInput = {
-    isGroup: false
+function getIndividualChatWhere(): Prisma.WhatsappChatWhereInput {
+  return {
+    isGroup: false,
+    jid: {
+      not: "status@broadcast"
+    },
+    AND: [
+      {
+        jid: {
+          not: {
+            endsWith: "@g.us"
+          }
+        }
+      },
+      {
+        jid: {
+          not: {
+            contains: "@broadcast"
+          }
+        }
+      },
+      {
+        jid: {
+          not: {
+            contains: "@newsletter"
+          }
+        }
+      }
+    ]
   };
+}
+
+function getScopeWhere(type: ConversationFilter): Prisma.WhatsappChatWhereInput {
+  const x1Only = getIndividualChatWhere();
 
   if (type === "without-message") {
     return andWhere(x1Only, {
@@ -475,6 +505,32 @@ async function findMatchingContactJids(query: string, instanceId: string) {
   const contacts = await prisma.whatsappContact.findMany({
     where: {
       instanceId,
+      jid: {
+        not: "status@broadcast"
+      },
+      AND: [
+        {
+          jid: {
+            not: {
+              endsWith: "@g.us"
+            }
+          }
+        },
+        {
+          jid: {
+            not: {
+              contains: "@broadcast"
+            }
+          }
+        },
+        {
+          jid: {
+            not: {
+              contains: "@newsletter"
+            }
+          }
+        }
+      ],
       OR: filters
     },
     select: {
@@ -675,31 +731,22 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
       where
     }),
     prisma.whatsappChat.count({
-      where: {
-        instanceId,
-        isGroup: false
-      }
+      where: andWhere({ instanceId }, getIndividualChatWhere())
     }),
     prisma.whatsappChat.count({
-      where: {
-        instanceId,
-        isGroup: false,
+      where: andWhere({ instanceId }, getIndividualChatWhere(), {
         lastMessageAt: {
           not: null
         }
-      }
+      })
     }),
     prisma.whatsappChat.count({
-      where: {
-        instanceId,
-        isGroup: false,
+      where: andWhere({ instanceId }, getIndividualChatWhere(), {
         lastMessageAt: null
-      }
+      })
     }),
     prisma.whatsappChat.count({
-      where: {
-        instanceId,
-        isGroup: false,
+      where: andWhere({ instanceId }, getIndividualChatWhere(), {
         labels: {
           some: {
             label: {
@@ -708,28 +755,24 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
             }
           }
         }
-      }
+      })
     }),
     jidSets.sentJids.length > 0
       ? prisma.whatsappChat.count({
-          where: {
-            instanceId,
-            isGroup: false,
+          where: andWhere({ instanceId }, getIndividualChatWhere(), {
             jid: {
               in: jidSets.sentJids
             }
-          }
+          })
         })
       : Promise.resolve(0),
     jidSets.failedJids.length > 0
       ? prisma.whatsappChat.count({
-          where: {
-            instanceId,
-            isGroup: false,
+          where: andWhere({ instanceId }, getIndividualChatWhere(), {
             jid: {
               in: jidSets.failedJids
             }
-          }
+          })
         })
       : Promise.resolve(0),
     getWhatsappInstanceRuntimeStatus(instanceId)
@@ -758,13 +801,11 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
   const neverSentCount =
     jidSets.anyRecipientJids.length > 0
       ? await prisma.whatsappChat.count({
-          where: {
-            instanceId,
-            isGroup: false,
+          where: andWhere({ instanceId }, getIndividualChatWhere(), {
             jid: {
               notIn: jidSets.anyRecipientJids
             }
-          }
+          })
         })
       : totalX1Chats;
   const counts = {

@@ -81,7 +81,7 @@ export function CatalogSelectionClient({ items }: { items: CatalogConversationIt
 
   return (
     <div className="catalog-selection">
-      <div className="catalog-selection-bar">
+      <div className="catalog-selection-bar compact">
         <div className="button-row">
           <button
             className="button secondary"
@@ -118,9 +118,9 @@ export function CatalogSelectionClient({ items }: { items: CatalogConversationIt
         </div>
       ) : null}
 
-      <div className="conversation-grid">
+      <div className="conversation-grid compact">
         {items.map((item) => (
-          <article className="inbox-conversation-card catalog-card" key={item.id}>
+          <article className="inbox-conversation-card catalog-card compact-conversation-card" key={item.id}>
             <label className="catalog-checkbox" title="Selecionar contato">
               <input
                 checked={selectedIds.has(item.id)}
@@ -131,7 +131,7 @@ export function CatalogSelectionClient({ items }: { items: CatalogConversationIt
             <Link className="conversation-avatar" href={item.href}>
               {item.avatarText}
             </Link>
-            <span className="conversation-card-body">
+            <span className="conversation-card-body compact">
               <span className="conversation-card-top">
                 <span className="conversation-title-block">
                   <strong>{item.displayName}</strong>
@@ -147,7 +147,7 @@ export function CatalogSelectionClient({ items }: { items: CatalogConversationIt
                   {item.sendStatusLabel}
                 </span>
                 {item.isLid ? <span className="badge warning">@lid</span> : null}
-                <span className="future-tag">
+                <span className="future-tag compact">
                   ordenado por {item.sortSource === "message" ? "mensagem" : "atualizacao"}
                 </span>
                 {item.lastDirection ? <span>{item.lastDirection}</span> : null}
@@ -169,7 +169,7 @@ export function CatalogSelectionClient({ items }: { items: CatalogConversationIt
                     ) : null}
                   </span>
                 ) : (
-                  <span className="future-tag">sem etiqueta</span>
+                  <span className="future-tag compact">sem etiqueta</span>
                 )}
                 {item.sentAtLabel ? <span>enviado em {item.sentAtLabel}</span> : null}
                 {item.campaignName ? <span>{item.campaignName}</span> : null}

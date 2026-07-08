@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import {
+  appendInstanceIdToHref,
   getStoredActiveInstanceId,
   setStoredActiveInstanceId
 } from "@/src/lib/client/active-instance";
@@ -214,6 +215,11 @@ export function InstancesClient() {
   function useInstance(instance: InstanceSummary) {
     setStoredActiveInstanceId(instance.id);
     setActiveInstanceId(instance.id);
+    window.history.replaceState(
+      null,
+      "",
+      appendInstanceIdToHref(`${window.location.pathname}${window.location.search}`, instance.id)
+    );
     setMessage(`Instancia ativa alterada para ${instance.name}.`);
   }
 
@@ -385,7 +391,7 @@ export function InstancesClient() {
             item.id === instance.id
               ? {
                   ...item,
-                  status: "connecting",
+                  status: hasConfirmedSession(item) ? "connected" : "connecting",
                   qrCode: null,
                   hasQrCode: false,
                   connectedPhone: hasConfirmedSession(item) && !item.isPairingPartial ? item.connectedPhone : null,

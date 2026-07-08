@@ -22,7 +22,20 @@ export function getStoredActiveInstanceId() {
     return urlInstanceId;
   }
 
-  return window.localStorage.getItem(ACTIVE_INSTANCE_STORAGE_KEY)?.trim() ?? "";
+  const localInstanceId = window.localStorage.getItem(ACTIVE_INSTANCE_STORAGE_KEY)?.trim() ?? "";
+
+  if (localInstanceId) {
+    return localInstanceId;
+  }
+
+  const cookieValue = document.cookie
+    .split(";")
+    .map((item) => item.trim())
+    .find((item) => item.startsWith(`${ACTIVE_INSTANCE_COOKIE_NAME}=`));
+
+  return cookieValue
+    ? decodeURIComponent(cookieValue.split("=").slice(1).join("=")).trim()
+    : "";
 }
 
 export function setStoredActiveInstanceId(instanceId: string) {

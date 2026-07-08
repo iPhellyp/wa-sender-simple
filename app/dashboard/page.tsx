@@ -6,6 +6,7 @@ import { EmptyState } from "@/app/components/ui/EmptyState";
 import { SectionCard } from "@/app/components/ui/SectionCard";
 import { StatCard } from "@/app/components/ui/StatCard";
 import { StatusBadge, statusToneFromValue } from "@/app/components/ui/StatusBadge";
+import { getWhatsappInstanceRuntimeStatus } from "@/src/lib/baileys/instance-manager";
 import { prisma } from "@/src/lib/prisma/client";
 import {
   getActiveInstanceIdFromSearchOrDefault,
@@ -33,6 +34,17 @@ function maxDate(...dates: Array<Date | null | undefined>) {
 
     return !latest || date > latest ? date : latest;
   }, null);
+}
+
+function getEffectiveWhatsappStatus(rawStatus: string, hasConfirmedSession: boolean) {
+  if (
+    hasConfirmedSession &&
+    ["connecting", "disconnected", "error"].includes(rawStatus)
+  ) {
+    return "connected";
+  }
+
+  return rawStatus;
 }
 
 function getRecipientLabel(recipient: {
@@ -85,7 +97,8 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
     latestLabelUpdate,
     latestAssociationUpdate,
     latestCampaigns,
-    latestRecipients
+    latestRecipients,
+    whatsappRuntimeStatus
   ] = await Promise.all([
     prisma.whatsappInstance.findUnique({
       where: {
@@ -266,10 +279,23 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
           }
         }
       }
-    })
+    }),
+    getWhatsappInstanceRuntimeStatus(instanceId).catch(() => null)
   ]);
 
-  const whatsappStatus = whatsappInstance?.status ?? whatsappSession?.status ?? "disconnected";
+  const rawWhatsappStatus =
+    whatsappRuntimeStatus?.status ?? whatsappInstance?.status ?? whatsappSession?.status ?? "disconnected";
+  const connectedPhone =
+    whatsappRuntimeStatus?.connectedPhone ?? whatsappSession?.connectedPhone ?? whatsappInstance?.phone ?? null;
+  const whatsappStatus = getEffectiveWhatsappStatus(
+    rawWhatsappStatus,
+    Boolean(
+      connectedPhone ||
+      whatsappRuntimeStatus?.hasRegisteredSession ||
+      whatsappRuntimeStatus?.hasMeId ||
+      rawWhatsappStatus === "connected"
+    )
+  );
   const latestCatalogUpdate = maxDate(
     whatsappSession?.updatedAt,
     whatsappInstance?.lastSyncAt,
@@ -336,7 +362,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
           <StatCard
             label="WhatsApp status"
             value={whatsappStatus}
-            helper={whatsappSession?.connectedPhone ?? "Instancia principal"}
+            helper={connectedPhone ?? "Instancia principal"}
             tone={statusToneFromValue(whatsappStatus)}
           />
           <StatCard label="Contatos WhatsApp" value={x1Chats} helper="Conversas individuais" />
