@@ -635,8 +635,8 @@ export function InstancesClient() {
                 onClick={() => void postWhatsappAction(instance, "sync-history")}
               >
                 {busyInstanceId === instance.id && busyAction === "sync-history"
-                  ? "Verificando..."
-                  : "Verificar historico"}
+                  ? "Atualizando..."
+                  : "Verificar e atualizar chats"}
               </button>
               <button
                 className="button secondary compact-button"

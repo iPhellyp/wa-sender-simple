@@ -38,6 +38,13 @@ type MessageSyncOptions = {
   instanceId?: string;
 };
 
+type MaterializableWhatsappContact = {
+  jid?: string | null;
+  name?: string | null;
+  pushName?: string | null;
+  phone?: string | null;
+};
+
 function sanitizeSyncError(error: unknown) {
   if (error instanceof Error) {
     return error.message;
@@ -156,6 +163,20 @@ export function normalizeChatJid(jid: string | null | undefined) {
 
 export { isGroupJid };
 
+function isOperationalIndividualJid(jid: string | null | undefined) {
+  const normalizedJid = normalizeChatJid(jid);
+
+  if (!normalizedJid || shouldIgnoreJidForX1Only(normalizedJid)) {
+    return false;
+  }
+
+  return (
+    normalizedJid.endsWith("@s.whatsapp.net") ||
+    normalizedJid.endsWith("@c.us") ||
+    normalizedJid.endsWith("@lid")
+  );
+}
+
 export async function ensureChatForJid(
   jid: string,
   optionalName?: string | null,
@@ -212,6 +233,112 @@ function extractPhoneFromJid(jid: string) {
 
   const phone = jid.split("@")[0];
   return /^\d+$/.test(phone) ? phone : null;
+}
+
+async function materializeWhatsappContactAsChat(
+  contact: MaterializableWhatsappContact,
+  instanceId = DEFAULT_WHATSAPP_INSTANCE_ID
+) {
+  const jid = normalizeChatJid(contact.jid);
+
+  if (!jid || !isOperationalIndividualJid(jid)) {
+    return false;
+  }
+
+  const existingChat = await prisma.whatsappChat.findUnique({
+    where: {
+      instanceId_jid: {
+        instanceId,
+        jid
+      }
+    },
+    select: {
+      name: true
+    }
+  });
+  const incomingName = pickBestDisplayName(null, [contact.name, contact.pushName], jid);
+  const shouldUpdateName = isBetterDisplayName(existingChat?.name, incomingName, jid);
+
+  await prisma.whatsappChat.upsert({
+    where: {
+      instanceId_jid: {
+        instanceId,
+        jid
+      }
+    },
+    update: {
+      isGroup: false,
+      ...(shouldUpdateName ? { name: incomingName } : {})
+    },
+    create: {
+      instanceId,
+      jid,
+      name: incomingName,
+      isGroup: false
+    }
+  });
+
+  return true;
+}
+
+export async function materializeWhatsappContactsAsChats(instanceId: string): Promise<{
+  scanned: number;
+  createdOrUpdated: number;
+  skipped: number;
+}> {
+  const normalizedInstanceId = instanceId.trim();
+
+  if (!normalizedInstanceId) {
+    throw new Error("instanceId obrigatorio para materializar contatos WhatsApp");
+  }
+
+  let scanned = 0;
+  let createdOrUpdated = 0;
+  let skipped = 0;
+  let cursor: string | undefined;
+
+  while (true) {
+    const contacts = await prisma.whatsappContact.findMany({
+      where: {
+        instanceId: normalizedInstanceId
+      },
+      orderBy: {
+        id: "asc"
+      },
+      ...(cursor
+        ? {
+            cursor: { id: cursor },
+            skip: 1
+          }
+        : {}),
+      take: BATCH_SIZE,
+      select: {
+        id: true,
+        jid: true,
+        name: true,
+        pushName: true,
+        phone: true
+      }
+    });
+
+    if (contacts.length === 0) {
+      break;
+    }
+
+    for (const contact of contacts) {
+      scanned += 1;
+
+      if (await materializeWhatsappContactAsChat(contact, normalizedInstanceId)) {
+        createdOrUpdated += 1;
+      } else {
+        skipped += 1;
+      }
+    }
+
+    cursor = contacts[contacts.length - 1]?.id;
+  }
+
+  return { scanned, createdOrUpdated, skipped };
 }
 
 function toNumber(value: TimestampInput) {
@@ -592,7 +719,16 @@ export async function upsertContactFromBaileys(
     }
   });
 
-  // Contacts discovered by history/catalog are not direct conversations by themselves.
+  await materializeWhatsappContactAsChat(
+    {
+      jid,
+      name,
+      pushName,
+      phone: extractPhoneFromJid(jid)
+    },
+    instanceId
+  );
+
   return true;
 }
 
@@ -655,6 +791,79 @@ async function upsertContactFromMessage(options: {
   });
 }
 
+async function updateChatMetadataFromMessage(options: {
+  jid: string;
+  instanceId: string;
+  fromMe: boolean;
+  pushName?: string | null;
+  timestamp?: Date | null;
+  lastMessageText?: string | null;
+}) {
+  const timestamp = options.timestamp ?? null;
+  const lastMessageText = compactText(options.lastMessageText);
+  const existingChat = await prisma.whatsappChat.findUnique({
+    where: {
+      instanceId_jid: {
+        instanceId: options.instanceId,
+        jid: options.jid
+      }
+    },
+    select: {
+      name: true,
+      lastMessageAt: true,
+      lastInboundAt: true,
+      lastOutboundAt: true
+    }
+  });
+  const shouldUpdateName =
+    !isGroupJid(options.jid) && isBetterDisplayName(existingChat?.name, options.pushName, options.jid);
+  const shouldUpdateLastMessage =
+    Boolean(timestamp) &&
+    (!existingChat?.lastMessageAt || timestamp! >= existingChat.lastMessageAt);
+  const shouldUpdateLastInbound =
+    Boolean(timestamp) &&
+    !options.fromMe &&
+    (!existingChat?.lastInboundAt || timestamp! >= existingChat.lastInboundAt);
+  const shouldUpdateLastOutbound =
+    Boolean(timestamp) &&
+    options.fromMe &&
+    (!existingChat?.lastOutboundAt || timestamp! >= existingChat.lastOutboundAt);
+
+  await prisma.whatsappChat.upsert({
+    where: {
+      instanceId_jid: {
+        instanceId: options.instanceId,
+        jid: options.jid
+      }
+    },
+    update: {
+      isGroup: isGroupJid(options.jid),
+      ...(shouldUpdateName ? { name: options.pushName } : {}),
+      ...(shouldUpdateLastMessage
+        ? {
+            lastMessageAt: timestamp,
+            ...(lastMessageText ? { lastMessageText } : {})
+          }
+        : {}),
+      ...(shouldUpdateLastInbound ? { lastInboundAt: timestamp } : {}),
+      ...(shouldUpdateLastOutbound ? { lastOutboundAt: timestamp } : {})
+    },
+    create: {
+      instanceId: options.instanceId,
+      jid: options.jid,
+      ...(!isGroupJid(options.jid) && options.pushName ? { name: options.pushName } : {}),
+      isGroup: isGroupJid(options.jid),
+      ...(timestamp
+        ? {
+            lastMessageAt: timestamp,
+            ...(options.fromMe ? { lastOutboundAt: timestamp } : { lastInboundAt: timestamp })
+          }
+        : {}),
+      ...(lastMessageText ? { lastMessageText } : {})
+    }
+  });
+}
+
 export async function upsertMessageFromBaileys(
   message: WAMessage,
   options: MessageSyncOptions = {}
@@ -685,6 +894,11 @@ export async function upsertMessageFromBaileys(
   const fromMe = message.key.fromMe === true;
   const senderJid = normalizeChatJid(message.key.participant ?? message.participant);
   const pushName = cleanDisplayName(message.pushName, jid);
+  const timestamp = getMessageTimestamp(message.messageTimestamp);
+  const messageType = extractMessageType(message.message);
+  const text = extractMessageText(message.message);
+  const skipReason = getMessageSkipReason(messageType, text);
+  const lastMessageText = skipReason ? null : getVisibleMessageText(text, messageType);
 
   if (FAST_LABEL_SENDER_MODE) {
     await upsertContactFromMessage({
@@ -694,15 +908,17 @@ export async function upsertMessageFromBaileys(
       senderJid,
       instanceId
     });
-    await ensureChatForJid(jid, fromMe ? null : pushName, instanceId);
+    await updateChatMetadataFromMessage({
+      jid,
+      instanceId,
+      fromMe,
+      pushName: fromMe ? null : pushName,
+      timestamp,
+      lastMessageText
+    });
 
     return false;
   }
-
-  const timestamp = getMessageTimestamp(message.messageTimestamp);
-  const messageType = extractMessageType(message.message);
-  const text = extractMessageText(message.message);
-  const skipReason = getMessageSkipReason(messageType, text);
 
   if (skipReason) {
     if (options.log) {
@@ -716,7 +932,6 @@ export async function upsertMessageFromBaileys(
     return false;
   }
 
-  const lastMessageText = getVisibleMessageText(text, messageType);
   const rawJson = toPrismaJson(message);
   const existingChat = await prisma.whatsappChat.findUnique({
     where: {

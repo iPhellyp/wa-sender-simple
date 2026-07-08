@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getWhatsappInstanceRuntimeStatus } from "@/src/lib/baileys/instance-manager";
+import { materializeWhatsappContactsAsChats } from "@/src/lib/baileys/sync";
+import { prisma } from "@/src/lib/prisma/client";
 import { enqueueWhatsappHistorySync } from "@/src/lib/queue/campaign-queue";
 import {
   isNoWhatsappInstanceError,
@@ -36,6 +38,24 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const [existingChats, totalContacts] = await Promise.all([
+      prisma.whatsappChat.count({
+        where: {
+          instanceId: instance.id
+        }
+      }),
+      prisma.whatsappContact.count({
+        where: {
+          instanceId: instance.id
+        }
+      })
+    ]);
+    const materialized = await materializeWhatsappContactsAsChats(instance.id);
+    const totalChats = await prisma.whatsappChat.count({
+      where: {
+        instanceId: instance.id
+      }
+    });
     const syncJob = await enqueueWhatsappHistorySync(instance.id);
 
     return NextResponse.json({
@@ -43,9 +63,15 @@ export async function POST(request: NextRequest) {
       mode: "event-driven",
       jobId: syncJob.jobId,
       deduped: syncJob.deduped,
+      contactsScanned: materialized.scanned,
+      chatsCreatedOrUpdated: materialized.createdOrUpdated,
+      skipped: materialized.skipped,
+      existingChats,
+      totalContacts,
+      totalChats,
       message: syncJob.deduped
-        ? "Sincronizacao de historico ja esta em andamento."
-        : "Verificacao de historico enfileirada."
+        ? "Verificacao e materializacao concluidas. Uma verificacao de historico ja estava em andamento."
+        : "Verificacao e materializacao concluidas. Verificacao de historico enfileirada."
     });
   } catch (error) {
     if (isNoWhatsappInstanceError(error)) {

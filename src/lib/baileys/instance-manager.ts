@@ -33,6 +33,7 @@ import {
 } from "./client";
 import {
   getMessageTimestamp,
+  materializeWhatsappContactsAsChats,
   normalizeChatJid,
   syncChatsUpdate,
   syncChatsUpsert,
@@ -920,7 +921,13 @@ export async function requestWhatsappHistorySyncForInstance(instanceId: string) 
   const instance = await resolveWhatsappInstance(instanceId);
 
   if (instance.id === DEFAULT_WHATSAPP_INSTANCE_ID) {
-    return requestWhatsappHistorySync();
+    const result = await requestWhatsappHistorySync();
+    const materialized = await materializeWhatsappContactsAsChats(instance.id);
+
+    return {
+      ...result,
+      materialized
+    };
   }
 
   const session = await getWhatsappInstanceRuntimeStatus(instance.id);
@@ -938,6 +945,7 @@ export async function requestWhatsappHistorySyncForInstance(instanceId: string) 
     };
   }
 
+  const materialized = await materializeWhatsappContactsAsChats(instance.id);
   const [chatCount, contactCount, messageCount] = await Promise.all([
     prisma.whatsappChat.count({
       where: {
@@ -961,7 +969,8 @@ export async function requestWhatsappHistorySyncForInstance(instanceId: string) 
     mode: "event-driven",
     chats: chatCount,
     contacts: contactCount,
-    messages: messageCount
+    messages: messageCount,
+    materialized
   });
 
   return {
@@ -972,9 +981,10 @@ export async function requestWhatsappHistorySyncForInstance(instanceId: string) 
       contacts: contactCount,
       messages: messageCount
     },
+    materialized,
     hasFetchMessageHistory: false,
     canUseOnDemandHistory: false,
-    message: "Historico verificado para a instancia solicitada."
+    message: "Historico verificado e contatos materializados para a instancia solicitada."
   };
 }
 
@@ -986,6 +996,7 @@ export async function requestWhatsappCatalogSyncForInstance(
 
   if (instance.id === DEFAULT_WHATSAPP_INSTANCE_ID) {
     const result = await requestWhatsappCatalogSync(options);
+    const materialized = await materializeWhatsappContactsAsChats(instance.id);
     await prisma.whatsappInstance.update({
       where: {
         id: instance.id
@@ -994,7 +1005,10 @@ export async function requestWhatsappCatalogSyncForInstance(
         lastSyncAt: new Date()
       }
     }).catch(() => undefined);
-    return result;
+    return {
+      ...result,
+      materialized
+    };
   }
 
   const socket = await getConnectedInstanceSocket(instance.id);
@@ -1002,23 +1016,24 @@ export async function requestWhatsappCatalogSyncForInstance(
     instanceId: instance.id
   });
 
-  if (options.forceSnapshot) {
-    const resyncAppState =
-      typeof socket.resyncAppState === "function" ? socket.resyncAppState.bind(socket) : null;
+  const resyncAppState =
+    typeof socket.resyncAppState === "function" ? socket.resyncAppState.bind(socket) : null;
 
-    if (!resyncAppState) {
-      return {
-        ok: false,
-        mode: "resync-app-state" as const,
-        message: "Socket Baileys conectado nao expoe resyncAppState."
-      };
-    }
-
-    console.log("[catalog] app-state resync requested", {
-      instanceId: instance.id
-    });
-    await resyncAppState(CATALOG_APP_STATE_COLLECTIONS, true);
+  if (!resyncAppState) {
+    return {
+      ok: false,
+      mode: "resync-app-state" as const,
+      message: "Socket Baileys conectado nao expoe resyncAppState."
+    };
   }
+
+  console.log("[catalog] app-state resync requested", {
+    instanceId: instance.id,
+    forceSnapshot: options.forceSnapshot === true
+  });
+  await resyncAppState(CATALOG_APP_STATE_COLLECTIONS, options.forceSnapshot === true);
+
+  const materialized = await materializeWhatsappContactsAsChats(instance.id);
 
   await prisma.whatsappInstance.update({
     where: {
@@ -1032,6 +1047,7 @@ export async function requestWhatsappCatalogSyncForInstance(
   return {
     ok: true,
     mode: "resync-app-state" as const,
+    materialized,
     message: "Sincronizacao da instancia solicitada."
   };
 }
