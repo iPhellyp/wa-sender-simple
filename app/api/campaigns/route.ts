@@ -4,6 +4,10 @@ import { renderCampaignMessage } from "@/src/lib/campaigns/message-template";
 import { buildCampaignDedupeKey } from "@/src/lib/labels/audience";
 import { prisma } from "@/src/lib/prisma/client";
 import { getActiveInstanceIdFromSearchOrDefault } from "@/src/lib/server/whatsapp-instances";
+import {
+  getIndividualWhatsappChatWhere,
+  isIndividualWhatsappChat
+} from "@/src/lib/whatsapp/individual-chat-filter";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -125,7 +129,7 @@ export async function POST(request: NextRequest) {
           in: uniqueChatIds
         },
         instanceId,
-        isGroup: false
+        ...getIndividualWhatsappChatWhere()
       },
       orderBy: {
         name: "asc"
@@ -133,11 +137,16 @@ export async function POST(request: NextRequest) {
       select: {
         id: true,
         name: true,
-        jid: true
+        jid: true,
+        isGroup: true
       }
     });
 
-    if (chats.length === 0) {
+    const individualChats = chats.filter((chat) =>
+      isIndividualWhatsappChat({ jid: chat.jid, isGroup: chat.isGroup })
+    );
+
+    if (individualChats.length === 0) {
       return NextResponse.json(
         { error: "Nenhum contato individual valido selecionado" },
         { status: 400 }
@@ -155,10 +164,10 @@ export async function POST(request: NextRequest) {
         targetMode: "chatIds",
         excludeGroups: true,
         dedupeKey,
-        maxRecipients: requestedMaxRecipients ?? chats.length,
+        maxRecipients: requestedMaxRecipients ?? individualChats.length,
         sendWindowStart: advancedSettings,
         recipients: {
-          create: chats.slice(0, requestedMaxRecipients ?? chats.length).map((chat) => ({
+          create: individualChats.slice(0, requestedMaxRecipients ?? individualChats.length).map((chat) => ({
             instanceId,
             chatId: chat.id,
             jid: chat.jid,

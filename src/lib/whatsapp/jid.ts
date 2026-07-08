@@ -45,7 +45,7 @@ export function recordX1GroupSkips(scope: X1GroupSkipScope, count = 1) {
 }
 
 export function isGroupJid(jid: string | null | undefined) {
-  return Boolean(jid?.trim().toLowerCase().endsWith("@g.us"));
+  return Boolean(jid?.trim().toLowerCase().includes("@g.us"));
 }
 
 export function isBroadcastOrNewsletterJid(jid: string | null | undefined) {
@@ -54,15 +54,21 @@ export function isBroadcastOrNewsletterJid(jid: string | null | undefined) {
   return (
     !normalized ||
     normalized === "status@broadcast" ||
-    normalized.endsWith("@broadcast") ||
-    normalized.includes("newsletter")
+    normalized.includes("broadcast") ||
+    normalized.includes("newsletter") ||
+    normalized.includes("channel")
   );
 }
 
 export function isIndividualJid(jid: string | null | undefined) {
   const normalized = jid?.trim().toLowerCase() ?? "";
 
-  return normalized.endsWith("@s.whatsapp.net") || normalized.endsWith("@lid");
+  return (
+    !shouldIgnoreJidForX1Only(normalized) &&
+    (normalized.endsWith("@s.whatsapp.net") ||
+      normalized.endsWith("@c.us") ||
+      normalized.endsWith("@lid"))
+  );
 }
 
 export function shouldIgnoreJidForX1Only(jid: string | null | undefined) {

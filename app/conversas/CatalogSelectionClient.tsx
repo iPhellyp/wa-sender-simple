@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
+import { isIndividualWhatsappIdentifier } from "@/src/lib/whatsapp/individual-chat-filter";
 
 export type CatalogConversationItem = {
   id: string;
@@ -45,17 +46,21 @@ function sendStatusClass(status: CatalogConversationItem["sendStatus"]) {
 
 export function CatalogSelectionClient({ items }: { items: CatalogConversationItem[] }) {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const visibleItems = useMemo(
+    () => items.filter((item) => isIndividualWhatsappIdentifier(item.jid)),
+    [items]
+  );
   const selected = useMemo(
-    () => items.filter((item) => selectedIds.has(item.id)),
-    [items, selectedIds]
+    () => visibleItems.filter((item) => selectedIds.has(item.id)),
+    [visibleItems, selectedIds]
   );
   const hasSelection = selected.length > 0;
   const exceedsQueryLimit = selected.length > MAX_QUERY_CHAT_IDS;
   const activeInstanceId = useMemo(() => {
-    const href = items[0]?.href ?? "";
+    const href = visibleItems[0]?.href ?? "";
     const query = href.split("?")[1] ?? "";
     return new URLSearchParams(query).get("instanceId") ?? "";
-  }, [items]);
+  }, [visibleItems]);
   const campaignHref =
     hasSelection && !exceedsQueryLimit
       ? `/campanhas?chatIds=${selected.map((item) => item.id).join(",")}${
@@ -85,9 +90,9 @@ export function CatalogSelectionClient({ items }: { items: CatalogConversationIt
         <div className="button-row">
           <button
             className="button secondary"
-            disabled={items.length === 0}
+            disabled={visibleItems.length === 0}
             type="button"
-            onClick={() => setSelectedIds(new Set(items.map((item) => item.id)))}
+            onClick={() => setSelectedIds(new Set(visibleItems.map((item) => item.id)))}
           >
             Selecionar visiveis
           </button>
@@ -119,7 +124,7 @@ export function CatalogSelectionClient({ items }: { items: CatalogConversationIt
       ) : null}
 
       <div className="conversation-grid compact">
-        {items.map((item) => (
+        {visibleItems.map((item) => (
           <article className="inbox-conversation-card catalog-card compact-conversation-card" key={item.id}>
             <label className="catalog-checkbox" title="Selecionar contato">
               <input

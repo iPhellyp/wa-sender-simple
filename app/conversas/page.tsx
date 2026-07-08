@@ -14,6 +14,11 @@ import {
   getActiveInstanceIdFromSearchOrDefault,
   isWhatsappInstanceNotFoundError
 } from "@/src/lib/server/whatsapp-instances";
+import {
+  getIndividualWhatsappChatWhere,
+  getIndividualWhatsappContactWhere,
+  isIndividualWhatsappChat
+} from "@/src/lib/whatsapp/individual-chat-filter";
 import { CatalogSelectionClient, type CatalogConversationItem } from "./CatalogSelectionClient";
 import { StartConversationForm } from "./StartConversationForm";
 import { SyncHistoryButton } from "./SyncHistoryButton";
@@ -271,40 +276,8 @@ function andWhere(...items: Prisma.WhatsappChatWhereInput[]): Prisma.WhatsappCha
   return filters.length > 0 ? { AND: filters } : {};
 }
 
-function getIndividualChatWhere(): Prisma.WhatsappChatWhereInput {
-  return {
-    isGroup: false,
-    jid: {
-      not: "status@broadcast"
-    },
-    AND: [
-      {
-        jid: {
-          not: {
-            endsWith: "@g.us"
-          }
-        }
-      },
-      {
-        jid: {
-          not: {
-            contains: "@broadcast"
-          }
-        }
-      },
-      {
-        jid: {
-          not: {
-            contains: "@newsletter"
-          }
-        }
-      }
-    ]
-  };
-}
-
 function getScopeWhere(type: ConversationFilter): Prisma.WhatsappChatWhereInput {
-  const x1Only = getIndividualChatWhere();
+  const x1Only = getIndividualWhatsappChatWhere();
 
   if (type === "without-message") {
     return andWhere(x1Only, {
@@ -505,32 +478,7 @@ async function findMatchingContactJids(query: string, instanceId: string) {
   const contacts = await prisma.whatsappContact.findMany({
     where: {
       instanceId,
-      jid: {
-        not: "status@broadcast"
-      },
-      AND: [
-        {
-          jid: {
-            not: {
-              endsWith: "@g.us"
-            }
-          }
-        },
-        {
-          jid: {
-            not: {
-              contains: "@broadcast"
-            }
-          }
-        },
-        {
-          jid: {
-            not: {
-              contains: "@newsletter"
-            }
-          }
-        }
-      ],
+      ...getIndividualWhatsappContactWhere(),
       OR: filters
     },
     select: {
@@ -731,22 +679,22 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
       where
     }),
     prisma.whatsappChat.count({
-      where: andWhere({ instanceId }, getIndividualChatWhere())
+      where: andWhere({ instanceId }, getIndividualWhatsappChatWhere())
     }),
     prisma.whatsappChat.count({
-      where: andWhere({ instanceId }, getIndividualChatWhere(), {
+      where: andWhere({ instanceId }, getIndividualWhatsappChatWhere(), {
         lastMessageAt: {
           not: null
         }
       })
     }),
     prisma.whatsappChat.count({
-      where: andWhere({ instanceId }, getIndividualChatWhere(), {
+      where: andWhere({ instanceId }, getIndividualWhatsappChatWhere(), {
         lastMessageAt: null
       })
     }),
     prisma.whatsappChat.count({
-      where: andWhere({ instanceId }, getIndividualChatWhere(), {
+      where: andWhere({ instanceId }, getIndividualWhatsappChatWhere(), {
         labels: {
           some: {
             label: {
@@ -759,7 +707,7 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
     }),
     jidSets.sentJids.length > 0
       ? prisma.whatsappChat.count({
-          where: andWhere({ instanceId }, getIndividualChatWhere(), {
+          where: andWhere({ instanceId }, getIndividualWhatsappChatWhere(), {
             jid: {
               in: jidSets.sentJids
             }
@@ -768,7 +716,7 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
       : Promise.resolve(0),
     jidSets.failedJids.length > 0
       ? prisma.whatsappChat.count({
-          where: andWhere({ instanceId }, getIndividualChatWhere(), {
+          where: andWhere({ instanceId }, getIndividualWhatsappChatWhere(), {
             jid: {
               in: jidSets.failedJids
             }
@@ -778,7 +726,11 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
     getWhatsappInstanceRuntimeStatus(instanceId)
   ]);
 
-  const chatJids = chats.map((chat) => chat.jid);
+  // Groups/broadcasts/newsletters are intentionally hidden from individual conversations for now.
+  const visibleChats = chats.filter((chat) =>
+    isIndividualWhatsappChat({ jid: chat.jid, isGroup: chat.isGroup })
+  );
+  const chatJids = visibleChats.map((chat) => chat.jid);
   const [contacts, lastSendByJid] = await Promise.all([
     prisma.whatsappContact.findMany({
       where: {
@@ -801,7 +753,7 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
   const neverSentCount =
     jidSets.anyRecipientJids.length > 0
       ? await prisma.whatsappChat.count({
-          where: andWhere({ instanceId }, getIndividualChatWhere(), {
+          where: andWhere({ instanceId }, getIndividualWhatsappChatWhere(), {
             jid: {
               notIn: jidSets.anyRecipientJids
             }
@@ -815,9 +767,9 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
     labeledCount
   };
   const totalPages = Math.max(1, Math.ceil(filteredCount / limit));
-  const firstVisible = chats.length === 0 ? 0 : skip + 1;
-  const lastVisible = Math.min(skip + chats.length, filteredCount);
-  const items: CatalogConversationItem[] = chats.map((chat) => {
+  const firstVisible = visibleChats.length === 0 ? 0 : skip + 1;
+  const lastVisible = Math.min(skip + visibleChats.length, filteredCount);
+  const items: CatalogConversationItem[] = visibleChats.map((chat) => {
     const contact = contactByJid.get(chat.jid);
     const name = getWhatsappDisplayName({
       jid: chat.jid,
@@ -957,7 +909,7 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
           </div>
         ) : null}
 
-        {chats.length === 0 ? (
+        {visibleChats.length === 0 ? (
           <div className="empty-state">
             <strong>Nenhum contato encontrado.</strong>
             <span>Altere filtros, sincronize o catalogo ou inicie uma conversa por telefone.</span>

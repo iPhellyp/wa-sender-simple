@@ -7,6 +7,11 @@ import {
 } from "@/src/lib/whatsapp/display-name";
 import { getLastSendByJids, getSendJidSets } from "@/src/lib/labels/send-stats";
 import { getActiveInstanceIdFromSearchOrDefault } from "@/src/lib/server/whatsapp-instances";
+import {
+  getIndividualWhatsappChatWhere,
+  getIndividualWhatsappContactWhere,
+  isIndividualWhatsappChat
+} from "@/src/lib/whatsapp/individual-chat-filter";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -121,40 +126,8 @@ function andWhere(...items: Prisma.WhatsappChatWhereInput[]): Prisma.WhatsappCha
   return filters.length > 0 ? { AND: filters } : {};
 }
 
-function getIndividualChatWhere(): Prisma.WhatsappChatWhereInput {
-  return {
-    isGroup: false,
-    jid: {
-      not: "status@broadcast"
-    },
-    AND: [
-      {
-        jid: {
-          not: {
-            endsWith: "@g.us"
-          }
-        }
-      },
-      {
-        jid: {
-          not: {
-            contains: "@broadcast"
-          }
-        }
-      },
-      {
-        jid: {
-          not: {
-            contains: "@newsletter"
-          }
-        }
-      }
-    ]
-  };
-}
-
 function getScopeWhere(type: ConversationApiFilter): Prisma.WhatsappChatWhereInput {
-  const x1Only = getIndividualChatWhere();
+  const x1Only = getIndividualWhatsappChatWhere();
 
   if (type === "with-message") {
     return andWhere(x1Only, {
@@ -433,32 +406,7 @@ async function findMatchingContactJids(search: string, instanceId: string) {
   const contacts = await prisma.whatsappContact.findMany({
     where: {
       instanceId,
-      jid: {
-        not: "status@broadcast"
-      },
-      AND: [
-        {
-          jid: {
-            not: {
-              endsWith: "@g.us"
-            }
-          }
-        },
-        {
-          jid: {
-            not: {
-              contains: "@broadcast"
-            }
-          }
-        },
-        {
-          jid: {
-            not: {
-              contains: "@newsletter"
-            }
-          }
-        }
-      ],
+      ...getIndividualWhatsappContactWhere(),
       OR: filters
     },
     select: {
@@ -507,17 +455,17 @@ export async function GET(request: NextRequest) {
       }),
       prisma.whatsappChat.count({ where }),
       prisma.whatsappChat.count({
-        where: andWhere({ instanceId }, getIndividualChatWhere())
+        where: andWhere({ instanceId }, getIndividualWhatsappChatWhere())
       }),
       prisma.whatsappChat.count({
-        where: andWhere({ instanceId }, getIndividualChatWhere(), {
+        where: andWhere({ instanceId }, getIndividualWhatsappChatWhere(), {
           lastMessageAt: {
             not: null
           }
         })
       }),
       prisma.whatsappChat.count({
-        where: andWhere({ instanceId }, getIndividualChatWhere(), {
+        where: andWhere({ instanceId }, getIndividualWhatsappChatWhere(), {
           lastMessageAt: null
         })
       }),
@@ -529,7 +477,11 @@ export async function GET(request: NextRequest) {
       })
     ]);
 
-  const contactJids = rows.map((chat) => chat.jid);
+  // Groups/broadcasts/newsletters are intentionally hidden from individual conversations for now.
+  const visibleRows = rows.filter((chat) =>
+    isIndividualWhatsappChat({ jid: chat.jid, isGroup: chat.isGroup })
+  );
+  const contactJids = visibleRows.map((chat) => chat.jid);
   const [contacts, lastSendByJid] = await Promise.all([
     prisma.whatsappContact.findMany({
       where: {
@@ -568,7 +520,7 @@ export async function GET(request: NextRequest) {
       withMessageCount,
       withoutMessageCount
     },
-    chats: rows.map((chat) => {
+    chats: visibleRows.map((chat) => {
       const contact = contactByJid.get(chat.jid);
       const lastSend = lastSendByJid.get(chat.jid);
 
