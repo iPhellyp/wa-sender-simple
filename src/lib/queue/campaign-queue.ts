@@ -11,23 +11,23 @@ export const SYNC_WHATSAPP_HISTORY_JOB = "sync-whatsapp-history";
 export const SYNC_WHATSAPP_CATALOG_JOB = "sync-whatsapp-catalog";
 export const APPLY_WHATSAPP_LABELS_JOB = "apply-whatsapp-labels";
 
-const CONNECT_WHATSAPP_JOB_ID = "connect-whatsapp";
-const DISCONNECT_WHATSAPP_JOB_ID = "disconnect-whatsapp";
-const RESET_WHATSAPP_JOB_ID = "reset-whatsapp";
 const SYNC_WHATSAPP_HISTORY_JOB_ID = "sync-whatsapp-history";
-const SYNC_WHATSAPP_CATALOG_JOB_ID = "sync-whatsapp-catalog";
 
-export type SendManualMessageJobData = {
+type InstanceJobData = {
+  instanceId?: string;
+};
+
+export type SendManualMessageJobData = InstanceJobData & {
   chatId: string;
   jid: string;
   text: string;
 };
 
-export type SyncWhatsappCatalogJobData = {
+export type SyncWhatsappCatalogJobData = InstanceJobData & {
   forceSnapshot?: boolean;
 };
 
-export type ApplyWhatsappLabelsJobData = {
+export type ApplyWhatsappLabelsJobData = InstanceJobData & {
   requestId: string;
   labelId: string;
   waLabelId: string;
@@ -70,39 +70,39 @@ export async function enqueueRecipient(recipientId: string, delayMs: number, job
   );
 }
 
-export async function enqueueWhatsappConnect() {
+export async function enqueueWhatsappConnect(instanceId = "default") {
   await getCampaignQueue().add(
     CONNECT_WHATSAPP_JOB,
-    {},
+    { instanceId },
     {
       attempts: 1,
-      jobId: CONNECT_WHATSAPP_JOB_ID,
+      jobId: buildJobId(CONNECT_WHATSAPP_JOB, instanceId),
       removeOnComplete: true,
       removeOnFail: 100
     }
   );
 }
 
-export async function enqueueWhatsappDisconnect() {
+export async function enqueueWhatsappDisconnect(instanceId = "default") {
   await getCampaignQueue().add(
     DISCONNECT_WHATSAPP_JOB,
-    {},
+    { instanceId },
     {
       attempts: 1,
-      jobId: DISCONNECT_WHATSAPP_JOB_ID,
+      jobId: buildJobId(DISCONNECT_WHATSAPP_JOB, instanceId),
       removeOnComplete: true,
       removeOnFail: 100
     }
   );
 }
 
-export async function enqueueWhatsappReset() {
+export async function enqueueWhatsappReset(instanceId = "default") {
   await getCampaignQueue().add(
     RESET_WHATSAPP_JOB,
-    {},
+    { instanceId },
     {
       attempts: 1,
-      jobId: RESET_WHATSAPP_JOB_ID,
+      jobId: buildJobId(RESET_WHATSAPP_JOB, instanceId),
       removeOnComplete: true,
       removeOnFail: 100
     }
@@ -110,12 +110,16 @@ export async function enqueueWhatsappReset() {
 }
 
 export async function enqueueManualMessage(data: SendManualMessageJobData) {
+  const instanceId = data.instanceId ?? "default";
   const job = await getCampaignQueue().add(
     SEND_MANUAL_MESSAGE_JOB,
-    data,
+    {
+      ...data,
+      instanceId
+    },
     {
       attempts: 1,
-      jobId: buildJobId("manual-send", data.chatId, String(Date.now())),
+      jobId: buildJobId("manual-send", instanceId, data.chatId, String(Date.now())),
       removeOnComplete: true,
       removeOnFail: 1000
     }
@@ -140,12 +144,16 @@ export async function enqueueWhatsappHistorySync() {
 }
 
 export async function enqueueWhatsappCatalogSync(data: SyncWhatsappCatalogJobData = {}) {
+  const instanceId = data.instanceId ?? "default";
   const job = await getCampaignQueue().add(
     SYNC_WHATSAPP_CATALOG_JOB,
-    data,
+    {
+      ...data,
+      instanceId
+    },
     {
       attempts: 1,
-      jobId: SYNC_WHATSAPP_CATALOG_JOB_ID,
+      jobId: buildJobId(SYNC_WHATSAPP_CATALOG_JOB, instanceId),
       removeOnComplete: true,
       removeOnFail: 100
     }
@@ -155,12 +163,16 @@ export async function enqueueWhatsappCatalogSync(data: SyncWhatsappCatalogJobDat
 }
 
 export async function enqueueApplyWhatsappLabels(data: ApplyWhatsappLabelsJobData) {
+  const instanceId = data.instanceId ?? "default";
   const job = await getCampaignQueue().add(
     APPLY_WHATSAPP_LABELS_JOB,
-    data,
+    {
+      ...data,
+      instanceId
+    },
     {
       attempts: 1,
-      jobId: buildJobId("apply-labels", data.requestId),
+      jobId: buildJobId("apply-labels", instanceId, data.requestId),
       removeOnComplete: true,
       removeOnFail: 1000
     }

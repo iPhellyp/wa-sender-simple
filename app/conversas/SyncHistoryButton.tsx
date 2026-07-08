@@ -12,7 +12,7 @@ type SyncHistoryResponse = {
 const SUCCESS_MESSAGE =
   "Verificacao enfileirada. O sistema salva o historico que o WhatsApp entregar por eventos; busca antiga completa depende de cursor seguro.";
 
-export function SyncHistoryButton() {
+export function SyncHistoryButton({ instanceId }: { instanceId: string }) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -27,7 +27,7 @@ export function SyncHistoryButton() {
     setError(null);
 
     try {
-      const response = await fetch("/api/whatsapp/sync-history", {
+      const response = await fetch(`/api/whatsapp/sync-history?instanceId=${encodeURIComponent(instanceId)}`, {
         method: "POST"
       });
       const data = (await response.json()) as SyncHistoryResponse;

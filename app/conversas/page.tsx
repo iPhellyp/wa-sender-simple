@@ -3,7 +3,7 @@ import type { Prisma } from "@prisma/client";
 import { AppShell } from "@/app/components/AppShell";
 import { StatCard } from "@/app/components/ui/StatCard";
 import { prisma } from "@/src/lib/prisma/client";
-import { getWhatsappStatusPayload } from "@/src/lib/baileys/client";
+import { getWhatsappInstanceRuntimeStatus } from "@/src/lib/baileys/instance-manager";
 import {
   getWhatsappDisplayName,
   getWhatsappIdentityLabel
@@ -706,7 +706,7 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
           }
         })
       : Promise.resolve(0),
-    getWhatsappStatusPayload()
+    getWhatsappInstanceRuntimeStatus(instanceId)
   ]);
 
   const chatJids = chats.map((chat) => chat.jid);
@@ -804,8 +804,8 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
             </p>
           </div>
           <div className="inbox-actions">
-            <StartConversationForm />
-            <SyncHistoryButton />
+            <StartConversationForm instanceId={instanceId} />
+            <SyncHistoryButton instanceId={instanceId} />
           </div>
         </div>
 

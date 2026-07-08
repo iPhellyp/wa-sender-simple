@@ -1,63 +1,38 @@
 import { NextRequest, NextResponse } from "next/server";
-import {
-  getWhatsappStatusPayload,
-  markWhatsappDisconnected,
-  markWhatsappError
-} from "@/src/lib/baileys/client";
+import { getWhatsappInstanceRuntimeStatus } from "@/src/lib/baileys/instance-manager";
 import { enqueueWhatsappDisconnect } from "@/src/lib/queue/campaign-queue";
-import { prisma } from "@/src/lib/prisma/client";
 import { clearWhatsappOperationalData } from "@/src/lib/server/whatsapp-session-data";
-import {
-  DEFAULT_WHATSAPP_INSTANCE_ID,
-  requireWhatsappInstance
-} from "@/src/lib/server/whatsapp-instances";
+import { requireWhatsappInstance } from "@/src/lib/server/whatsapp-instances";
 
 export const runtime = "nodejs";
 
-function getErrorMessage(error: unknown) {
-  return error instanceof Error ? error.message : "Erro desconhecido";
+async function getRequestedInstanceId(request: NextRequest) {
+  const queryInstanceId = request.nextUrl.searchParams.get("instanceId");
+
+  if (queryInstanceId) {
+    return queryInstanceId;
+  }
+
+  const payload = (await request.json().catch(() => null)) as { instanceId?: string } | null;
+  return payload?.instanceId ?? null;
 }
 
 export async function POST(request: NextRequest) {
-  const instance = await requireWhatsappInstance(request.nextUrl.searchParams.get("instanceId"));
-
-  if (instance.id !== DEFAULT_WHATSAPP_INSTANCE_ID) {
-    const updated = await prisma.whatsappInstance.update({
-      where: {
-        id: instance.id
-      },
-      data: {
-        status: "disconnected"
-      }
-    });
-
-    return NextResponse.json({
-      id: updated.id,
-      instanceId: updated.id,
-      status: updated.status,
-      qrCode: null,
-      hasQrCode: false,
-      connectedPhone: updated.phone,
-      lastError: null,
-      updatedAt: updated.updatedAt,
-      message: "Instancia marcada como desconectada. Multi-socket entra na proxima fase."
-    });
-  }
+  const instance = await requireWhatsappInstance(await getRequestedInstanceId(request));
 
   try {
     await clearWhatsappOperationalData("manual-disconnect", instance.id);
-    await markWhatsappDisconnected();
-    await enqueueWhatsappDisconnect();
+    await enqueueWhatsappDisconnect(instance.id);
 
-    return NextResponse.json(await getWhatsappStatusPayload());
+    return NextResponse.json({
+      ...(await getWhatsappInstanceRuntimeStatus(instance.id)),
+      message: "Desconexao enfileirada para esta instancia"
+    });
   } catch (error) {
-    const lastError = `Falha ao enfileirar desconexao WhatsApp: ${getErrorMessage(error)}`;
-    await markWhatsappError(lastError).catch(() => undefined);
-
     return NextResponse.json(
       {
-        ...(await getWhatsappStatusPayload()),
-        error: lastError
+        ...(await getWhatsappInstanceRuntimeStatus(instance.id)),
+        error: error instanceof Error ? error.message : "Falha ao enfileirar desconexao"
       },
       { status: 500 }
     );

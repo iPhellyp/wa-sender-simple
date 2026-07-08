@@ -1,13 +1,18 @@
-﻿import { NextResponse } from "next/server";
-import { getWhatsappStatusPayload } from "@/src/lib/baileys/client";
+import { NextRequest, NextResponse } from "next/server";
+import { getWhatsappInstanceRuntimeStatus } from "@/src/lib/baileys/instance-manager";
 import { enqueueWhatsappHistorySync } from "@/src/lib/queue/campaign-queue";
+import {
+  DEFAULT_WHATSAPP_INSTANCE_ID,
+  requireWhatsappInstance
+} from "@/src/lib/server/whatsapp-instances";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function POST() {
+export async function POST(request: NextRequest) {
   try {
-    const session = await getWhatsappStatusPayload();
+    const instance = await requireWhatsappInstance(request.nextUrl.searchParams.get("instanceId"));
+    const session = await getWhatsappInstanceRuntimeStatus(instance.id);
 
     if (session.status !== "connected") {
       return NextResponse.json(
@@ -18,6 +23,15 @@ export async function POST() {
         },
         { status: 409 }
       );
+    }
+
+    if (instance.id !== DEFAULT_WHATSAPP_INSTANCE_ID) {
+      return NextResponse.json({
+        ok: true,
+        mode: "event-driven",
+        message:
+          "Historico desta instancia e salvo por eventos do proprio socket. Use sincronizacao de catalogo para contatos e etiquetas."
+      });
     }
 
     const jobId = await enqueueWhatsappHistorySync();
@@ -35,4 +49,3 @@ export async function POST() {
     );
   }
 }
-

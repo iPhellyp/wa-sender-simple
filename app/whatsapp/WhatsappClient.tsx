@@ -14,6 +14,11 @@ type WhatsappSession = {
   connectedPhone: string | null;
   lastError: string | null;
   updatedAt: string;
+  instanceId?: string;
+  instanceName?: string;
+  instanceRole?: string;
+  lastConnectedAt?: string | null;
+  lastSyncAt?: string | null;
   latestMessageAt?: string | null;
   message?: string;
   error?: string;
@@ -145,7 +150,7 @@ export function WhatsappClient() {
       <div className="whatsapp-health-grid">
         <SectionCard
           title="Saude da conexao"
-          description="Instancia principal usada para contatos, etiquetas e campanhas."
+          description="Status, QR e telefone da instancia ativa selecionada."
         >
           <div className="health-panel">
             <div className="health-status">
@@ -158,8 +163,24 @@ export function WhatsappClient() {
 
             <div className="meta-list">
               <div className="meta-row">
+                <span>Instancia ativa</span>
+                <span>{session?.instanceName ?? session?.instanceId ?? "Principal"}</span>
+              </div>
+              <div className="meta-row">
+                <span>Funcao</span>
+                <span>{session?.instanceRole ?? "-"}</span>
+              </div>
+              <div className="meta-row">
                 <span>Telefone conectado</span>
                 <span>{session?.connectedPhone ?? "Nao conectado"}</span>
+              </div>
+              <div className="meta-row">
+                <span>Ultima conexao</span>
+                <span>{formatDateTime(session?.lastConnectedAt)}</span>
+              </div>
+              <div className="meta-row">
+                <span>Ultima sincronizacao</span>
+                <span>{formatDateTime(session?.lastSyncAt)}</span>
               </div>
               <div className="meta-row">
                 <span>Ultima atualizacao</span>
@@ -182,7 +203,7 @@ export function WhatsappClient() {
                 type="button"
                 onClick={() => void postAction("/api/whatsapp/reconnect")}
               >
-                Reconectar
+                Conectar/Reconectar esta instancia
               </button>
               <button
                 className="button secondary"
@@ -190,7 +211,7 @@ export function WhatsappClient() {
                 type="button"
                 onClick={() => void postAction("/api/whatsapp/disconnect")}
               >
-                Desconectar
+                Desconectar esta instancia
               </button>
             </div>
           </div>
@@ -199,7 +220,11 @@ export function WhatsappClient() {
         <SectionCard
           title="Contatos individuais"
           description="O produto opera como base de contatos e sender por etiquetas, nao como inbox pesada."
-          actions={<ButtonLink href="/conversas">Abrir conversas</ButtonLink>}
+          actions={
+            <ButtonLink href={`/conversas${activeInstanceId ? `?instanceId=${activeInstanceId}` : ""}`}>
+              Abrir conversas
+            </ButtonLink>
+          }
         >
           <div className="message">
             Grupos, broadcasts e newsletters sao ignorados para reduzir carga. Contatos individuais
@@ -214,7 +239,7 @@ export function WhatsappClient() {
       >
         <div className="message">
           Use manutencao avancada apenas se o suporte pedir. Desconectar ou resetar limpa os dados
-          operacionais do numero atual na interface.
+          operacionais apenas desta instancia.
         </div>
         {catalogMessage ? <div className="message success">{catalogMessage}</div> : null}
       </SectionCard>
@@ -255,7 +280,7 @@ export function WhatsappClient() {
       >
         <div className="danger-note">
           Resetar sessao remove a sessao local do Baileys, limpa dados operacionais e exige novo
-          pareamento por QR. Nao use para quedas transitorias de conexao.
+          pareamento por QR. A acao afeta apenas esta instancia.
         </div>
         <div className="whatsapp-actions">
           <button
@@ -264,7 +289,7 @@ export function WhatsappClient() {
             type="button"
             onClick={() => void syncCatalogNow()}
           >
-            {catalogBusy ? "Enviando..." : "Sincronizacao manual avancada"}
+            {catalogBusy ? "Enviando..." : "Sincronizar esta instancia"}
           </button>
           <button
             className="button danger"
@@ -272,7 +297,7 @@ export function WhatsappClient() {
             type="button"
             onClick={() => void postAction("/api/whatsapp/reset-session")}
           >
-            Resetar sessao
+            Resetar esta instancia
           </button>
         </div>
       </SectionCard>

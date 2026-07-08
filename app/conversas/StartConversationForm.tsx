@@ -9,7 +9,7 @@ type StartConversationResponse = {
   error?: string;
 };
 
-export function StartConversationForm() {
+export function StartConversationForm({ instanceId }: { instanceId: string }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [phone, setPhone] = useState("");
@@ -29,6 +29,7 @@ export function StartConversationForm() {
           "Content-Type": "application/json"
         },
         body: JSON.stringify({
+          instanceId,
           phone,
           name
         })

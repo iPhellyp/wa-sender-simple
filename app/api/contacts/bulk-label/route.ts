@@ -61,6 +61,7 @@ export async function PATCH(request: NextRequest) {
 
   if (result.jids.length > 0) {
     jobId = await enqueueApplyWhatsappLabels({
+      instanceId,
       requestId: randomUUID(),
       labelId: label.id,
       waLabelId: label.waLabelId,

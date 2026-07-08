@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { markWhatsappDisconnected } from "@/src/lib/baileys/client";
+import { getWhatsappInstanceRuntimeStatus } from "@/src/lib/baileys/instance-manager";
 import { enqueueWhatsappReset } from "@/src/lib/queue/campaign-queue";
 import { prisma } from "@/src/lib/prisma/client";
 
@@ -23,26 +23,10 @@ export async function POST(
     return NextResponse.json({ error: "Instancia nao encontrada" }, { status: 404 });
   }
 
-  if (instance.sessionKey === "default") {
-    await markWhatsappDisconnected();
-    await enqueueWhatsappReset();
-  }
-
-  const updated = await prisma.whatsappInstance.update({
-    where: {
-      id
-    },
-    data: {
-      status: "disconnected",
-      lastConnectedAt: null
-    }
-  });
+  await enqueueWhatsappReset(instance.id);
 
   return NextResponse.json({
-    instance: updated,
-    message:
-      instance.sessionKey === "default"
-        ? "Reset enfileirado para a instancia padrao."
-        : "Reset preparado. Multi-socket e sessoes separadas entram na proxima fase."
+    instance: await getWhatsappInstanceRuntimeStatus(instance.id),
+    message: "Reset enfileirado para esta instancia."
   });
 }

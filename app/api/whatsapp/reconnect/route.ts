@@ -1,68 +1,37 @@
 import { NextRequest, NextResponse } from "next/server";
-import {
-  getWhatsappStatusPayload,
-  markWhatsappConnecting,
-  markWhatsappError
-} from "@/src/lib/baileys/client";
+import { getWhatsappInstanceRuntimeStatus } from "@/src/lib/baileys/instance-manager";
 import { enqueueWhatsappConnect } from "@/src/lib/queue/campaign-queue";
-import {
-  DEFAULT_WHATSAPP_INSTANCE_ID,
-  requireWhatsappInstance
-} from "@/src/lib/server/whatsapp-instances";
+import { requireWhatsappInstance } from "@/src/lib/server/whatsapp-instances";
 
 export const runtime = "nodejs";
 
-function getErrorMessage(error: unknown) {
-  return error instanceof Error ? error.message : "Erro desconhecido";
+async function getRequestedInstanceId(request: NextRequest) {
+  const queryInstanceId = request.nextUrl.searchParams.get("instanceId");
+
+  if (queryInstanceId) {
+    return queryInstanceId;
+  }
+
+  const payload = (await request.json().catch(() => null)) as { instanceId?: string } | null;
+  return payload?.instanceId ?? null;
 }
 
 export async function POST(request: NextRequest) {
-  const instance = await requireWhatsappInstance(request.nextUrl.searchParams.get("instanceId"));
+  const instance = await requireWhatsappInstance(await getRequestedInstanceId(request));
+  const currentSession = await getWhatsappInstanceRuntimeStatus(instance.id);
 
-  if (instance.id !== DEFAULT_WHATSAPP_INSTANCE_ID) {
-    return NextResponse.json(
-      {
-        id: instance.id,
-        instanceId: instance.id,
-        status: instance.status,
-        qrCode: null,
-        hasQrCode: false,
-        connectedPhone: instance.phone,
-        lastError: null,
-        updatedAt: instance.updatedAt,
-        error: "Conexao por instancia entra na proxima fase."
-      },
-      { status: 409 }
-    );
-  }
-
-  try {
-    const currentSession = await getWhatsappStatusPayload();
-
-    if (currentSession.status === "connecting" || currentSession.status === "qr") {
-      return NextResponse.json({
-        ...currentSession,
-        message: "Conexao WhatsApp ja esta em andamento"
-      });
-    }
-
-    await markWhatsappConnecting();
-    await enqueueWhatsappConnect();
-
+  if (currentSession.status === "connecting" || currentSession.status === "qr") {
     return NextResponse.json({
-      ...(await getWhatsappStatusPayload()),
-      message: "Conexao WhatsApp enfileirada"
+      ...currentSession,
+      message: "Conexao WhatsApp ja esta em andamento"
     });
-  } catch (error) {
-    const lastError = `Falha ao enfileirar conexao WhatsApp: ${getErrorMessage(error)}`;
-    await markWhatsappError(lastError).catch(() => undefined);
-
-    return NextResponse.json(
-      {
-        ...(await getWhatsappStatusPayload()),
-        error: lastError
-      },
-      { status: 500 }
-    );
   }
+
+  await enqueueWhatsappConnect(instance.id);
+
+  return NextResponse.json({
+    ...currentSession,
+    instanceId: instance.id,
+    message: "Conexao WhatsApp enfileirada para esta instancia"
+  });
 }

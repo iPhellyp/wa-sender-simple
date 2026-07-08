@@ -35,6 +35,7 @@ type TimestampInput = number | string | Date | null | undefined | {
 type MessageSyncOptions = {
   log?: boolean;
   logScope?: "history" | "live";
+  instanceId?: string;
 };
 
 function sanitizeSyncError(error: unknown) {
@@ -460,7 +461,10 @@ function splitX1Contacts<T extends Partial<Contact>>(contacts: T[]) {
   return { allowed, groupSkipped };
 }
 
-export async function upsertChatFromBaileys(chat: Partial<Chat>) {
+export async function upsertChatFromBaileys(
+  chat: Partial<Chat>,
+  instanceId = DEFAULT_WHATSAPP_INSTANCE_ID
+) {
   const jid = normalizeChatJid(chat.id ?? chat.newJid ?? chat.oldJid);
 
   if (!jid) {
@@ -484,7 +488,7 @@ export async function upsertChatFromBaileys(chat: Partial<Chat>) {
   const existingChat = await prisma.whatsappChat.findUnique({
     where: {
       instanceId_jid: {
-        instanceId: DEFAULT_WHATSAPP_INSTANCE_ID,
+        instanceId,
         jid
       }
     },
@@ -502,7 +506,7 @@ export async function upsertChatFromBaileys(chat: Partial<Chat>) {
   await prisma.whatsappChat.upsert({
     where: {
       instanceId_jid: {
-        instanceId: DEFAULT_WHATSAPP_INSTANCE_ID,
+        instanceId,
         jid
       }
     },
@@ -513,7 +517,7 @@ export async function upsertChatFromBaileys(chat: Partial<Chat>) {
       ...(shouldUpdateLastMessageAt ? { lastMessageAt } : {})
     },
     create: {
-      instanceId: DEFAULT_WHATSAPP_INSTANCE_ID,
+      instanceId,
       jid,
       name,
       isGroup,
@@ -525,7 +529,10 @@ export async function upsertChatFromBaileys(chat: Partial<Chat>) {
   return true;
 }
 
-export async function upsertContactFromBaileys(contact: Partial<Contact>) {
+export async function upsertContactFromBaileys(
+  contact: Partial<Contact>,
+  instanceId = DEFAULT_WHATSAPP_INSTANCE_ID
+) {
   const jid = normalizeChatJid(contact.jid ?? contact.id ?? contact.lid);
 
   if (!jid) {
@@ -548,7 +555,7 @@ export async function upsertContactFromBaileys(contact: Partial<Contact>) {
   const existingContact = await prisma.whatsappContact.findUnique({
     where: {
       instanceId_jid: {
-        instanceId: DEFAULT_WHATSAPP_INSTANCE_ID,
+        instanceId,
         jid
       }
     },
@@ -565,7 +572,7 @@ export async function upsertContactFromBaileys(contact: Partial<Contact>) {
   await prisma.whatsappContact.upsert({
     where: {
       instanceId_jid: {
-        instanceId: DEFAULT_WHATSAPP_INSTANCE_ID,
+        instanceId,
         jid
       }
     },
@@ -576,7 +583,7 @@ export async function upsertContactFromBaileys(contact: Partial<Contact>) {
       ...(contact.verifiedName !== undefined ? { isBusiness: Boolean(contact.verifiedName) } : {})
     },
     create: {
-      instanceId: DEFAULT_WHATSAPP_INSTANCE_ID,
+      instanceId,
       jid,
       phone: extractPhoneFromJid(jid),
       name,
@@ -586,7 +593,7 @@ export async function upsertContactFromBaileys(contact: Partial<Contact>) {
   });
 
   if (!isGroupJid(jid)) {
-    await ensureChatForJid(jid, name ?? pushName);
+    await ensureChatForJid(jid, name ?? pushName, instanceId);
   }
 
   return true;
@@ -597,7 +604,9 @@ async function upsertContactFromMessage(options: {
   fromMe: boolean;
   pushName?: string | null;
   senderJid?: string | null;
+  instanceId?: string;
 }) {
+  const instanceId = options.instanceId ?? DEFAULT_WHATSAPP_INSTANCE_ID;
   const contactJid = isGroupJid(options.chatJid)
     ? normalizeChatJid(options.senderJid)
     : options.chatJid;
@@ -610,7 +619,7 @@ async function upsertContactFromMessage(options: {
   const existingContact = await prisma.whatsappContact.findUnique({
     where: {
       instanceId_jid: {
-        instanceId: DEFAULT_WHATSAPP_INSTANCE_ID,
+        instanceId,
         jid: contactJid
       }
     },
@@ -629,7 +638,7 @@ async function upsertContactFromMessage(options: {
   await prisma.whatsappContact.upsert({
     where: {
       instanceId_jid: {
-        instanceId: DEFAULT_WHATSAPP_INSTANCE_ID,
+        instanceId,
         jid: contactJid
       }
     },
@@ -639,7 +648,7 @@ async function upsertContactFromMessage(options: {
       ...(shouldUpdatePushName ? { pushName: candidateName } : {})
     },
     create: {
-      instanceId: DEFAULT_WHATSAPP_INSTANCE_ID,
+      instanceId,
       jid: contactJid,
       phone: extractPhoneFromJid(contactJid),
       name: candidateName,
@@ -653,6 +662,7 @@ export async function upsertMessageFromBaileys(
   message: WAMessage,
   options: MessageSyncOptions = {}
 ) {
+  const instanceId = options.instanceId ?? DEFAULT_WHATSAPP_INSTANCE_ID;
   const jid = normalizeChatJid(message.key.remoteJid);
   const waMessageId = compactText(message.key.id);
 
@@ -684,9 +694,10 @@ export async function upsertMessageFromBaileys(
       chatJid: jid,
       fromMe,
       pushName: message.pushName,
-      senderJid
+      senderJid,
+      instanceId
     });
-    await ensureChatForJid(jid, fromMe ? null : pushName);
+    await ensureChatForJid(jid, fromMe ? null : pushName, instanceId);
 
     return false;
   }
@@ -713,7 +724,7 @@ export async function upsertMessageFromBaileys(
   const existingChat = await prisma.whatsappChat.findUnique({
     where: {
       instanceId_jid: {
-        instanceId: DEFAULT_WHATSAPP_INSTANCE_ID,
+        instanceId,
         jid
       }
     },
@@ -727,13 +738,14 @@ export async function upsertMessageFromBaileys(
     chatJid: jid,
     fromMe,
     pushName: message.pushName,
-    senderJid
+    senderJid,
+    instanceId
   });
 
   const chat = await prisma.whatsappChat.upsert({
     where: {
       instanceId_jid: {
-        instanceId: DEFAULT_WHATSAPP_INSTANCE_ID,
+        instanceId,
         jid
       }
     },
@@ -742,7 +754,7 @@ export async function upsertMessageFromBaileys(
       ...(shouldUpdateName ? { name: pushName } : {})
     },
     create: {
-      instanceId: DEFAULT_WHATSAPP_INSTANCE_ID,
+      instanceId,
       jid,
       ...(!isGroupJid(jid) && pushName ? { name: pushName } : {}),
       isGroup: isGroupJid(jid),
@@ -755,7 +767,7 @@ export async function upsertMessageFromBaileys(
   await prisma.whatsappMessage.upsert({
     where: {
       instanceId_jid_waMessageId: {
-        instanceId: DEFAULT_WHATSAPP_INSTANCE_ID,
+        instanceId,
         jid,
         waMessageId
       }
@@ -770,7 +782,7 @@ export async function upsertMessageFromBaileys(
       ...(timestamp ? { timestamp } : {})
     },
     create: {
-      instanceId: DEFAULT_WHATSAPP_INSTANCE_ID,
+      instanceId,
       chatId: chat.id,
       waMessageId,
       jid,
@@ -819,7 +831,10 @@ export async function upsertMessageFromBaileys(
   return true;
 }
 
-export async function updateMessageFromBaileys(messageUpdate: WAMessageUpdate) {
+export async function updateMessageFromBaileys(
+  messageUpdate: WAMessageUpdate,
+  instanceId = DEFAULT_WHATSAPP_INSTANCE_ID
+) {
   const jid = normalizeChatJid(messageUpdate.key.remoteJid);
   const waMessageId = compactText(messageUpdate.key.id);
 
@@ -841,7 +856,7 @@ export async function updateMessageFromBaileys(messageUpdate: WAMessageUpdate) {
 
   const result = await prisma.whatsappMessage.updateMany({
     where: {
-      instanceId: DEFAULT_WHATSAPP_INSTANCE_ID,
+      instanceId,
       jid,
       waMessageId
     },
@@ -859,7 +874,10 @@ export async function updateMessageFromBaileys(messageUpdate: WAMessageUpdate) {
   return result.count > 0;
 }
 
-export async function syncMessagingHistorySet(event: BaileysEventMap["messaging-history.set"]) {
+export async function syncMessagingHistorySet(
+  event: BaileysEventMap["messaging-history.set"],
+  instanceId = DEFAULT_WHATSAPP_INSTANCE_ID
+) {
   const syncType = event.syncType ?? null;
   const progress = (event as { progress?: number | null }).progress ?? null;
   const x1Chats = splitX1Chats(event.chats);
@@ -869,6 +887,7 @@ export async function syncMessagingHistorySet(event: BaileysEventMap["messaging-
   console.log("[catalog] history set received", {
     syncType,
     progress,
+    instanceId,
     chats: event.chats.length,
     contacts: event.contacts.length,
     messages: event.messages.length
@@ -886,9 +905,12 @@ export async function syncMessagingHistorySet(event: BaileysEventMap["messaging-
     recordX1GroupSkips("messages", x1Messages.groupSkipped);
   }
 
-  const chatsResult = await settleInBatches(x1Chats.allowed, upsertChatFromBaileys);
+  const chatsResult = await settleInBatches(x1Chats.allowed, (chat) =>
+    upsertChatFromBaileys(chat, instanceId)
+  );
   console.log("[catalog] chats saved", {
     syncType,
+    instanceId,
     processed: chatsResult.processed,
     skippedGroups: x1Chats.groupSkipped,
     skipped: chatsResult.skipped,
@@ -896,9 +918,12 @@ export async function syncMessagingHistorySet(event: BaileysEventMap["messaging-
     ...(chatsResult.firstError ? { firstError: chatsResult.firstError } : {})
   });
 
-  const contactsResult = await settleInBatches(x1Contacts.allowed, upsertContactFromBaileys);
+  const contactsResult = await settleInBatches(x1Contacts.allowed, (contact) =>
+    upsertContactFromBaileys(contact, instanceId)
+  );
   console.log("[catalog] contacts saved", {
     syncType,
+    instanceId,
     processed: contactsResult.processed,
     skippedGroups: x1Contacts.groupSkipped,
     skipped: contactsResult.skipped,
@@ -907,10 +932,11 @@ export async function syncMessagingHistorySet(event: BaileysEventMap["messaging-
   });
 
   const messagesResult = await settleInBatches(x1Messages.allowed, (message) =>
-    upsertMessageFromBaileys(message, { log: true, logScope: "history" })
+    upsertMessageFromBaileys(message, { log: true, logScope: "history", instanceId })
   );
   console.log("[catalog] message metadata processed", {
     syncType,
+    instanceId,
     processed: messagesResult.processed,
     skipped: messagesResult.skipped,
     failed: messagesResult.failed,
@@ -925,7 +951,10 @@ export async function syncMessagingHistorySet(event: BaileysEventMap["messaging-
   });
 }
 
-export async function syncChatsUpsert(chats: BaileysEventMap["chats.upsert"]) {
+export async function syncChatsUpsert(
+  chats: BaileysEventMap["chats.upsert"],
+  instanceId = DEFAULT_WHATSAPP_INSTANCE_ID
+) {
   const x1Chats = splitX1Chats(chats);
 
   if (x1Chats.groupSkipped > 0) {
@@ -934,12 +963,15 @@ export async function syncChatsUpsert(chats: BaileysEventMap["chats.upsert"]) {
 
   logSyncResult(
     "chats upsert",
-    { chats: chats.length },
-    await settleInBatches(x1Chats.allowed, upsertChatFromBaileys)
+    { chats: chats.length, instanceId },
+    await settleInBatches(x1Chats.allowed, (chat) => upsertChatFromBaileys(chat, instanceId))
   );
 }
 
-export async function syncChatsUpdate(chats: BaileysEventMap["chats.update"]) {
+export async function syncChatsUpdate(
+  chats: BaileysEventMap["chats.update"],
+  instanceId = DEFAULT_WHATSAPP_INSTANCE_ID
+) {
   const x1Chats = splitX1Chats(chats);
 
   if (x1Chats.groupSkipped > 0) {
@@ -948,12 +980,15 @@ export async function syncChatsUpdate(chats: BaileysEventMap["chats.update"]) {
 
   logSyncResult(
     "chats update",
-    { chats: chats.length },
-    await settleInBatches(x1Chats.allowed, upsertChatFromBaileys)
+    { chats: chats.length, instanceId },
+    await settleInBatches(x1Chats.allowed, (chat) => upsertChatFromBaileys(chat, instanceId))
   );
 }
 
-export async function syncContactsUpsert(contacts: BaileysEventMap["contacts.upsert"]) {
+export async function syncContactsUpsert(
+  contacts: BaileysEventMap["contacts.upsert"],
+  instanceId = DEFAULT_WHATSAPP_INSTANCE_ID
+) {
   const x1Contacts = splitX1Contacts(contacts);
 
   if (x1Contacts.groupSkipped > 0) {
@@ -962,12 +997,15 @@ export async function syncContactsUpsert(contacts: BaileysEventMap["contacts.ups
 
   logSyncResult(
     "contacts upsert",
-    { contacts: contacts.length },
-    await settleInBatches(x1Contacts.allowed, upsertContactFromBaileys)
+    { contacts: contacts.length, instanceId },
+    await settleInBatches(x1Contacts.allowed, (contact) => upsertContactFromBaileys(contact, instanceId))
   );
 }
 
-export async function syncContactsUpdate(contacts: BaileysEventMap["contacts.update"]) {
+export async function syncContactsUpdate(
+  contacts: BaileysEventMap["contacts.update"],
+  instanceId = DEFAULT_WHATSAPP_INSTANCE_ID
+) {
   const x1Contacts = splitX1Contacts(contacts);
 
   if (x1Contacts.groupSkipped > 0) {
@@ -976,18 +1014,22 @@ export async function syncContactsUpdate(contacts: BaileysEventMap["contacts.upd
 
   logSyncResult(
     "contacts update",
-    { contacts: contacts.length },
-    await settleInBatches(x1Contacts.allowed, upsertContactFromBaileys)
+    { contacts: contacts.length, instanceId },
+    await settleInBatches(x1Contacts.allowed, (contact) => upsertContactFromBaileys(contact, instanceId))
   );
 }
 
-export async function syncMessagesUpsert(event: BaileysEventMap["messages.upsert"]) {
+export async function syncMessagesUpsert(
+  event: BaileysEventMap["messages.upsert"],
+  instanceId = DEFAULT_WHATSAPP_INSTANCE_ID
+) {
   const x1Messages = splitX1Messages(event.messages);
 
   console.log("[sync] messages.upsert received", {
     count: event.messages.length,
     type: event.type,
-    messages: event.messages.length
+    messages: event.messages.length,
+    instanceId
   });
 
   if (x1Messages.groupSkipped > 0) {
@@ -995,21 +1037,25 @@ export async function syncMessagesUpsert(event: BaileysEventMap["messages.upsert
   }
 
   const result = await settleInBatches(x1Messages.allowed, (message) =>
-    upsertMessageFromBaileys(message, { log: true, logScope: "live" })
+    upsertMessageFromBaileys(message, { log: true, logScope: "live", instanceId })
   );
 
   console.log("[history] live messages persisted", {
     type: event.type,
+    instanceId,
     count: result.processed,
     skipped: result.skipped,
     failed: result.failed,
     ...(result.firstError ? { firstError: result.firstError } : {})
   });
 
-  logSyncResult("messages upsert", { type: event.type, messages: event.messages.length }, result);
+  logSyncResult("messages upsert", { type: event.type, messages: event.messages.length, instanceId }, result);
 }
 
-export async function syncMessagesUpdate(messages: BaileysEventMap["messages.update"]) {
+export async function syncMessagesUpdate(
+  messages: BaileysEventMap["messages.update"],
+  instanceId = DEFAULT_WHATSAPP_INSTANCE_ID
+) {
   const x1Messages = splitX1Messages(messages);
 
   if (x1Messages.groupSkipped > 0) {
@@ -1018,7 +1064,7 @@ export async function syncMessagesUpdate(messages: BaileysEventMap["messages.upd
 
   logSyncResult(
     "messages update",
-    { messages: messages.length },
-    await settleInBatches(x1Messages.allowed, updateMessageFromBaileys)
+    { messages: messages.length, instanceId },
+    await settleInBatches(x1Messages.allowed, (message) => updateMessageFromBaileys(message, instanceId))
   );
 }

@@ -18,23 +18,26 @@ import {
 } from "../lib/queue/campaign-queue";
 import { getRedisConnectionOptions } from "../lib/queue/connection";
 import {
-  disconnectBaileys,
   isBaileysStartSkippedError,
   markWhatsappError,
-  requestWhatsappCatalogSync,
-  requestWhatsappHistorySync,
-  resetBaileysSession,
-  applyWhatsappLabelToJids,
-  sendWhatsappMessage,
-  sendWhatsappMessageToJid,
-  startBaileysConnection
+  requestWhatsappHistorySync
 } from "../lib/baileys/client";
+import {
+  applyWhatsappLabelsForInstance,
+  disconnectWhatsappInstance,
+  reconnectWhatsappInstance,
+  requestWhatsappCatalogSyncForInstance,
+  resetWhatsappInstance,
+  sendWhatsappMessageForInstance,
+  sendWhatsappPhoneMessageForInstance
+} from "../lib/baileys/instance-manager";
 import { ensureChatForJid, isGroupJid, normalizeChatJid } from "../lib/baileys/sync";
 import { completeCampaignIfDone } from "../lib/campaigns/progress";
 import { schedulePendingRecipients } from "../lib/campaigns/schedule";
 import { hashMessage, resolveCampaignJid, type SkippedReason } from "../lib/labels/audience";
 import { normalizeBrazilPhone, toWhatsappJid } from "../lib/phone/normalize";
 import { clearWhatsappOperationalData } from "../lib/server/whatsapp-session-data";
+import { DEFAULT_WHATSAPP_INSTANCE_ID } from "../lib/server/whatsapp-instances";
 import { shouldIgnoreJidForX1Only } from "../lib/whatsapp/jid";
 
 const PAUSED_RECHECK_DELAY_MS = 60 * 1000;
@@ -60,7 +63,7 @@ async function requeueRecipient(recipientId: string, delayMs = PAUSED_RECHECK_DE
   await enqueueRecipient(recipientId, delayMs);
 }
 
-type SentWhatsappMessage = Awaited<ReturnType<typeof sendWhatsappMessageToJid>>;
+type SentWhatsappMessage = Awaited<ReturnType<typeof sendWhatsappMessageForInstance>>;
 
 function buildFallbackMessageId(prefix: string, id: string | undefined) {
   return `${prefix}-${id ?? Date.now()}`
@@ -225,6 +228,7 @@ async function processManualMessage(
   const chatId = String(data.chatId ?? "").trim();
   const normalizedJid = normalizeChatJid(data.jid);
   const text = String(data.text ?? "").trim();
+  const requestedInstanceId = String(data.instanceId ?? "").trim();
 
   if (!chatId) {
     throw new Error("chatId obrigatorio para envio manual");
@@ -256,12 +260,20 @@ async function processManualMessage(
     throw new Error("Conversa nao encontrada para envio manual");
   }
 
+  if (requestedInstanceId && requestedInstanceId !== chat.instanceId) {
+    throw new Error("Instancia do job nao corresponde a conversa");
+  }
+
   if (chat.jid !== normalizedJid) {
     throw new Error("JID do job nao corresponde a conversa");
   }
 
   try {
-    const sentMessage = await sendWhatsappMessageToJid(normalizedJid, text);
+    console.log("[manual-send] sending with instance", {
+      chatId,
+      instanceId: chat.instanceId
+    });
+    const sentMessage = await sendWhatsappMessageForInstance(chat.instanceId, normalizedJid, text);
     const sentAt = new Date();
     await persistOutboundMessage({
       instanceId: chat.instanceId,
@@ -396,10 +408,26 @@ async function processRecipient(recipientId: string) {
 
     if (resolvedRecipientJid) {
       sentJid = resolvedRecipientJid;
-      sentMessage = await sendWhatsappMessageToJid(resolvedRecipientJid, recipient.messageFinal);
+      console.log("[campaign] sending with instance", {
+        campaignId: recipient.campaignId,
+        instanceId: recipient.campaign.instanceId
+      });
+      sentMessage = await sendWhatsappMessageForInstance(
+        recipient.campaign.instanceId,
+        resolvedRecipientJid,
+        recipient.messageFinal
+      );
     } else if (recipient.contact) {
       sentJid = toWhatsappJid(recipient.contact.phoneNormalized);
-      sentMessage = await sendWhatsappMessage(recipient.contact.phoneNormalized, recipient.messageFinal);
+      console.log("[campaign] sending with instance", {
+        campaignId: recipient.campaignId,
+        instanceId: recipient.campaign.instanceId
+      });
+      sentMessage = await sendWhatsappPhoneMessageForInstance(
+        recipient.campaign.instanceId,
+        recipient.contact.phoneNormalized,
+        recipient.messageFinal
+      );
     } else {
       throw new Error("Destinatario sem jid ou contato");
     }
@@ -503,11 +531,12 @@ const worker = new Worker(
     });
 
     if (job.name === CONNECT_WHATSAPP_JOB) {
-      console.log("[worker] connect-whatsapp job received");
+      const instanceId = String((job.data as { instanceId?: string })?.instanceId ?? "default");
+      console.log("[worker] connect-whatsapp job received", { instanceId });
 
       try {
-        await startBaileysConnection();
-        console.log("[worker] connect-whatsapp finished");
+        await reconnectWhatsappInstance(instanceId);
+        console.log("[worker] connect-whatsapp finished", { instanceId });
       } catch (error) {
         if (isBaileysStartSkippedError(error)) {
           console.log("[worker] connect-whatsapp skipped", {
@@ -517,8 +546,10 @@ const worker = new Worker(
         }
 
         const lastError = `Falha ao iniciar conexao WhatsApp no worker: ${getErrorMessage(error)}`;
-        console.error("[worker] connect-whatsapp failed", { error: lastError });
-        await markWhatsappError(lastError);
+        console.error("[worker] connect-whatsapp failed", { instanceId, error: lastError });
+        if (instanceId === DEFAULT_WHATSAPP_INSTANCE_ID) {
+          await markWhatsappError(lastError);
+        }
         throw error;
       }
 
@@ -526,16 +557,19 @@ const worker = new Worker(
     }
 
     if (job.name === DISCONNECT_WHATSAPP_JOB) {
-      console.log("[worker] disconnect-whatsapp job received");
+      const instanceId = String((job.data as { instanceId?: string })?.instanceId ?? "default");
+      console.log("[worker] disconnect-whatsapp job received", { instanceId });
 
       try {
-        await clearWhatsappOperationalData("manual-disconnect-worker");
-        await disconnectBaileys();
-        console.log("[worker] disconnect-whatsapp finished");
+        await clearWhatsappOperationalData("manual-disconnect-worker", instanceId);
+        await disconnectWhatsappInstance(instanceId);
+        console.log("[worker] disconnect-whatsapp finished", { instanceId });
       } catch (error) {
         const lastError = `Falha ao desconectar WhatsApp no worker: ${getErrorMessage(error)}`;
-        console.error("[worker] disconnect-whatsapp failed", { error: lastError });
-        await markWhatsappError(lastError);
+        console.error("[worker] disconnect-whatsapp failed", { instanceId, error: lastError });
+        if (instanceId === DEFAULT_WHATSAPP_INSTANCE_ID) {
+          await markWhatsappError(lastError);
+        }
         throw error;
       }
 
@@ -543,16 +577,19 @@ const worker = new Worker(
     }
 
     if (job.name === RESET_WHATSAPP_JOB) {
-      console.log("[worker] reset-whatsapp job received");
+      const instanceId = String((job.data as { instanceId?: string })?.instanceId ?? "default");
+      console.log("[worker] reset-whatsapp job received", { instanceId });
 
       try {
-        await clearWhatsappOperationalData("manual-reset-worker");
-        await resetBaileysSession();
-        console.log("[worker] reset-whatsapp finished");
+        await clearWhatsappOperationalData("manual-reset-worker", instanceId);
+        await resetWhatsappInstance(instanceId);
+        console.log("[worker] reset-whatsapp finished", { instanceId });
       } catch (error) {
         const lastError = `Falha ao resetar sessao WhatsApp no worker: ${getErrorMessage(error)}`;
-        console.error("[worker] reset-whatsapp failed", { error: lastError });
-        await markWhatsappError(lastError);
+        console.error("[worker] reset-whatsapp failed", { instanceId, error: lastError });
+        if (instanceId === DEFAULT_WHATSAPP_INSTANCE_ID) {
+          await markWhatsappError(lastError);
+        }
         throw error;
       }
 
@@ -572,12 +609,13 @@ const worker = new Worker(
     }
 
     if (job.name === SYNC_WHATSAPP_CATALOG_JOB) {
-      console.log("[worker] sync-whatsapp-catalog job received");
+      const data = job.data as Partial<SyncWhatsappCatalogJobData>;
+      const instanceId = String(data.instanceId ?? "default");
+      console.log("[worker] sync-whatsapp-catalog job received", { instanceId });
 
-      const result = await requestWhatsappCatalogSync(
-        job.data as Partial<SyncWhatsappCatalogJobData>
-      );
+      const result = await requestWhatsappCatalogSyncForInstance(instanceId, data);
       console.log("[worker] sync-whatsapp-catalog finished", {
+        instanceId,
         ok: result.ok,
         mode: result.mode
       });
@@ -589,8 +627,10 @@ const worker = new Worker(
       const data = job.data as Partial<ApplyWhatsappLabelsJobData>;
       const jids = Array.isArray(data.jids) ? data.jids : [];
       const waLabelId = String(data.waLabelId ?? "").trim();
+      const instanceId = String(data.instanceId ?? "default");
 
       console.log("[contacts-labels] apply requested", {
+        instanceId,
         count: jids.length
       });
 
@@ -601,7 +641,8 @@ const worker = new Worker(
         return;
       }
 
-      const result = await applyWhatsappLabelToJids({
+      const result = await applyWhatsappLabelsForInstance({
+        instanceId,
         waLabelId,
         jids
       });

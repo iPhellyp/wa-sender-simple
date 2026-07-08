@@ -39,7 +39,10 @@ function buildLabelRawJson(label: LabelEditEvent) {
   };
 }
 
-export async function upsertWhatsappLabel(label: LabelEditEvent) {
+export async function upsertWhatsappLabel(
+  label: LabelEditEvent,
+  instanceId = DEFAULT_WHATSAPP_INSTANCE_ID
+) {
   const waLabelId = String(label.id ?? "").trim();
 
   if (!waLabelId) {
@@ -49,7 +52,7 @@ export async function upsertWhatsappLabel(label: LabelEditEvent) {
   await prisma.whatsappLabel.upsert({
     where: {
       instanceId_waLabelId: {
-        instanceId: DEFAULT_WHATSAPP_INSTANCE_ID,
+        instanceId,
         waLabelId
       }
     },
@@ -61,7 +64,7 @@ export async function upsertWhatsappLabel(label: LabelEditEvent) {
       rawJson: buildLabelRawJson(label)
     },
     create: {
-      instanceId: DEFAULT_WHATSAPP_INSTANCE_ID,
+      instanceId,
       waLabelId,
       name: safeLabelName(label.name, waLabelId),
       color: labelColorToString(label.color),
@@ -74,12 +77,15 @@ export async function upsertWhatsappLabel(label: LabelEditEvent) {
   return { processed: 1, skipped: 0, failed: 0 };
 }
 
-export async function upsertWhatsappLabels(labels: LabelEditEvent[]) {
-  const counters = { labels: labels.length, processed: 0, skipped: 0, failed: 0 };
+export async function upsertWhatsappLabels(
+  labels: LabelEditEvent[],
+  instanceId = DEFAULT_WHATSAPP_INSTANCE_ID
+) {
+  const counters = { instanceId, labels: labels.length, processed: 0, skipped: 0, failed: 0 };
 
   for (const label of labels) {
     try {
-      const result = await upsertWhatsappLabel(label);
+      const result = await upsertWhatsappLabel(label, instanceId);
       counters.processed += result.processed;
       counters.skipped += result.skipped;
       counters.failed += result.failed;
@@ -95,21 +101,25 @@ export async function upsertWhatsappLabels(labels: LabelEditEvent[]) {
   return counters;
 }
 
-async function resolveLabelByWaId(waLabelId: string) {
+async function resolveLabelByWaId(waLabelId: string, instanceId = DEFAULT_WHATSAPP_INSTANCE_ID) {
   return prisma.whatsappLabel.findUnique({
     where: {
       instanceId_waLabelId: {
-        instanceId: DEFAULT_WHATSAPP_INSTANCE_ID,
+        instanceId,
         waLabelId
       }
     }
   });
 }
 
-export async function removeWhatsappLabelAssociation(chatId: string, labelInternalId: string) {
+export async function removeWhatsappLabelAssociation(
+  chatId: string,
+  labelInternalId: string,
+  instanceId = DEFAULT_WHATSAPP_INSTANCE_ID
+) {
   await prisma.whatsappChatLabel.deleteMany({
     where: {
-      instanceId: DEFAULT_WHATSAPP_INSTANCE_ID,
+      instanceId,
       chatId,
       labelId: labelInternalId
     }
@@ -119,12 +129,13 @@ export async function removeWhatsappLabelAssociation(chatId: string, labelIntern
 export async function upsertWhatsappLabelAssociation(
   jid: string,
   labelInternalId: string,
-  chatId: string
+  chatId: string,
+  instanceId = DEFAULT_WHATSAPP_INSTANCE_ID
 ) {
   await prisma.whatsappChatLabel.upsert({
     where: {
       instanceId_chatId_labelId: {
-        instanceId: DEFAULT_WHATSAPP_INSTANCE_ID,
+        instanceId,
         chatId,
         labelId: labelInternalId
       }
@@ -133,7 +144,7 @@ export async function upsertWhatsappLabelAssociation(
       jid
     },
     create: {
-      instanceId: DEFAULT_WHATSAPP_INSTANCE_ID,
+      instanceId,
       chatId,
       labelId: labelInternalId,
       jid
@@ -141,11 +152,17 @@ export async function upsertWhatsappLabelAssociation(
   });
 }
 
-export async function syncLabelsEdit(label: LabelEditEvent) {
-  return upsertWhatsappLabels([label]);
+export async function syncLabelsEdit(
+  label: LabelEditEvent,
+  instanceId = DEFAULT_WHATSAPP_INSTANCE_ID
+) {
+  return upsertWhatsappLabels([label], instanceId);
 }
 
-export async function syncLabelsAssociation(event: LabelAssociationEvent) {
+export async function syncLabelsAssociation(
+  event: LabelAssociationEvent,
+  instanceId = DEFAULT_WHATSAPP_INSTANCE_ID
+) {
   const counters = {
     associations: 1,
     processed: 0,
@@ -186,17 +203,17 @@ export async function syncLabelsAssociation(event: LabelAssociationEvent) {
       return counters;
     }
 
-    const label = await resolveLabelByWaId(waLabelId);
+    const label = await resolveLabelByWaId(waLabelId, instanceId);
 
     if (!label || label.deleted) {
       counters.skipped = 1;
       return counters;
     }
 
-    const chat = await ensureChatForJid(jid);
+    const chat = await ensureChatForJid(jid, undefined, instanceId);
 
     if (event.type === "remove") {
-      await removeWhatsappLabelAssociation(chat.id, label.id);
+      await removeWhatsappLabelAssociation(chat.id, label.id, instanceId);
       counters.removed = 1;
       counters.processed = 1;
       counters.x1Saved = 1;
@@ -204,7 +221,7 @@ export async function syncLabelsAssociation(event: LabelAssociationEvent) {
       return counters;
     }
 
-    await upsertWhatsappLabelAssociation(jid, label.id, chat.id);
+    await upsertWhatsappLabelAssociation(jid, label.id, chat.id, instanceId);
     counters.processed = 1;
     counters.x1Saved = 1;
   } catch (error) {

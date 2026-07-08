@@ -7,11 +7,8 @@ import {
   getWhatsappDisplayName,
   getWhatsappIdentityLabel
 } from "@/src/lib/whatsapp/display-name";
-import { getWhatsappStatusPayload } from "@/src/lib/baileys/client";
-import {
-  DEFAULT_WHATSAPP_INSTANCE_ID,
-  getActiveInstanceIdFromSearchOrDefault
-} from "@/src/lib/server/whatsapp-instances";
+import { getWhatsappInstanceRuntimeStatus } from "@/src/lib/baileys/instance-manager";
+import { getActiveInstanceIdFromSearchOrDefault } from "@/src/lib/server/whatsapp-instances";
 import { ConversationMessagesClient } from "./ConversationMessagesClient";
 
 export const runtime = "nodejs";
@@ -42,7 +39,7 @@ export default async function ConversationDetailPage({ params, searchParams }: C
   const instanceId = await getActiveInstanceIdFromSearchOrDefault(
     new URLSearchParams(resolvedSearchParams?.instanceId ? { instanceId: resolvedSearchParams.instanceId } : {})
   );
-  const [chat, whatsappSession, whatsappInstance] = await Promise.all([
+  const [chat, whatsappSession] = await Promise.all([
     prisma.whatsappChat.findFirst({
       where: {
         id,
@@ -68,12 +65,7 @@ export default async function ConversationDetailPage({ params, searchParams }: C
         }
       }
     }),
-    getWhatsappStatusPayload(),
-    prisma.whatsappInstance.findUnique({
-      where: {
-        id: instanceId
-      }
-    })
+    getWhatsappInstanceRuntimeStatus(instanceId)
   ]);
 
   if (!chat) {
@@ -97,10 +89,7 @@ export default async function ConversationDetailPage({ params, searchParams }: C
     contactPushName: chatContact?.pushName,
     isGroup: chat.isGroup
   });
-  const whatsappStatus =
-    instanceId === DEFAULT_WHATSAPP_INSTANCE_ID
-      ? whatsappSession.status
-      : whatsappInstance?.status ?? "disconnected";
+  const whatsappStatus = whatsappSession.status;
 
   return (
     <AppShell
@@ -168,14 +157,14 @@ export default async function ConversationDetailPage({ params, searchParams }: C
           </div>
         ) : (
           <Suspense fallback={<div className="data-card empty-state compact">Carregando mensagens...</div>}>
-        <ConversationMessagesClient
-            chatId={chat.id}
-            isGroup={chat.isGroup}
-            totalMessages={chat._count.messages}
-            whatsappStatus={whatsappStatus}
-            instanceId={instanceId}
-          />
-      </Suspense>
+            <ConversationMessagesClient
+              chatId={chat.id}
+              isGroup={chat.isGroup}
+              totalMessages={chat._count.messages}
+              whatsappStatus={whatsappStatus}
+              instanceId={instanceId}
+            />
+          </Suspense>
         )}
       </section>
     </AppShell>

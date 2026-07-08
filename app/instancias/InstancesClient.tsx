@@ -14,6 +14,7 @@ type InstanceSummary = {
   isDefault: boolean;
   lastConnectedAt: string | null;
   lastSyncAt: string | null;
+  lastError: string | null;
 };
 
 type InstancesResponse = {
@@ -147,6 +148,30 @@ export function InstancesClient() {
     }
   }
 
+  async function postWhatsappAction(instanceId: string, action: "reconnect" | "sync-catalog") {
+    setBusy(true);
+    setError(null);
+    setMessage(null);
+
+    try {
+      const response = await fetch(`/api/whatsapp/${action}?instanceId=${encodeURIComponent(instanceId)}`, {
+        method: "POST"
+      });
+      const data = (await response.json()) as { error?: string; message?: string };
+
+      if (!response.ok || data.error) {
+        throw new Error(data.error ?? "Erro ao executar acao");
+      }
+
+      setMessage(data.message ?? "Acao concluida.");
+      await loadInstances();
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : "Erro inesperado");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <section className="page-shell">
       {error ? <div className="message error compact">{error}</div> : null}
@@ -202,6 +227,10 @@ export function InstancesClient() {
                 <span>Ultima sincronizacao</span>
                 <span>{formatDate(instance.lastSyncAt)}</span>
               </div>
+              <div className="meta-row">
+                <span>Erro recente</span>
+                <span>{instance.lastError ?? "-"}</span>
+              </div>
             </div>
 
             <div className="field">
@@ -235,6 +264,22 @@ export function InstancesClient() {
               <Link className="button secondary compact-button" href={`/whatsapp?instanceId=${instance.id}`}>
                 Abrir WhatsApp
               </Link>
+              <button
+                className="button compact-button"
+                disabled={busy}
+                type="button"
+                onClick={() => void postWhatsappAction(instance.id, "reconnect")}
+              >
+                Conectar
+              </button>
+              <button
+                className="button secondary compact-button"
+                disabled={busy}
+                type="button"
+                onClick={() => void postWhatsappAction(instance.id, "sync-catalog")}
+              >
+                Sincronizar
+              </button>
               <button
                 className="button secondary compact-button"
                 disabled={busy}

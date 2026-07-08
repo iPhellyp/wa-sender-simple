@@ -53,6 +53,7 @@ export async function POST(
 
   try {
     jobId = await enqueueManualMessage({
+      instanceId: chat.instanceId,
       chatId: chat.id,
       jid: chat.jid,
       text

@@ -24,10 +24,25 @@ export async function GET() {
       }
     ]
   });
+  const sessions = await prisma.whatsappSession.findMany({
+    where: {
+      instanceId: {
+        in: instances.map((instance) => instance.id)
+      }
+    },
+    select: {
+      instanceId: true,
+      lastError: true
+    }
+  });
+  const lastErrorByInstanceId = new Map(
+    sessions.map((session) => [session.instanceId, session.lastError])
+  );
 
   return NextResponse.json({
     instances: instances.map((instance) => ({
       ...instance,
+      lastError: lastErrorByInstanceId.get(instance.id) ?? null,
       roleLabel: WHATSAPP_INSTANCE_ROLE_LABELS[instance.role]
     })),
     roles: WHATSAPP_INSTANCE_ROLE_LABELS

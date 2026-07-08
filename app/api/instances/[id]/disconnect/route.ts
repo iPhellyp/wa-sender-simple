@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { markWhatsappDisconnected } from "@/src/lib/baileys/client";
+import { getWhatsappInstanceRuntimeStatus } from "@/src/lib/baileys/instance-manager";
 import { enqueueWhatsappDisconnect } from "@/src/lib/queue/campaign-queue";
 import { prisma } from "@/src/lib/prisma/client";
 
@@ -23,25 +23,10 @@ export async function POST(
     return NextResponse.json({ error: "Instancia nao encontrada" }, { status: 404 });
   }
 
-  if (instance.sessionKey === "default") {
-    await markWhatsappDisconnected();
-    await enqueueWhatsappDisconnect();
-  }
-
-  const updated = await prisma.whatsappInstance.update({
-    where: {
-      id
-    },
-    data: {
-      status: "disconnected"
-    }
-  });
+  await enqueueWhatsappDisconnect(instance.id);
 
   return NextResponse.json({
-    instance: updated,
-    message:
-      instance.sessionKey === "default"
-        ? "Desconexao enfileirada para a instancia padrao."
-        : "Instancia preparada como desconectada. Multi-socket entra na proxima fase."
+    instance: await getWhatsappInstanceRuntimeStatus(instance.id),
+    message: "Desconexao enfileirada para esta instancia."
   });
 }

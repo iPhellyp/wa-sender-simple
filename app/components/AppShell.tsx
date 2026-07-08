@@ -1,5 +1,5 @@
 ﻿import Link from "next/link";
-import type { ReactNode } from "react";
+import { Suspense, type ReactNode } from "react";
 import { ActiveInstanceSelector } from "./ActiveInstanceSelector";
 import { NavLink } from "./NavLink";
 import { PageHeader } from "./ui/PageHeader";
@@ -41,7 +41,9 @@ export function AppShell({ title, subtitle, children, actions }: AppShellProps) 
         </div>
       </header>
       <main className="page">
-        <ActiveInstanceSelector />
+        <Suspense fallback={null}>
+          <ActiveInstanceSelector />
+        </Suspense>
         <PageHeader title={title} subtitle={subtitle} actions={actions} />
         {children}
       </main>
