@@ -31,6 +31,7 @@ import {
   normalizeChatJid
 } from "./sync";
 import { syncLabelsAssociation, syncLabelsEdit } from "./labels-sync";
+import { getBaileysSessionFilesInfo } from "./session-files";
 
 const SESSION_ID = "default";
 
@@ -65,6 +66,8 @@ const RECOVERABLE_SESSION_MESSAGE =
   "Sessao salva, aguardando retomada. Clique em Retomar sessao se nao reconectar automaticamente.";
 const TERMINAL_SESSION_MESSAGE =
   "Conexao WhatsApp encerrada ou removida no celular. Use Resetar sessao e Reconectar para gerar novo QR.";
+const PAIRING_INCOMPLETE_MESSAGE =
+  "QR expirou ou pareamento nao foi concluido. Gere um novo QR.";
 const QR_SAFE_428_MESSAGE =
   "Falha ao gerar QR mesmo em modo seguro. Tente Resetar sessao e Reconectar novamente.";
 const QR_SAFE_405_EXHAUSTED_MESSAGE =
@@ -447,39 +450,7 @@ function getSafeSessionDir() {
 }
 
 async function getSessionFilesInfo() {
-  const sessionDir = getSafeSessionDir();
-  await mkdir(sessionDir, { recursive: true });
-
-  async function scanDir(dir: string): Promise<{ count: number; hasCredsJson: boolean }> {
-    const entries = await readdir(dir, { withFileTypes: true });
-    let count = 0;
-    let hasCredsJson = false;
-
-    for (const entry of entries) {
-      const fullPath = join(dir, entry.name);
-
-      if (entry.isDirectory()) {
-        const child = await scanDir(fullPath);
-        count += child.count;
-        hasCredsJson = hasCredsJson || child.hasCredsJson;
-      } else if (entry.isFile()) {
-        count += 1;
-        hasCredsJson = hasCredsJson || entry.name === "creds.json";
-      }
-    }
-
-    return {
-      count,
-      hasCredsJson
-    };
-  }
-
-  const result = await scanDir(sessionDir);
-  return {
-    sessionDir,
-    sessionFilesCount: result.count,
-    hasCredsJson: result.hasCredsJson
-  };
+  return getBaileysSessionFilesInfo(getSafeSessionDir());
 }
 
 async function countSessionFiles() {
@@ -530,6 +501,8 @@ async function scheduleTransientReconnect(options: {
     sessionDir: string;
     sessionFilesCount: number;
     hasCredsJson: boolean;
+    hasRegisteredSession?: boolean;
+    isPairingPartial?: boolean;
   };
 }) {
   if (manualDisconnectRequested || resetInProgress) {
@@ -561,7 +534,9 @@ async function scheduleTransientReconnect(options: {
       lastError: options.lastError,
       sessionDir: options.sessionInfo?.sessionDir,
       sessionFilesCount: options.sessionInfo?.sessionFilesCount,
-      hasCredsJson: options.sessionInfo?.hasCredsJson
+      hasCredsJson: options.sessionInfo?.hasCredsJson,
+      hasRegisteredSession: options.sessionInfo?.hasRegisteredSession,
+      isPairingPartial: options.sessionInfo?.isPairingPartial
     });
     return;
   }
@@ -588,6 +563,8 @@ async function scheduleTransientReconnect(options: {
     sessionDir: options.sessionInfo?.sessionDir,
     sessionFilesCount: options.sessionInfo?.sessionFilesCount,
     hasCredsJson: options.sessionInfo?.hasCredsJson,
+    hasRegisteredSession: options.sessionInfo?.hasRegisteredSession,
+    isPairingPartial: options.sessionInfo?.isPairingPartial,
     isRecoverable: true
   });
 
@@ -917,10 +894,10 @@ async function createSocket(options: {
         const shouldRestartInPairingMode =
           isCleanPairing || pairingPending || isDbPairingPendingNow;
         const sessionInfo = await getSessionFilesInfo();
-        const hasSavedSession = sessionInfo.hasCredsJson || sessionInfo.sessionFilesCount > 0;
         const wasConnected =
           currentSession.status === WhatsappStatus.connected ||
           Boolean(currentSession.connectedPhone);
+        const hasSavedSession = sessionInfo.hasRegisteredSession || sessionInfo.hasMeId || wasConnected;
 
         if (statusCode === 428 && hasSavedSession && !shouldPreserveQrDuringPairing && !isCleanPairing) {
           await scheduleTransientReconnect({
@@ -938,9 +915,17 @@ async function createSocket(options: {
             await saveWhatsappSession({
               status: WhatsappStatus.qr,
               connectedPhone: null,
-              lastError: "Conexao fechou durante o pareamento; QR preservado."
+              lastError: PAIRING_INCOMPLETE_MESSAGE
             });
-            console.log("[baileys] 428 during pairing; preserving qr state");
+            console.log("[baileys] 428 during pairing; preserving qr state", {
+              statusCode,
+              hasQr: true,
+              persistedQr: true,
+              sessionFilesCount: sessionInfo.sessionFilesCount,
+              hasCredsJson: sessionInfo.hasCredsJson,
+              hasRegisteredSession: sessionInfo.hasRegisteredSession,
+              isPairingPartial: sessionInfo.isPairingPartial
+            });
             return;
           }
 
@@ -948,7 +933,9 @@ async function createSocket(options: {
           lastTerminalErrorAt = Date.now();
           const isCleanPairing428 = statusCode === 428 && isCleanPairing;
           const lastError =
-            isCleanPairing428
+            sessionInfo.isPairingPartial
+              ? PAIRING_INCOMPLETE_MESSAGE
+              : isCleanPairing428
               ? QR_SAFE_428_MESSAGE
               : statusCode === 428
               ? TERMINAL_SESSION_MESSAGE
@@ -962,11 +949,29 @@ async function createSocket(options: {
           });
 
           if (isCleanPairing428) {
-            console.log("[baileys] clean pairing failed with 428");
+            console.log("[baileys] clean pairing failed with 428", {
+              statusCode,
+              sessionFilesCount: sessionInfo.sessionFilesCount,
+              hasCredsJson: sessionInfo.hasCredsJson,
+              hasRegisteredSession: sessionInfo.hasRegisteredSession,
+              isPairingPartial: sessionInfo.isPairingPartial
+            });
           } else if (statusCode === 428) {
-            console.log("[baileys] connection terminated 428; reconnect disabled");
+            console.log("[baileys] connection terminated 428; reconnect disabled", {
+              statusCode,
+              sessionFilesCount: sessionInfo.sessionFilesCount,
+              hasCredsJson: sessionInfo.hasCredsJson,
+              hasRegisteredSession: sessionInfo.hasRegisteredSession,
+              isPairingPartial: sessionInfo.isPairingPartial
+            });
           } else {
-            console.log("[baileys] connection terminated; reconnect disabled", { statusCode });
+            console.log("[baileys] connection terminated; reconnect disabled", {
+              statusCode,
+              sessionFilesCount: sessionInfo.sessionFilesCount,
+              hasCredsJson: sessionInfo.hasCredsJson,
+              hasRegisteredSession: sessionInfo.hasRegisteredSession,
+              isPairingPartial: sessionInfo.isPairingPartial
+            });
           }
 
           return;
@@ -1208,21 +1213,39 @@ export async function startBaileysConnection(options: { resetRetry?: boolean } =
     return socket;
   }
 
-  const sessionInfo = await getSessionFilesInfo();
-  const sessionFileCount = sessionInfo.sessionFilesCount;
+  let sessionInfo = await getSessionFilesInfo();
   console.log("[baileys] session files before start", {
-    action: sessionFileCount > 0 ? "resume_session" : "generate_qr",
+    action: sessionInfo.hasRegisteredSession || sessionInfo.hasMeId ? "resume_session" : "generate_qr",
     instanceId: DEFAULT_WHATSAPP_INSTANCE_ID,
     sessionDir: sessionInfo.sessionDir,
     sessionFilesCount: sessionInfo.sessionFilesCount,
-    hasCredsJson: sessionInfo.hasCredsJson
+    hasCredsJson: sessionInfo.hasCredsJson,
+    hasRegisteredSession: sessionInfo.hasRegisteredSession,
+    isPairingPartial: sessionInfo.isPairingPartial
   });
   const dbSession = await getWhatsappStatus();
   const hasConnectedPhone = Boolean(dbSession.connectedPhone);
+
+  if (sessionInfo.isPairingPartial && !hasConnectedPhone) {
+    console.log("[baileys] clearing partial pairing session before new qr", {
+      action: "generate_qr",
+      instanceId: DEFAULT_WHATSAPP_INSTANCE_ID,
+      sessionDir: sessionInfo.sessionDir,
+      sessionFilesCount: sessionInfo.sessionFilesCount,
+      hasCredsJson: sessionInfo.hasCredsJson,
+      hasRegisteredSession: sessionInfo.hasRegisteredSession,
+      isPairingPartial: sessionInfo.isPairingPartial
+    });
+    await clearSessionDir();
+    pairingPending = true;
+    sessionInfo = await getSessionFilesInfo();
+  }
+
+  const sessionFileCount = sessionInfo.sessionFilesCount;
   const isDbPairingPending = isPairingPendingSession(dbSession);
   const hasStoredPairingQr = Boolean(dbSession.qrCode) && !dbSession.connectedPhone;
   const isCleanSession = sessionFileCount === 0;
-  const shouldUseQrSafeMode = isCleanSession || isDbPairingPending || pairingPending;
+  const shouldUseQrSafeMode = isCleanSession || isDbPairingPending || pairingPending || sessionInfo.isPairingPartial;
 
   console.log("[baileys] pairing mode decision", {
     sessionFiles: sessionFileCount,
@@ -1232,6 +1255,8 @@ export async function startBaileysConnection(options: { resetRetry?: boolean } =
     isCleanSession,
     isDbPairingPending,
     internalPairingPending: pairingPending,
+    hasRegisteredSession: sessionInfo.hasRegisteredSession,
+    isPairingPartial: sessionInfo.isPairingPartial,
     shouldUseQrSafeMode
   });
 
@@ -1315,8 +1340,13 @@ export async function getWhatsappStatusPayload() {
   const session = await getWhatsappStatus();
   const sessionInfo = await getSessionFilesInfo();
   const hasSessionFiles = sessionInfo.sessionFilesCount > 0;
+  const hasConfirmedSession =
+    sessionInfo.hasRegisteredSession ||
+    sessionInfo.hasMeId ||
+    session.status === WhatsappStatus.connected ||
+    Boolean(session.connectedPhone);
   const isRecoverableSession =
-    hasSessionFiles &&
+    hasConfirmedSession &&
     session.status !== WhatsappStatus.connected &&
     !session.qrCode;
 
@@ -1329,6 +1359,10 @@ export async function getWhatsappStatusPayload() {
     hasSessionFiles,
     sessionFilesCount: sessionInfo.sessionFilesCount,
     hasCredsJson: sessionInfo.hasCredsJson,
+    hasRegisteredSession: sessionInfo.hasRegisteredSession,
+    hasMe: sessionInfo.hasMe,
+    hasMeId: sessionInfo.hasMeId,
+    isPairingPartial: sessionInfo.isPairingPartial,
     connectedPhone: session.connectedPhone,
     displayName: null,
     profilePictureUrl: null,

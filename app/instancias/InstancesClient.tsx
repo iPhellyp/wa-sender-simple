@@ -27,6 +27,10 @@ type InstanceSummary = {
   hasSessionFiles?: boolean;
   sessionFilesCount?: number;
   hasCredsJson?: boolean;
+  hasRegisteredSession?: boolean;
+  hasMe?: boolean;
+  hasMeId?: boolean;
+  isPairingPartial?: boolean;
   isRecoverableSession?: boolean;
   lastOpenAt?: string | null;
 };
@@ -49,6 +53,24 @@ function statusClass(status: string) {
   if (status === "error" || status === "disconnected") return "danger";
   if (status === "connecting" || status === "qr") return "info";
   return "warning";
+}
+
+function hasConfirmedSession(instance: InstanceSummary) {
+  return Boolean(
+    instance.hasRegisteredSession ||
+    instance.hasMeId ||
+    instance.connectedPhone ||
+    instance.phone ||
+    instance.status === "connected"
+  );
+}
+
+function getConnectionActionLabel(instance: InstanceSummary) {
+  if (instance.isPairingPartial) {
+    return "Gerar novo QR";
+  }
+
+  return hasConfirmedSession(instance) ? "Retomar sessao" : "Gerar QR";
 }
 
 export function InstancesClient() {
@@ -235,6 +257,10 @@ export function InstancesClient() {
                   hasSessionFiles: false,
                   sessionFilesCount: 0,
                   hasCredsJson: false,
+                  hasRegisteredSession: false,
+                  hasMe: false,
+                  hasMeId: false,
+                  isPairingPartial: false,
                   lastError: null
                 }
               : item
@@ -337,6 +363,9 @@ export function InstancesClient() {
                   status: "connecting",
                   qrCode: null,
                   hasQrCode: false,
+                  connectedPhone: hasConfirmedSession(item) && !item.isPairingPartial ? item.connectedPhone : null,
+                  hasRegisteredSession: item.isPairingPartial ? false : item.hasRegisteredSession,
+                  isPairingPartial: false,
                   lastError: null
                 }
               : item
@@ -452,7 +481,13 @@ export function InstancesClient() {
               </div>
               <div className="meta-row">
                 <span>Sessao salva</span>
-                <span>{instance.hasSessionFiles ? `Sim (${instance.sessionFilesCount ?? 0})` : "Nao"}</span>
+                <span>
+                  {hasConfirmedSession(instance)
+                    ? `Sim (${instance.sessionFilesCount ?? 0})`
+                    : instance.isPairingPartial
+                      ? "Parcial"
+                      : "Nao"}
+                </span>
               </div>
               <div className="meta-row">
                 <span>QR aguardando</span>
@@ -466,6 +501,12 @@ export function InstancesClient() {
 
             {cardErrors[instance.id] ? (
               <div className="message error compact">{cardErrors[instance.id]}</div>
+            ) : null}
+
+            {instance.isPairingPartial ? (
+              <div className="message warning compact">
+                Pareamento incompleto. Gere um novo QR.
+              </div>
             ) : null}
 
             {instance.qrCode ? (
@@ -508,9 +549,7 @@ export function InstancesClient() {
               >
                 {busyInstanceId === instance.id
                   ? "Aguarde..."
-                  : instance.hasSessionFiles
-                    ? "Retomar sessao"
-                    : "Gerar QR"}
+                  : getConnectionActionLabel(instance)}
               </button>
               <button
                 className="button secondary compact-button"

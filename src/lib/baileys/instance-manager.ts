@@ -6,7 +6,7 @@ import makeWASocket, {
   useMultiFileAuthState,
   type WASocket
 } from "@whiskeysockets/baileys";
-import { mkdir, readdir, rm } from "fs/promises";
+import { mkdir, rm } from "fs/promises";
 import { join, resolve } from "path";
 import P from "pino";
 import QRCode from "qrcode";
@@ -45,10 +45,13 @@ import {
 } from "./sync";
 import { syncLabelsAssociation, syncLabelsEdit } from "./labels-sync";
 import { extractMessageText, isOptOutMessage } from "./opt-out";
+import { getBaileysSessionFilesInfo } from "./session-files";
 
 const CATALOG_APP_STATE_COLLECTIONS = ALL_WA_PATCH_NAMES;
 const RECOVERABLE_SESSION_MESSAGE =
   "Sessao salva, aguardando retomada. Clique em Retomar sessao se nao reconectar automaticamente.";
+const PAIRING_INCOMPLETE_MESSAGE =
+  "QR expirou ou pareamento nao foi concluido. Gere um novo QR.";
 const RECOVERABLE_RECONNECT_BACKOFF_MS = [5_000, 15_000, 30_000] as const;
 const runtimeByInstanceId = new Map<string, WhatsappRuntime>();
 const startPromiseByInstanceId = new Map<string, Promise<WASocket>>();
@@ -87,36 +90,7 @@ export function getBaileysSessionDirForInstance(instance: Pick<WhatsappInstance,
 async function getBaileysSessionFilesInfoForInstance(
   instance: Pick<WhatsappInstance, "id" | "sessionKey">
 ) {
-  const sessionDir = resolve(getBaileysSessionDirForInstance(instance));
-  await mkdir(sessionDir, { recursive: true });
-
-  async function scanDir(dir: string): Promise<{ count: number; hasCredsJson: boolean }> {
-    const entries = await readdir(dir, { withFileTypes: true });
-    let count = 0;
-    let hasCredsJson = false;
-
-    for (const entry of entries) {
-      const fullPath = join(dir, entry.name);
-
-      if (entry.isDirectory()) {
-        const child = await scanDir(fullPath);
-        count += child.count;
-        hasCredsJson = hasCredsJson || child.hasCredsJson;
-      } else if (entry.isFile()) {
-        count += 1;
-        hasCredsJson = hasCredsJson || entry.name === "creds.json";
-      }
-    }
-
-    return { count, hasCredsJson };
-  }
-
-  const result = await scanDir(sessionDir);
-  return {
-    sessionDir,
-    sessionFilesCount: result.count,
-    hasCredsJson: result.hasCredsJson
-  };
+  return getBaileysSessionFilesInfo(getBaileysSessionDirForInstance(instance));
 }
 
 function getSessionIdForInstance(instanceId: string) {
@@ -234,6 +208,8 @@ async function scheduleRecoverableReconnect(
       sessionDir: string;
       sessionFilesCount: number;
       hasCredsJson: boolean;
+      hasRegisteredSession?: boolean;
+      isPairingPartial?: boolean;
     };
   }
 ) {
@@ -262,6 +238,8 @@ async function scheduleRecoverableReconnect(
       sessionDir: options.sessionInfo.sessionDir,
       sessionFilesCount: options.sessionInfo.sessionFilesCount,
       hasCredsJson: options.sessionInfo.hasCredsJson,
+      hasRegisteredSession: options.sessionInfo.hasRegisteredSession,
+      isPairingPartial: options.sessionInfo.isPairingPartial,
       isRecoverable: true
     });
     return;
@@ -290,6 +268,8 @@ async function scheduleRecoverableReconnect(
     sessionDir: options.sessionInfo.sessionDir,
     sessionFilesCount: options.sessionInfo.sessionFilesCount,
     hasCredsJson: options.sessionInfo.hasCredsJson,
+    hasRegisteredSession: options.sessionInfo.hasRegisteredSession,
+    isPairingPartial: options.sessionInfo.isPairingPartial,
     isRecoverable: true
   });
 
@@ -373,7 +353,7 @@ async function startSecondaryWhatsappInstance(instance: WhatsappInstance) {
 
   const startPromise = (async () => {
     const sessionDir = resolve(getBaileysSessionDirForInstance(instance));
-    const sessionInfo = await getBaileysSessionFilesInfoForInstance(instance);
+    let sessionInfo = await getBaileysSessionFilesInfoForInstance(instance);
     if (runtime.socket && runtime.status !== WhatsappStatus.connected) {
       runtime.socket.end(new Error("Restarting instance connection"));
       runtime.socket = null;
@@ -388,13 +368,31 @@ async function startSecondaryWhatsappInstance(instance: WhatsappInstance) {
     });
     await mkdir(sessionDir, { recursive: true });
 
+    if (sessionInfo.isPairingPartial && !instance.phone) {
+      console.log("[instance-manager] clearing partial pairing session before new qr", {
+        action: "generate_qr",
+        instanceId: instance.id,
+        sessionKey: instance.sessionKey,
+        sessionDir: sessionInfo.sessionDir,
+        sessionFilesCount: sessionInfo.sessionFilesCount,
+        hasCredsJson: sessionInfo.hasCredsJson,
+        hasRegisteredSession: sessionInfo.hasRegisteredSession,
+        isPairingPartial: sessionInfo.isPairingPartial
+      });
+      await rm(sessionDir, { recursive: true, force: true });
+      await mkdir(sessionDir, { recursive: true });
+      sessionInfo = await getBaileysSessionFilesInfoForInstance(instance);
+    }
+
     console.log("[instance-manager] starting instance", {
-      action: sessionInfo.sessionFilesCount > 0 ? "resume_session" : "generate_qr",
+      action: sessionInfo.hasRegisteredSession || sessionInfo.hasMeId || Boolean(instance.phone) ? "resume_session" : "generate_qr",
       instanceId: instance.id,
       sessionKey: instance.sessionKey,
       sessionDir: sessionInfo.sessionDir,
       sessionFilesCount: sessionInfo.sessionFilesCount,
-      hasCredsJson: sessionInfo.hasCredsJson
+      hasCredsJson: sessionInfo.hasCredsJson,
+      hasRegisteredSession: sessionInfo.hasRegisteredSession,
+      isPairingPartial: sessionInfo.isPairingPartial
     });
 
     const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
@@ -499,11 +497,19 @@ async function startSecondaryWhatsappInstance(instance: WhatsappInstance) {
         if (update.connection === "close") {
           const statusCode = getDisconnectStatusCode(update.lastDisconnect?.error);
           const sessionInfo = await getBaileysSessionFilesInfoForInstance(instance);
-          const hasSavedSession = sessionInfo.hasCredsJson || sessionInfo.sessionFilesCount > 0;
+          const hasSavedSession =
+            sessionInfo.hasRegisteredSession ||
+            sessionInfo.hasMeId ||
+            Boolean(runtime.connectedPhone) ||
+            Boolean(instance.phone);
           runtime.socket = null;
           runtime.lastError = update.lastDisconnect?.error
             ? errorMessage(update.lastDisconnect.error)
             : null;
+
+          if (sessionInfo.isPairingPartial && !hasSavedSession) {
+            runtime.lastError = PAIRING_INCOMPLETE_MESSAGE;
+          }
 
           if (statusCode === 428 && hasSavedSession) {
             await scheduleRecoverableReconnect(instance, runtime, {
@@ -526,6 +532,10 @@ async function startSecondaryWhatsappInstance(instance: WhatsappInstance) {
             sessionDir: sessionInfo.sessionDir,
             sessionFilesCount: sessionInfo.sessionFilesCount,
             hasCredsJson: sessionInfo.hasCredsJson,
+            hasRegisteredSession: sessionInfo.hasRegisteredSession,
+            isPairingPartial: sessionInfo.isPairingPartial,
+            hasQr: Boolean(runtime.qrCode),
+            persistedQr: Boolean(runtime.qrCode),
             isRecoverable: false
           });
 
@@ -650,6 +660,13 @@ export async function getWhatsappInstanceRuntimeStatus(instanceId?: string | nul
   const session = await ensureWhatsappSessionForInstance(instance.id);
   const sessionInfo = await getBaileysSessionFilesInfoForInstance(instance);
   const hasSessionFiles = sessionInfo.sessionFilesCount > 0;
+  const connectedPhone = runtime.connectedPhone ?? session.connectedPhone ?? instance.phone;
+  const currentStatus = runtime.status ?? session.status;
+  const hasConfirmedSession =
+    sessionInfo.hasRegisteredSession ||
+    sessionInfo.hasMeId ||
+    currentStatus === WhatsappStatus.connected ||
+    Boolean(connectedPhone);
 
   return {
     id: session.id,
@@ -663,7 +680,11 @@ export async function getWhatsappInstanceRuntimeStatus(instanceId?: string | nul
     hasSessionFiles,
     sessionFilesCount: sessionInfo.sessionFilesCount,
     hasCredsJson: sessionInfo.hasCredsJson,
-    connectedPhone: runtime.connectedPhone ?? session.connectedPhone ?? instance.phone,
+    hasRegisteredSession: sessionInfo.hasRegisteredSession,
+    hasMe: sessionInfo.hasMe,
+    hasMeId: sessionInfo.hasMeId,
+    isPairingPartial: sessionInfo.isPairingPartial,
+    connectedPhone,
     displayName: runtime.displayName,
     profilePictureUrl: runtime.profilePictureUrl,
     lastError: runtime.lastError ?? session.lastError,
@@ -672,8 +693,8 @@ export async function getWhatsappInstanceRuntimeStatus(instanceId?: string | nul
     lastConnectedAt: instance.lastConnectedAt?.toISOString() ?? null,
     lastSyncAt: instance.lastSyncAt?.toISOString() ?? null,
     isRecoverableSession:
-      hasSessionFiles &&
-      (runtime.status ?? session.status) !== WhatsappStatus.connected &&
+      hasConfirmedSession &&
+      currentStatus !== WhatsappStatus.connected &&
       !Boolean(runtime.qrCode ?? session.qrCode)
   };
 }

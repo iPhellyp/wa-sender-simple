@@ -42,10 +42,15 @@ export async function POST(request: NextRequest) {
 
   const currentSession = await getWhatsappInstanceRuntimeStatus(instance.id);
 
-  const hasSessionFiles = Boolean(currentSession.hasSessionFiles || currentSession.hasCredsJson);
-  const action = hasSessionFiles ? "resume_session" : "generate_qr";
+  const hasConfirmedSession = Boolean(
+    currentSession.hasRegisteredSession ||
+    currentSession.hasMeId ||
+    currentSession.connectedPhone ||
+    currentSession.status === WhatsappStatus.connected
+  );
+  const action = hasConfirmedSession ? "resume_session" : "generate_qr";
 
-  if (currentSession.status === "qr" && currentSession.hasQrCode && hasSessionFiles) {
+  if (currentSession.status === "qr" && currentSession.hasQrCode && !currentSession.isPairingPartial) {
     return NextResponse.json({
       ...currentSession,
       message: "Conexao WhatsApp ja esta em andamento"
@@ -64,14 +69,16 @@ export async function POST(request: NextRequest) {
     update: {
       status: WhatsappStatus.connecting,
       qrCode: null,
-      lastError: null
+      lastError: null,
+      ...(action === "generate_qr" ? { connectedPhone: null } : {})
     },
     create: {
       id: sessionId,
       instanceId: instance.id,
       status: WhatsappStatus.connecting,
       qrCode: null,
-      lastError: null
+      lastError: null,
+      connectedPhone: null
     }
   });
   await prisma.whatsappInstance.update({
@@ -79,7 +86,8 @@ export async function POST(request: NextRequest) {
       id: instance.id
     },
     data: {
-      status: WhatsappStatus.connecting
+      status: WhatsappStatus.connecting,
+      ...(action === "generate_qr" ? { phone: null } : {})
     }
   });
 
@@ -89,6 +97,9 @@ export async function POST(request: NextRequest) {
     instanceId: instance.id,
     sessionKey: instance.sessionKey,
     hasCredsJson: currentSession.hasCredsJson ?? false,
+    hasRegisteredSession: currentSession.hasRegisteredSession ?? false,
+    hasMeId: currentSession.hasMeId ?? false,
+    isPairingPartial: currentSession.isPairingPartial ?? false,
     sessionFilesCount: currentSession.sessionFilesCount ?? 0,
     jobId
   });
@@ -99,6 +110,9 @@ export async function POST(request: NextRequest) {
     status: WhatsappStatus.connecting,
     qrCode: null,
     hasQrCode: false,
+    hasRegisteredSession: currentSession.hasRegisteredSession ?? false,
+    hasMeId: currentSession.hasMeId ?? false,
+    isPairingPartial: currentSession.isPairingPartial ?? false,
     message: action === "generate_qr"
       ? "Geracao de QR enfileirada para esta instancia"
       : "Retomada de sessao enfileirada para esta instancia"
