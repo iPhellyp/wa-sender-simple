@@ -84,17 +84,10 @@ export function isVisibleIndividualWhatsappChat(chat: MaybeChat | null | undefin
   if (!chat) return false;
   if (chat.isGroup === true) return false;
   if (hasBlockedKind(chat.type) || hasBlockedKind(chat.source)) return false;
-  if (!isIndividualWhatsappJidSafe(chat.jid)) return false;
 
-  const jid = normalized(chat.jid);
-
-  // @lid sem mensagem/conversa costuma ser participante descoberto em grupo.
-  // Mantemos @s.whatsapp.net/@c.us/catalogo visiveis, mas @lid precisa de evidencia direta.
-  if (jid.endsWith("@lid")) {
-    return hasDirectConversationEvidence(chat);
-  }
-
-  return true;
+  // Nao exigir lastMessageAt aqui: contatos legitimos de catalogo/lista podem nao ter mensagem ainda.
+  // O bloqueio de participantes de grupo deve acontecer na origem do sync e pelos marcadores de JID.
+  return isIndividualWhatsappJidSafe(chat.jid);
 }
 
 export function isVisibleIndividualWhatsappContact(contact: MaybeContact | null | undefined) {
