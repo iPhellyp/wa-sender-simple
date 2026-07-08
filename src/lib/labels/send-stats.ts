@@ -31,11 +31,12 @@ function toCatalogSendStatus(status: CampaignRecipientStatus): CatalogSendStatus
   return "pending";
 }
 
-export async function getSendJidSets(): Promise<SendJidSets> {
+export async function getSendJidSets(instanceId?: string): Promise<SendJidSets> {
   const [sentRows, failedRows, anyRows] = await Promise.all([
     prisma.campaignRecipient.findMany({
       distinct: ["jid"],
       where: {
+        ...(instanceId ? { instanceId } : {}),
         jid: {
           not: null
         },
@@ -48,6 +49,7 @@ export async function getSendJidSets(): Promise<SendJidSets> {
     prisma.campaignRecipient.findMany({
       distinct: ["jid"],
       where: {
+        ...(instanceId ? { instanceId } : {}),
         jid: {
           not: null
         },
@@ -60,6 +62,7 @@ export async function getSendJidSets(): Promise<SendJidSets> {
     prisma.campaignRecipient.findMany({
       distinct: ["jid"],
       where: {
+        ...(instanceId ? { instanceId } : {}),
         jid: {
           not: null
         }
@@ -77,13 +80,14 @@ export async function getSendJidSets(): Promise<SendJidSets> {
   };
 }
 
-export async function getLastSendByJids(jids: string[]) {
+export async function getLastSendByJids(jids: string[], instanceId?: string) {
   if (jids.length === 0) {
     return new Map<string, LastSendSummary>();
   }
 
   const rows = await prisma.campaignRecipient.findMany({
     where: {
+      ...(instanceId ? { instanceId } : {}),
       jid: {
         in: jids
       }

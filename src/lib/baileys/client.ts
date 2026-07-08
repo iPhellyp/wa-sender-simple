@@ -17,6 +17,7 @@ import { prisma } from "../prisma/client";
 import { normalizeBrazilPhone, toWhatsappJid } from "../phone/normalize";
 import { enqueueWhatsappCatalogSync } from "../queue/campaign-queue";
 import { clearWhatsappOperationalData } from "../server/whatsapp-session-data";
+import { DEFAULT_WHATSAPP_INSTANCE_ID } from "../server/whatsapp-instances";
 import { CATALOG_BOOTSTRAP_MODE, shouldIgnoreJidForX1Only } from "../whatsapp/jid";
 import { extractMessageText, isOptOutMessage } from "./opt-out";
 import {
@@ -361,7 +362,8 @@ async function getStoredMessage(key: proto.IMessageKey) {
 
   const storedMessage = await prisma.whatsappMessage.findUnique({
     where: {
-      jid_waMessageId: {
+      instanceId_jid_waMessageId: {
+        instanceId: DEFAULT_WHATSAPP_INSTANCE_ID,
         jid,
         waMessageId
       }
@@ -387,7 +389,19 @@ async function saveWhatsappSession(data: {
     update: data,
     create: {
       id: SESSION_ID,
+      instanceId: DEFAULT_WHATSAPP_INSTANCE_ID,
       ...data
+    }
+  });
+
+  await prisma.whatsappInstance.updateMany({
+    where: {
+      id: DEFAULT_WHATSAPP_INSTANCE_ID
+    },
+    data: {
+      status: data.status,
+      ...(data.connectedPhone !== undefined ? { phone: data.connectedPhone } : {}),
+      ...(data.status === WhatsappStatus.connected ? { lastConnectedAt: new Date() } : {})
     }
   });
 }
@@ -613,6 +627,7 @@ async function handleIncomingMessages(event: BaileysEventMap["messages.upsert"])
 
     await prisma.contact.updateMany({
       where: {
+        instanceId: DEFAULT_WHATSAPP_INSTANCE_ID,
         phoneNormalized: normalizedPhone.normalized
       },
       data: {
@@ -1367,11 +1382,24 @@ export async function requestWhatsappHistorySync() {
   }
 
   const [chatCount, contactCount, messageCount, oldestMessage] = await Promise.all([
-    prisma.whatsappChat.count(),
-    prisma.whatsappContact.count(),
-    prisma.whatsappMessage.count(),
+    prisma.whatsappChat.count({
+      where: {
+        instanceId: DEFAULT_WHATSAPP_INSTANCE_ID
+      }
+    }),
+    prisma.whatsappContact.count({
+      where: {
+        instanceId: DEFAULT_WHATSAPP_INSTANCE_ID
+      }
+    }),
+    prisma.whatsappMessage.count({
+      where: {
+        instanceId: DEFAULT_WHATSAPP_INSTANCE_ID
+      }
+    }),
     prisma.whatsappMessage.findFirst({
       where: {
+        instanceId: DEFAULT_WHATSAPP_INSTANCE_ID,
         timestamp: {
           not: null
         }
@@ -1437,17 +1465,24 @@ export async function requestWhatsappCatalogSync(options: { forceSnapshot?: bool
   const [chatCount, contactCount, labelCount, associationCount] = await Promise.all([
     prisma.whatsappChat.count({
       where: {
+        instanceId: DEFAULT_WHATSAPP_INSTANCE_ID,
         isGroup: false
       }
     }),
-    prisma.whatsappContact.count(),
+    prisma.whatsappContact.count({
+      where: {
+        instanceId: DEFAULT_WHATSAPP_INSTANCE_ID
+      }
+    }),
     prisma.whatsappLabel.count({
       where: {
+        instanceId: DEFAULT_WHATSAPP_INSTANCE_ID,
         deleted: false
       }
     }),
     prisma.whatsappChatLabel.count({
       where: {
+        instanceId: DEFAULT_WHATSAPP_INSTANCE_ID,
         chat: {
           isGroup: false
         }

@@ -7,6 +7,7 @@ import type {
 } from "@whiskeysockets/baileys";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../prisma/client";
+import { DEFAULT_WHATSAPP_INSTANCE_ID } from "../server/whatsapp-instances";
 import { cleanDisplayName, isBetterDisplayName, pickBestDisplayName } from "../whatsapp/display-name";
 import {
   FAST_LABEL_SENDER_MODE,
@@ -154,7 +155,11 @@ export function normalizeChatJid(jid: string | null | undefined) {
 
 export { isGroupJid };
 
-export async function ensureChatForJid(jid: string, optionalName?: string | null) {
+export async function ensureChatForJid(
+  jid: string,
+  optionalName?: string | null,
+  instanceId = DEFAULT_WHATSAPP_INSTANCE_ID
+) {
   const normalizedJid = normalizeChatJid(jid);
 
   if (!normalizedJid) {
@@ -168,7 +173,10 @@ export async function ensureChatForJid(jid: string, optionalName?: string | null
   const name = cleanDisplayName(optionalName, normalizedJid);
   const existingChat = await prisma.whatsappChat.findUnique({
     where: {
-      jid: normalizedJid
+      instanceId_jid: {
+        instanceId,
+        jid: normalizedJid
+      }
     },
     select: {
       name: true
@@ -178,13 +186,17 @@ export async function ensureChatForJid(jid: string, optionalName?: string | null
 
   return prisma.whatsappChat.upsert({
     where: {
-      jid: normalizedJid
+      instanceId_jid: {
+        instanceId,
+        jid: normalizedJid
+      }
     },
     update: {
       ...(shouldUpdateName ? { name } : {}),
       isGroup: isGroupJid(normalizedJid)
     },
     create: {
+      instanceId,
       jid: normalizedJid,
       name,
       isGroup: isGroupJid(normalizedJid)
@@ -471,7 +483,10 @@ export async function upsertChatFromBaileys(chat: Partial<Chat>) {
     getMessageTimestamp(chat.lastMessageRecvTimestamp);
   const existingChat = await prisma.whatsappChat.findUnique({
     where: {
-      jid
+      instanceId_jid: {
+        instanceId: DEFAULT_WHATSAPP_INSTANCE_ID,
+        jid
+      }
     },
     select: {
       name: true,
@@ -486,7 +501,10 @@ export async function upsertChatFromBaileys(chat: Partial<Chat>) {
 
   await prisma.whatsappChat.upsert({
     where: {
-      jid
+      instanceId_jid: {
+        instanceId: DEFAULT_WHATSAPP_INSTANCE_ID,
+        jid
+      }
     },
     update: {
       ...(shouldUpdateName ? { name } : {}),
@@ -495,6 +513,7 @@ export async function upsertChatFromBaileys(chat: Partial<Chat>) {
       ...(shouldUpdateLastMessageAt ? { lastMessageAt } : {})
     },
     create: {
+      instanceId: DEFAULT_WHATSAPP_INSTANCE_ID,
       jid,
       name,
       isGroup,
@@ -528,7 +547,10 @@ export async function upsertContactFromBaileys(contact: Partial<Contact>) {
   ], jid);
   const existingContact = await prisma.whatsappContact.findUnique({
     where: {
-      jid
+      instanceId_jid: {
+        instanceId: DEFAULT_WHATSAPP_INSTANCE_ID,
+        jid
+      }
     },
     select: {
       name: true,
@@ -542,7 +564,10 @@ export async function upsertContactFromBaileys(contact: Partial<Contact>) {
 
   await prisma.whatsappContact.upsert({
     where: {
-      jid
+      instanceId_jid: {
+        instanceId: DEFAULT_WHATSAPP_INSTANCE_ID,
+        jid
+      }
     },
     update: {
       phone: extractPhoneFromJid(jid),
@@ -551,6 +576,7 @@ export async function upsertContactFromBaileys(contact: Partial<Contact>) {
       ...(contact.verifiedName !== undefined ? { isBusiness: Boolean(contact.verifiedName) } : {})
     },
     create: {
+      instanceId: DEFAULT_WHATSAPP_INSTANCE_ID,
       jid,
       phone: extractPhoneFromJid(jid),
       name,
@@ -583,7 +609,10 @@ async function upsertContactFromMessage(options: {
   const candidateName = options.fromMe ? null : cleanDisplayName(options.pushName, contactJid);
   const existingContact = await prisma.whatsappContact.findUnique({
     where: {
-      jid: contactJid
+      instanceId_jid: {
+        instanceId: DEFAULT_WHATSAPP_INSTANCE_ID,
+        jid: contactJid
+      }
     },
     select: {
       name: true,
@@ -599,7 +628,10 @@ async function upsertContactFromMessage(options: {
 
   await prisma.whatsappContact.upsert({
     where: {
-      jid: contactJid
+      instanceId_jid: {
+        instanceId: DEFAULT_WHATSAPP_INSTANCE_ID,
+        jid: contactJid
+      }
     },
     update: {
       phone: extractPhoneFromJid(contactJid),
@@ -607,6 +639,7 @@ async function upsertContactFromMessage(options: {
       ...(shouldUpdatePushName ? { pushName: candidateName } : {})
     },
     create: {
+      instanceId: DEFAULT_WHATSAPP_INSTANCE_ID,
       jid: contactJid,
       phone: extractPhoneFromJid(contactJid),
       name: candidateName,
@@ -679,7 +712,10 @@ export async function upsertMessageFromBaileys(
   const rawJson = toPrismaJson(message);
   const existingChat = await prisma.whatsappChat.findUnique({
     where: {
-      jid
+      instanceId_jid: {
+        instanceId: DEFAULT_WHATSAPP_INSTANCE_ID,
+        jid
+      }
     },
     select: {
       name: true
@@ -696,13 +732,17 @@ export async function upsertMessageFromBaileys(
 
   const chat = await prisma.whatsappChat.upsert({
     where: {
-      jid
+      instanceId_jid: {
+        instanceId: DEFAULT_WHATSAPP_INSTANCE_ID,
+        jid
+      }
     },
     update: {
       isGroup: isGroupJid(jid),
       ...(shouldUpdateName ? { name: pushName } : {})
     },
     create: {
+      instanceId: DEFAULT_WHATSAPP_INSTANCE_ID,
       jid,
       ...(!isGroupJid(jid) && pushName ? { name: pushName } : {}),
       isGroup: isGroupJid(jid),
@@ -714,7 +754,8 @@ export async function upsertMessageFromBaileys(
 
   await prisma.whatsappMessage.upsert({
     where: {
-      jid_waMessageId: {
+      instanceId_jid_waMessageId: {
+        instanceId: DEFAULT_WHATSAPP_INSTANCE_ID,
         jid,
         waMessageId
       }
@@ -729,6 +770,7 @@ export async function upsertMessageFromBaileys(
       ...(timestamp ? { timestamp } : {})
     },
     create: {
+      instanceId: DEFAULT_WHATSAPP_INSTANCE_ID,
       chatId: chat.id,
       waMessageId,
       jid,
@@ -799,6 +841,7 @@ export async function updateMessageFromBaileys(messageUpdate: WAMessageUpdate) {
 
   const result = await prisma.whatsappMessage.updateMany({
     where: {
+      instanceId: DEFAULT_WHATSAPP_INSTANCE_ID,
       jid,
       waMessageId
     },

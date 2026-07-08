@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
 type EnvioSummary = {
@@ -94,6 +95,8 @@ function getAudienceLabel(campaign: Pick<EnvioSummary, "targetLabel" | "targetMo
 }
 
 export function EnviosClient({ selectedCampaignId }: { selectedCampaignId?: string | null }) {
+  const searchParams = useSearchParams();
+  const activeInstanceId = searchParams.get("instanceId") ?? "";
   const [campaigns, setCampaigns] = useState<EnvioSummary[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(selectedCampaignId ?? null);
   const [details, setDetails] = useState<CampaignDetails | null>(null);
@@ -150,13 +153,17 @@ export function EnviosClient({ selectedCampaignId }: { selectedCampaignId?: stri
   const progressPercent = detailTotal > 0 ? Math.round((detailGroups.sent.length / detailTotal) * 100) : 0;
 
   async function loadCampaigns() {
-    const response = await fetch("/api/envios", { cache: "no-store" });
+    const params = new URLSearchParams();
+    if (activeInstanceId) params.set("instanceId", activeInstanceId);
+    const response = await fetch(`/api/envios?${params.toString()}`, { cache: "no-store" });
     const data = (await response.json()) as { campaigns: EnvioSummary[] };
     setCampaigns(data.campaigns);
   }
 
   async function loadDetails(campaignId: string) {
-    const response = await fetch(`/api/envios/${campaignId}`, { cache: "no-store" });
+    const params = new URLSearchParams();
+    if (activeInstanceId) params.set("instanceId", activeInstanceId);
+    const response = await fetch(`/api/envios/${campaignId}?${params.toString()}`, { cache: "no-store" });
     const data = (await response.json()) as { campaign?: CampaignDetails; error?: string };
     if (!response.ok || !data.campaign) {
       throw new Error(String(data.error ?? "Erro ao carregar detalhes"));
@@ -195,14 +202,16 @@ export function EnviosClient({ selectedCampaignId }: { selectedCampaignId?: stri
         setLoading(false);
       }
     })();
-  }, [selectedCampaignId]);
+  }, [selectedCampaignId, activeInstanceId]);
 
   async function runCampaignAction(campaignId: string, action: "start" | "pause" | "resume" | "cancel") {
     setBusy(true);
     setError(null);
 
     try {
-      const response = await fetch(`/api/campaigns/${campaignId}/${action}`, {
+      const params = new URLSearchParams();
+      if (activeInstanceId) params.set("instanceId", activeInstanceId);
+      const response = await fetch(`/api/campaigns/${campaignId}/${action}?${params.toString()}`, {
         method: "POST"
       });
 
@@ -304,7 +313,7 @@ export function EnviosClient({ selectedCampaignId }: { selectedCampaignId?: stri
             <div className="empty-state compact">
               <strong>Nenhuma campanha encontrada</strong>
               <span>Ajuste os filtros ou crie uma nova campanha.</span>
-              <Link className="button compact-button" href="/campanhas">
+              <Link className="button compact-button" href={activeInstanceId ? `/campanhas?instanceId=${activeInstanceId}` : "/campanhas"}>
                 Criar campanha
               </Link>
             </div>

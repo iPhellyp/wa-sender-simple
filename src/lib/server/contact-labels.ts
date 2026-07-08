@@ -12,6 +12,7 @@ function jidMatchesPhone(jid: string, phone: string) {
 }
 
 export async function applyLocalContactLabel(params: {
+  instanceId: string;
   contactIds: string[];
   labelName: string;
 }) {
@@ -24,6 +25,7 @@ export async function applyLocalContactLabel(params: {
 
   const contacts = await prisma.contact.findMany({
     where: {
+      instanceId: params.instanceId,
       id: {
         in: contactIds
       }
@@ -37,6 +39,7 @@ export async function applyLocalContactLabel(params: {
   const chats = phones.length
     ? await prisma.whatsappChat.findMany({
         where: {
+          instanceId: params.instanceId,
           isGroup: false,
           OR: phones.map((phone) => ({
             jid: {
@@ -61,6 +64,7 @@ export async function applyLocalContactLabel(params: {
 
   const updated = await prisma.contact.updateMany({
     where: {
+      instanceId: params.instanceId,
       id: {
         in: contacts.map((contact) => contact.id)
       }

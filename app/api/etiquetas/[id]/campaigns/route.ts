@@ -8,6 +8,7 @@ import {
   DEFAULT_EXCLUDE_ALREADY_SENT_DAYS,
   DEFAULT_MAX_RECIPIENTS
 } from "@/src/lib/labels/audience";
+import { getActiveInstanceIdFromSearchOrDefault } from "@/src/lib/server/whatsapp-instances";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -30,7 +31,11 @@ export async function POST(
     sendWindowStart?: string | null;
     sendWindowEnd?: string | null;
     startNow?: boolean;
+    instanceId?: string;
   };
+  const instanceId = await getActiveInstanceIdFromSearchOrDefault({
+    instanceId: payload.instanceId
+  });
 
   const name = String(payload.name ?? "").trim();
   const message = String(payload.message ?? "").trim();
@@ -69,6 +74,7 @@ export async function POST(
   }
 
   const audience = await buildLabelAudience({
+    instanceId,
     labelId,
     includeGroups,
     excludeOptOut: true,
@@ -95,6 +101,7 @@ export async function POST(
   const campaign = await prisma.campaign.create({
     data: {
       name,
+      instanceId,
       defaultMessage: message,
       intervalMinutes,
       status: CampaignStatus.draft,
@@ -108,6 +115,7 @@ export async function POST(
       sendWindowEnd: payload.sendWindowEnd?.trim() || null,
       recipients: {
         create: audience.eligibleRecipients.map((recipient) => ({
+          instanceId,
           chatId: recipient.chatId,
           jid: recipient.jid,
           messageFinal: message,

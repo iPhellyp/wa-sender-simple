@@ -1,6 +1,7 @@
 ﻿import { NextRequest, NextResponse } from "next/server";
 import { enqueueManualMessage } from "@/src/lib/queue/campaign-queue";
 import { prisma } from "@/src/lib/prisma/client";
+import { getActiveInstanceIdFromSearchOrDefault } from "@/src/lib/server/whatsapp-instances";
 import { shouldIgnoreJidForX1Only } from "@/src/lib/whatsapp/jid";
 
 export const runtime = "nodejs";
@@ -13,6 +14,7 @@ export async function POST(
   }
 ) {
   const { id } = await context.params;
+  const instanceId = await getActiveInstanceIdFromSearchOrDefault(request.nextUrl.searchParams);
   const payload = (await request.json()) as {
     text?: string;
   };
@@ -29,9 +31,10 @@ export async function POST(
     );
   }
 
-  const chat = await prisma.whatsappChat.findUnique({
+  const chat = await prisma.whatsappChat.findFirst({
     where: {
-      id
+      id,
+      instanceId
     }
   });
 

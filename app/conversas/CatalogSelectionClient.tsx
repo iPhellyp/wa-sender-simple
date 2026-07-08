@@ -80,7 +80,7 @@ export function CatalogSelectionClient({ items }: { items: CatalogConversationIt
             type="button"
             onClick={() => setSelectedIds(new Set(items.map((item) => item.id)))}
           >
-            Selecionar visÃ­veis
+            Selecionar visiveis
           </button>
           <button
             className="button secondary"
@@ -88,7 +88,7 @@ export function CatalogSelectionClient({ items }: { items: CatalogConversationIt
             type="button"
             onClick={() => setSelectedIds(new Set())}
           >
-            Limpar seleÃ§Ã£o
+            Limpar selecao
           </button>
         </div>
         <div className="button-row">
@@ -105,7 +105,7 @@ export function CatalogSelectionClient({ items }: { items: CatalogConversationIt
 
       {exceedsQueryLimit ? (
         <div className="message error">
-          Selecione atÃ© {MAX_QUERY_CHAT_IDS} contatos para enviar por query string com seguranÃ§a.
+          Selecione ate {MAX_QUERY_CHAT_IDS} contatos para enviar por query string com seguranca.
         </div>
       ) : null}
 
@@ -176,5 +176,4 @@ export function CatalogSelectionClient({ items }: { items: CatalogConversationIt
     </div>
   );
 }
-
 

@@ -1,6 +1,7 @@
 ﻿"use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { SendMessageForm } from "./SendMessageForm";
 
 type ConversationMessage = {
@@ -24,6 +25,7 @@ type ConversationMessagesClientProps = {
   chatId: string;
   isGroup: boolean;
   whatsappStatus: string;
+  instanceId?: string;
   totalMessages: number;
 };
 
@@ -70,6 +72,8 @@ export function ConversationMessagesClient({
   whatsappStatus,
   totalMessages
 }: ConversationMessagesClientProps) {
+  const searchParams = useSearchParams();
+  const activeInstanceId = searchParams.get("instanceId") ?? "";
   const threadRef = useRef<HTMLDivElement | null>(null);
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [hasMore, setHasMore] = useState(false);
@@ -109,6 +113,7 @@ export function ConversationMessagesClient({
         const params = new URLSearchParams({
           limit: String(PAGE_SIZE)
         });
+        if (activeInstanceId) params.set("instanceId", activeInstanceId);
         const response = await fetch(`/api/conversas/${chatId}/messages?${params.toString()}`, {
           cache: "no-store"
         });
@@ -133,7 +138,7 @@ export function ConversationMessagesClient({
         setRefreshing(false);
       }
     },
-    [chatId, isNearBottom, scrollToBottom]
+    [activeInstanceId, chatId, isNearBottom, scrollToBottom]
   );
 
   const loadOlder = useCallback(async () => {
@@ -154,6 +159,7 @@ export function ConversationMessagesClient({
         limit: String(PAGE_SIZE),
         before: oldestMessage.id
       });
+      if (activeInstanceId) params.set("instanceId", activeInstanceId);
       const response = await fetch(`/api/conversas/${chatId}/messages?${params.toString()}`, {
         cache: "no-store"
       });
@@ -178,7 +184,7 @@ export function ConversationMessagesClient({
     } finally {
       setLoadingOlder(false);
     }
-  }, [chatId, loadingOlder, messages]);
+  }, [activeInstanceId, chatId, loadingOlder, messages]);
 
   useEffect(() => {
     void loadLatest();
@@ -267,6 +273,7 @@ export function ConversationMessagesClient({
       <footer className="chat-composer">
         <SendMessageForm
           chatId={chatId}
+          instanceId={activeInstanceId}
           isGroup={isGroup}
           onSent={() => {
             window.setTimeout(() => void loadLatest(), 1200);
@@ -276,4 +283,5 @@ export function ConversationMessagesClient({
     </>
   );
 }
+
 

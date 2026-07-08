@@ -6,6 +6,7 @@ import { SectionCard } from "@/app/components/ui/SectionCard";
 import { StatCard } from "@/app/components/ui/StatCard";
 import { StatusBadge, statusToneFromValue } from "@/app/components/ui/StatusBadge";
 import { prisma } from "@/src/lib/prisma/client";
+import { getActiveInstanceIdFromSearchOrDefault } from "@/src/lib/server/whatsapp-instances";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -37,13 +38,22 @@ function getRecipientLabel(recipient: {
   return recipient.contact?.name ?? recipient.contact?.phoneNormalized ?? recipient.jid ?? "Contato";
 }
 
-export default async function DashboardPage() {
+type DashboardPageProps = {
+  searchParams?: Promise<{
+    instanceId?: string | string[];
+  }>;
+};
+
+export default async function DashboardPage({ searchParams }: DashboardPageProps) {
+  const resolvedSearchParams = await searchParams;
+  const instanceId = await getActiveInstanceIdFromSearchOrDefault(resolvedSearchParams);
   const startOfToday = new Date();
   startOfToday.setHours(0, 0, 0, 0);
 
   const recentFailureWindow = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
   const [
+    whatsappInstance,
     whatsappSession,
     x1Chats,
     activeLabels,
@@ -59,24 +69,32 @@ export default async function DashboardPage() {
     latestCampaigns,
     latestRecipients
   ] = await Promise.all([
-    prisma.whatsappSession.findUnique({
+    prisma.whatsappInstance.findUnique({
       where: {
-        id: "default"
+        id: instanceId
+      }
+    }),
+    prisma.whatsappSession.findFirst({
+      where: {
+        instanceId
       }
     }),
     prisma.whatsappChat.count({
       where: {
+        instanceId,
         isGroup: false
       }
     }),
     prisma.whatsappLabel.count({
       where: {
+        instanceId,
         deleted: false
       }
     }),
     prisma.whatsappChatLabel.findMany({
       distinct: ["chatId"],
       where: {
+        instanceId,
         chat: {
           isGroup: false
         }
@@ -85,9 +103,14 @@ export default async function DashboardPage() {
         chatId: true
       }
     }),
-    prisma.campaign.count(),
+    prisma.campaign.count({
+      where: {
+        instanceId
+      }
+    }),
     prisma.campaignRecipient.count({
       where: {
+        instanceId,
         status: CampaignRecipientStatus.sent,
         sentAt: {
           gte: startOfToday
@@ -96,6 +119,7 @@ export default async function DashboardPage() {
     }),
     prisma.campaignRecipient.count({
       where: {
+        instanceId,
         status: CampaignRecipientStatus.failed,
         updatedAt: {
           gte: recentFailureWindow
@@ -103,6 +127,9 @@ export default async function DashboardPage() {
       }
     }),
     prisma.whatsappMessage.findFirst({
+      where: {
+        instanceId
+      },
       orderBy: [
         {
           timestamp: {
@@ -120,6 +147,9 @@ export default async function DashboardPage() {
       }
     }),
     prisma.whatsappChat.findFirst({
+      where: {
+        instanceId
+      },
       orderBy: {
         updatedAt: "desc"
       },
@@ -128,6 +158,9 @@ export default async function DashboardPage() {
       }
     }),
     prisma.whatsappContact.findFirst({
+      where: {
+        instanceId
+      },
       orderBy: {
         updatedAt: "desc"
       },
@@ -136,6 +169,9 @@ export default async function DashboardPage() {
       }
     }),
     prisma.whatsappLabel.findFirst({
+      where: {
+        instanceId
+      },
       orderBy: {
         updatedAt: "desc"
       },
@@ -144,6 +180,9 @@ export default async function DashboardPage() {
       }
     }),
     prisma.whatsappChatLabel.findFirst({
+      where: {
+        instanceId
+      },
       orderBy: {
         updatedAt: "desc"
       },
@@ -152,6 +191,9 @@ export default async function DashboardPage() {
       }
     }),
     prisma.campaign.findMany({
+      where: {
+        instanceId
+      },
       orderBy: {
         updatedAt: "desc"
       },
@@ -177,6 +219,7 @@ export default async function DashboardPage() {
     }),
     prisma.campaignRecipient.findMany({
       where: {
+        instanceId,
         status: {
           in: [CampaignRecipientStatus.sent, CampaignRecipientStatus.failed]
         }
@@ -208,9 +251,11 @@ export default async function DashboardPage() {
     })
   ]);
 
-  const whatsappStatus = whatsappSession?.status ?? "disconnected";
+  const whatsappStatus = whatsappInstance?.status ?? whatsappSession?.status ?? "disconnected";
   const latestCatalogUpdate = maxDate(
     whatsappSession?.updatedAt,
+    whatsappInstance?.lastSyncAt,
+    whatsappInstance?.lastConnectedAt,
     latestChatUpdate?.updatedAt,
     latestContactUpdate?.updatedAt,
     latestLabelUpdate?.updatedAt,
@@ -358,7 +403,7 @@ export default async function DashboardPage() {
               </div>
             ) : (
               <div className="alert-item success">
-                <strong>Sem alertas crÃ­ticos</strong>
+                <strong>Sem alertas criticos</strong>
                 <span>Conexao, etiquetas e campanhas nao indicam bloqueios operacionais agora.</span>
               </div>
             )}
@@ -387,7 +432,7 @@ export default async function DashboardPage() {
           ) : (
             <EmptyState
               title="Nenhum envio recente"
-              description="Os envios aparecerÃ£o aqui quando campanhas comecarem a rodar."
+              description="Os envios aparecerao aqui quando campanhas comecarem a rodar."
             />
           )}
         </SectionCard>
@@ -395,5 +440,4 @@ export default async function DashboardPage() {
     </AppShell>
   );
 }
-
 

@@ -45,7 +45,7 @@ function toLastSend(recipient: RecipientWithCampaign): ContactLastSend {
   };
 }
 
-export async function getSendStatsByContact(contactIds: string[]) {
+export async function getSendStatsByContact(contactIds: string[], instanceId?: string) {
   const uniqueIds = Array.from(new Set(contactIds.filter(Boolean)));
   const latestByContactId = new Map<string, ContactLastSend>();
 
@@ -55,6 +55,7 @@ export async function getSendStatsByContact(contactIds: string[]) {
 
   const recipients = await prisma.campaignRecipient.findMany({
     where: {
+      ...(instanceId ? { instanceId } : {}),
       contactId: {
         in: uniqueIds
       }
@@ -83,7 +84,7 @@ export async function getSendStatsByContact(contactIds: string[]) {
   return latestByContactId;
 }
 
-export async function getLastSendByPhone(phones: string[]) {
+export async function getLastSendByPhone(phones: string[], instanceId?: string) {
   const uniquePhones = Array.from(new Set(phones.filter(Boolean)));
   const latestByPhone = new Map<string, ContactLastSend>();
 
@@ -93,7 +94,9 @@ export async function getLastSendByPhone(phones: string[]) {
 
   const recipients = await prisma.campaignRecipient.findMany({
     where: {
+      ...(instanceId ? { instanceId } : {}),
       contact: {
+        ...(instanceId ? { instanceId } : {}),
         phoneNormalized: {
           in: uniquePhones
         }
@@ -130,7 +133,7 @@ export async function getLastSendByPhone(phones: string[]) {
   return latestByPhone;
 }
 
-export async function getLastSendByJid(jids: string[]) {
+export async function getLastSendByJid(jids: string[], instanceId?: string) {
   const uniqueJids = Array.from(new Set(jids.filter(Boolean)));
   const latestByJid = new Map<string, ContactLastSend>();
 
@@ -140,6 +143,7 @@ export async function getLastSendByJid(jids: string[]) {
 
   const recipients = await prisma.campaignRecipient.findMany({
     where: {
+      ...(instanceId ? { instanceId } : {}),
       jid: {
         in: uniqueJids
       }
@@ -168,13 +172,14 @@ export async function getLastSendByJid(jids: string[]) {
   return latestByJid;
 }
 
-export async function getSendStatsByPhone(phones: string[]) {
-  return getLastSendByPhone(phones);
+export async function getSendStatsByPhone(phones: string[], instanceId?: string) {
+  return getLastSendByPhone(phones, instanceId);
 }
 
-export async function getSendStatsByCampaign(campaignId: string) {
+export async function getSendStatsByCampaign(campaignId: string, instanceId?: string) {
   const recipients = await prisma.campaignRecipient.findMany({
     where: {
+      ...(instanceId ? { instanceId } : {}),
       campaignId
     },
     select: {

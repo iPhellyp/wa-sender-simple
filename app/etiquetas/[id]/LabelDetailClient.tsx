@@ -206,7 +206,7 @@ export function LabelDetailClient({ labelId }: { labelId: string }) {
             type="button"
             onClick={() => setSelectedIds(new Set(conversations.map((item) => item.chatId)))}
           >
-            Selecionar visÃ­veis
+            Selecionar visiveis
           </button>
           <button
             className="button secondary"
@@ -214,7 +214,7 @@ export function LabelDetailClient({ labelId }: { labelId: string }) {
             type="button"
             onClick={() => setSelectedIds(new Set())}
           >
-            Limpar seleÃ§Ã£o
+            Limpar selecao
           </button>
           <span className="muted">{selected.length} selecionado(s)</span>
           <Link
@@ -228,7 +228,7 @@ export function LabelDetailClient({ labelId }: { labelId: string }) {
 
       {exceedsQueryLimit ? (
         <div className="message error">
-          Selecione atÃ© {MAX_QUERY_CHAT_IDS} contatos para enviar por query string.
+          Selecione ate {MAX_QUERY_CHAT_IDS} contatos para enviar por query string.
         </div>
       ) : null}
 
@@ -325,5 +325,4 @@ export function LabelDetailClient({ labelId }: { labelId: string }) {
     </section>
   );
 }
-
 

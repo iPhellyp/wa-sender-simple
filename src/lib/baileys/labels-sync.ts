@@ -1,5 +1,6 @@
 import type { BaileysEventMap } from "@whiskeysockets/baileys";
 import { prisma } from "../prisma/client";
+import { DEFAULT_WHATSAPP_INSTANCE_ID } from "../server/whatsapp-instances";
 import { ensureChatForJid, isGroupJid, normalizeChatJid } from "./sync";
 import { recordX1GroupSkips, shouldIgnoreJidForX1Only } from "../whatsapp/jid";
 
@@ -47,7 +48,10 @@ export async function upsertWhatsappLabel(label: LabelEditEvent) {
 
   await prisma.whatsappLabel.upsert({
     where: {
-      waLabelId
+      instanceId_waLabelId: {
+        instanceId: DEFAULT_WHATSAPP_INSTANCE_ID,
+        waLabelId
+      }
     },
     update: {
       name: safeLabelName(label.name, waLabelId),
@@ -57,6 +61,7 @@ export async function upsertWhatsappLabel(label: LabelEditEvent) {
       rawJson: buildLabelRawJson(label)
     },
     create: {
+      instanceId: DEFAULT_WHATSAPP_INSTANCE_ID,
       waLabelId,
       name: safeLabelName(label.name, waLabelId),
       color: labelColorToString(label.color),
@@ -93,7 +98,10 @@ export async function upsertWhatsappLabels(labels: LabelEditEvent[]) {
 async function resolveLabelByWaId(waLabelId: string) {
   return prisma.whatsappLabel.findUnique({
     where: {
-      waLabelId
+      instanceId_waLabelId: {
+        instanceId: DEFAULT_WHATSAPP_INSTANCE_ID,
+        waLabelId
+      }
     }
   });
 }
@@ -101,6 +109,7 @@ async function resolveLabelByWaId(waLabelId: string) {
 export async function removeWhatsappLabelAssociation(chatId: string, labelInternalId: string) {
   await prisma.whatsappChatLabel.deleteMany({
     where: {
+      instanceId: DEFAULT_WHATSAPP_INSTANCE_ID,
       chatId,
       labelId: labelInternalId
     }
@@ -114,7 +123,8 @@ export async function upsertWhatsappLabelAssociation(
 ) {
   await prisma.whatsappChatLabel.upsert({
     where: {
-      chatId_labelId: {
+      instanceId_chatId_labelId: {
+        instanceId: DEFAULT_WHATSAPP_INSTANCE_ID,
         chatId,
         labelId: labelInternalId
       }
@@ -123,6 +133,7 @@ export async function upsertWhatsappLabelAssociation(
       jid
     },
     create: {
+      instanceId: DEFAULT_WHATSAPP_INSTANCE_ID,
       chatId,
       labelId: labelInternalId,
       jid

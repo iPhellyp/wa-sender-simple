@@ -32,20 +32,60 @@ enum CampaignRecipientStatus {
   canceled
 }
 
+enum WhatsappInstanceRole {
+  SALES
+  SUPPORT
+  BILLING
+  POST_SALES
+  AFFILIATE
+  GENERAL
+}
+
 model Contact {
   id              String              @id @default(cuid())
+  instanceId      String
   name            String
   phoneRaw        String
-  phoneNormalized String              @unique
+  phoneNormalized String
   message         String?             @db.Text
   source          String
   optedOut        Boolean             @default(false)
   createdAt       DateTime            @default(now())
   updatedAt       DateTime            @updatedAt
+  instance        WhatsappInstance    @relation(fields: [instanceId], references: [id], onDelete: Restrict)
   recipients      CampaignRecipient[]
 
+  @@unique([instanceId, phoneNormalized])
+  @@index([instanceId])
   @@index([source])
   @@index([optedOut])
+}
+
+model WhatsappInstance {
+  id              String               @id @default(cuid())
+  name            String
+  phone           String?
+  role            WhatsappInstanceRole @default(GENERAL)
+  status          WhatsappStatus       @default(disconnected)
+  sessionKey      String               @unique
+  isDefault       Boolean              @default(false)
+  lastConnectedAt DateTime?
+  lastSyncAt      DateTime?
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+  contacts        Contact[]
+  sessions        WhatsappSession[]
+  chats           WhatsappChat[]
+  whatsappContacts WhatsappContact[]
+  labels          WhatsappLabel[]
+  chatLabels      WhatsappChatLabel[]
+  messages        WhatsappMessage[]
+  campaigns       Campaign[]
+  recipients      CampaignRecipient[]
+  sendLogs        SendLog[]
+
+  @@index([isDefault])
+  @@index([role])
 }
 
 model ImportBatch {
@@ -60,17 +100,22 @@ model ImportBatch {
 
 model WhatsappSession {
   id             String         @id @default(cuid())
+  instanceId     String
   status         WhatsappStatus @default(disconnected)
   qrCode         String?        @db.Text
   connectedPhone String?
   lastError      String?        @db.Text
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
+  instance       WhatsappInstance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+
+  @@index([instanceId])
 }
 
 model WhatsappChat {
   id              String              @id @default(cuid())
-  jid             String              @unique
+  instanceId      String
+  jid             String
   name            String?
   isGroup         Boolean             @default(false)
   unreadCount     Int                 @default(0)
@@ -80,28 +125,36 @@ model WhatsappChat {
   lastOutboundAt  DateTime?
   createdAt       DateTime            @default(now())
   updatedAt       DateTime            @updatedAt
+  instance        WhatsappInstance    @relation(fields: [instanceId], references: [id], onDelete: Cascade)
   messages        WhatsappMessage[]
   labels          WhatsappChatLabel[]
 
+  @@unique([instanceId, jid])
+  @@index([instanceId, jid])
   @@index([lastMessageAt])
   @@index([isGroup])
 }
 
 model WhatsappContact {
   id         String   @id @default(cuid())
-  jid        String   @unique
+  instanceId String
+  jid        String
   phone      String?
   name       String?
   pushName   String?
   isBusiness Boolean  @default(false)
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
+  instance   WhatsappInstance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
 
+  @@unique([instanceId, jid])
+  @@index([instanceId, phone])
   @@index([phone])
 }
 
 model WhatsappMessage {
   id          String       @id @default(cuid())
+  instanceId  String
   chatId      String
   waMessageId String
   jid         String
@@ -112,9 +165,11 @@ model WhatsappMessage {
   text        String?      @db.Text
   rawJson     Json?
   createdAt   DateTime     @default(now())
+  instance    WhatsappInstance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
   chat        WhatsappChat @relation(fields: [chatId], references: [id], onDelete: Cascade)
 
-  @@unique([jid, waMessageId])
+  @@unique([instanceId, jid, waMessageId])
+  @@index([instanceId, jid])
   @@index([chatId, timestamp])
   @@index([fromMe])
   @@index([jid])
@@ -122,7 +177,8 @@ model WhatsappMessage {
 
 model WhatsappLabel {
   id         String              @id @default(cuid())
-  waLabelId  String              @unique
+  instanceId String
+  waLabelId  String
   name       String
   color      String?
   predefined Boolean             @default(false)
@@ -130,29 +186,36 @@ model WhatsappLabel {
   rawJson    Json?
   createdAt  DateTime            @default(now())
   updatedAt  DateTime            @updatedAt
+  instance   WhatsappInstance    @relation(fields: [instanceId], references: [id], onDelete: Cascade)
   chats      WhatsappChatLabel[]
   campaigns  Campaign[]
 
+  @@unique([instanceId, waLabelId])
+  @@index([instanceId, waLabelId])
   @@index([deleted])
 }
 
 model WhatsappChatLabel {
   id        String        @id @default(cuid())
+  instanceId String
   chatId    String
   labelId   String
   jid       String
   createdAt DateTime      @default(now())
   updatedAt DateTime      @updatedAt
+  instance  WhatsappInstance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
   chat      WhatsappChat  @relation(fields: [chatId], references: [id], onDelete: Cascade)
   label     WhatsappLabel @relation(fields: [labelId], references: [id], onDelete: Cascade)
 
-  @@unique([chatId, labelId])
+  @@unique([instanceId, chatId, labelId])
+  @@index([instanceId, jid])
   @@index([jid])
   @@index([labelId])
 }
 
 model Campaign {
   id                     String              @id @default(cuid())
+  instanceId             String
   name                   String
   defaultMessage         String?             @db.Text
   intervalMinutes        Int
@@ -169,10 +232,12 @@ model Campaign {
   updatedAt              DateTime            @updatedAt
   startedAt              DateTime?
   completedAt            DateTime?
+  instance               WhatsappInstance    @relation(fields: [instanceId], references: [id], onDelete: Restrict)
   recipients             CampaignRecipient[]
   sendLogs               SendLog[]
   targetLabel            WhatsappLabel?      @relation(fields: [targetLabelId], references: [id], onDelete: SetNull)
 
+  @@index([instanceId, createdAt])
   @@index([status])
   @@index([targetMode])
   @@index([targetLabelId])
@@ -180,6 +245,7 @@ model Campaign {
 
 model CampaignRecipient {
   id           String                  @id @default(cuid())
+  instanceId   String
   campaignId   String
   contactId    String?
   chatId       String?
@@ -195,12 +261,14 @@ model CampaignRecipient {
   error        String?                 @db.Text
   createdAt    DateTime                @default(now())
   updatedAt    DateTime                @updatedAt
+  instance     WhatsappInstance        @relation(fields: [instanceId], references: [id], onDelete: Restrict)
   campaign     Campaign                @relation(fields: [campaignId], references: [id], onDelete: Cascade)
   contact      Contact?                @relation(fields: [contactId], references: [id], onDelete: Restrict)
   sendLogs     SendLog[]
 
   @@unique([campaignId, contactId])
   @@unique([campaignId, jid])
+  @@index([instanceId, campaignId])
   @@index([campaignId, status])
   @@index([contactId])
   @@index([jid])
@@ -209,6 +277,7 @@ model CampaignRecipient {
 
 model SendLog {
   id          String             @id @default(cuid())
+  instanceId  String
   jid         String
   chatId      String?
   campaignId  String?
@@ -218,9 +287,11 @@ model SendLog {
   error       String?            @db.Text
   sentAt      DateTime?
   createdAt   DateTime           @default(now())
+  instance    WhatsappInstance    @relation(fields: [instanceId], references: [id], onDelete: Restrict)
   campaign    Campaign?          @relation(fields: [campaignId], references: [id], onDelete: SetNull)
   recipient   CampaignRecipient? @relation(fields: [recipientId], references: [id], onDelete: SetNull)
 
+  @@index([instanceId, jid, sentAt])
   @@index([jid, sentAt])
   @@index([campaignId])
   @@index([recipientId])

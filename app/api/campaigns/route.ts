@@ -1,7 +1,8 @@
-﻿import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { CampaignRecipientStatus, CampaignStatus } from "@prisma/client";
 import { buildCampaignDedupeKey } from "@/src/lib/labels/audience";
 import { prisma } from "@/src/lib/prisma/client";
+import { getActiveInstanceIdFromSearchOrDefault } from "@/src/lib/server/whatsapp-instances";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -17,8 +18,12 @@ function countRecipientsByStatus(
   }, {});
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const instanceId = await getActiveInstanceIdFromSearchOrDefault(request.nextUrl.searchParams);
   const campaigns = await prisma.campaign.findMany({
+    where: {
+      instanceId
+    },
     include: {
       targetLabel: {
         select: {
@@ -28,6 +33,9 @@ export async function GET() {
         }
       },
       recipients: {
+        where: {
+          instanceId
+        },
         select: {
           status: true
         }
@@ -39,6 +47,7 @@ export async function GET() {
   });
 
   return NextResponse.json({
+    instanceId,
     campaigns: campaigns.map((campaign) => ({
       ...campaign,
       recipientCount: campaign.recipients.length,
@@ -54,8 +63,11 @@ export async function POST(request: NextRequest) {
     intervalMinutes?: number;
     contactIds?: string[];
     chatIds?: string[];
+    instanceId?: string;
   };
-
+  const instanceId = await getActiveInstanceIdFromSearchOrDefault({
+    instanceId: payload.instanceId
+  });
   const name = String(payload.name ?? "").trim();
   const defaultMessage = String(payload.defaultMessage ?? "").trim();
   const intervalMinutes = Number(payload.intervalMinutes ?? 0);
@@ -95,6 +107,7 @@ export async function POST(request: NextRequest) {
         id: {
           in: uniqueChatIds
         },
+        instanceId,
         isGroup: false
       },
       orderBy: {
@@ -116,6 +129,7 @@ export async function POST(request: NextRequest) {
     const dedupeKey = `chatIds:${Date.now()}`;
     const campaign = await prisma.campaign.create({
       data: {
+        instanceId,
         name,
         defaultMessage,
         intervalMinutes,
@@ -126,6 +140,7 @@ export async function POST(request: NextRequest) {
         maxRecipients: chats.length,
         recipients: {
           create: chats.map((chat) => ({
+            instanceId,
             chatId: chat.id,
             jid: chat.jid,
             messageFinal: defaultMessage,
@@ -146,6 +161,7 @@ export async function POST(request: NextRequest) {
       id: {
         in: contactIds
       },
+      instanceId,
       optedOut: false
     },
     orderBy: {
@@ -172,11 +188,13 @@ export async function POST(request: NextRequest) {
 
   const campaign = await prisma.campaign.create({
     data: {
+      instanceId,
       name,
       defaultMessage: defaultMessage || null,
       intervalMinutes,
       recipients: {
         create: contacts.map((contact) => ({
+          instanceId,
           contactId: contact.id,
           messageFinal: defaultMessage || contact.message?.trim() || ""
         }))
@@ -189,4 +207,3 @@ export async function POST(request: NextRequest) {
 
   return NextResponse.json(campaign, { status: 201 });
 }
-

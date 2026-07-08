@@ -70,6 +70,7 @@ type LabelAudience = {
 };
 
 type CampaignPrefillContext = {
+  instanceId: string;
   labelId: string | null;
   labelName: string | null;
   chatIds: string[];
@@ -161,6 +162,7 @@ export function CampaignsClient({
     [contacts]
   );
   const catalogChats = prefillContext?.chatPreview ?? [];
+  const activeInstanceId = prefillContext?.instanceId ?? "";
   const prefilledContacts = prefillContext?.contactPreview ?? [];
   const removedPrefillContacts = Math.max(
     0,
@@ -182,7 +184,12 @@ export function CampaignsClient({
     securityConfirmed;
 
   async function loadContacts() {
-    const response = await fetch("/api/contacts?optedOut=false&pageSize=100", {
+    const params = new URLSearchParams({
+      optedOut: "false",
+      pageSize: "100"
+    });
+    if (activeInstanceId) params.set("instanceId", activeInstanceId);
+    const response = await fetch(`/api/contacts?${params.toString()}`, {
       cache: "no-store"
     });
     const data = (await response.json()) as { contacts: ContactOption[] };
@@ -190,13 +197,17 @@ export function CampaignsClient({
   }
 
   async function loadCampaigns() {
-    const response = await fetch("/api/campaigns", { cache: "no-store" });
+    const params = new URLSearchParams();
+    if (activeInstanceId) params.set("instanceId", activeInstanceId);
+    const response = await fetch(`/api/campaigns?${params.toString()}`, { cache: "no-store" });
     const data = (await response.json()) as { campaigns: CampaignSummary[] };
     setCampaigns(data.campaigns);
   }
 
   async function loadRecipients(campaignId: string) {
-    const response = await fetch(`/api/campaigns/${campaignId}/recipients`, { cache: "no-store" });
+    const params = new URLSearchParams();
+    if (activeInstanceId) params.set("instanceId", activeInstanceId);
+    const response = await fetch(`/api/campaigns/${campaignId}/recipients?${params.toString()}`, { cache: "no-store" });
     const data = (await response.json()) as { recipients: RecipientDetail[] };
     setRecipients(data.recipients);
   }
@@ -226,7 +237,9 @@ export function CampaignsClient({
     let cancelled = false;
     void (async () => {
       try {
-        const response = await fetch(`/api/etiquetas/${selectedLabelId}/audience?limit=6`, {
+        const params = new URLSearchParams({ limit: "6" });
+        if (activeInstanceId) params.set("instanceId", activeInstanceId);
+        const response = await fetch(`/api/etiquetas/${selectedLabelId}/audience?${params.toString()}`, {
           cache: "no-store"
         });
         const data = (await response.json()) as LabelAudience;
@@ -269,6 +282,7 @@ export function CampaignsClient({
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
+                instanceId: activeInstanceId,
                 name: body.name,
                 message: body.message,
                 intervalMinutes,
@@ -282,6 +296,7 @@ export function CampaignsClient({
                 name: body.name,
                 defaultMessage: body.defaultMessage,
                 intervalMinutes,
+                instanceId: activeInstanceId,
                 contactIds: audienceMode === "contacts" ? Array.from(selectedContacts) : [],
                 chatIds: audienceMode === "catalog" ? catalogChats.map((chat) => chat.id) : []
               })
@@ -307,7 +322,11 @@ export function CampaignsClient({
     setError(null);
 
     try {
-      const response = await fetch(`/api/campaigns/${campaignId}/${action}`, { method: "POST" });
+      const params = new URLSearchParams();
+      if (activeInstanceId) params.set("instanceId", activeInstanceId);
+      const response = await fetch(`/api/campaigns/${campaignId}/${action}?${params.toString()}`, {
+        method: "POST"
+      });
       const data = await response.json();
       if (!response.ok) throw new Error(String(data.error ?? "Erro ao atualizar campanha"));
       await refresh();
@@ -346,7 +365,12 @@ export function CampaignsClient({
               >
                 Iniciar agora
               </button>
-              <Link className="button secondary compact-button" href={`/envios?campaign=${createdCampaignId}`}>
+              <Link
+                className="button secondary compact-button"
+                href={`/envios?campaign=${createdCampaignId}${
+                  activeInstanceId ? `&instanceId=${activeInstanceId}` : ""
+                }`}
+              >
                 Acompanhar em envios
               </Link>
             </span>

@@ -211,13 +211,14 @@ function logRecipientSkipped(reason: SkippedReason) {
   console.log("[campaign] recipient skipped", { reason });
 }
 
-async function loadOptedOutPhones(phones: string[]) {
+async function loadOptedOutPhones(phones: string[], instanceId: string) {
   if (phones.length === 0) {
     return new Set<string>();
   }
 
   const contacts = await prisma.contact.findMany({
     where: {
+      instanceId,
       phoneNormalized: {
         in: phones
       },
@@ -231,7 +232,7 @@ async function loadOptedOutPhones(phones: string[]) {
   return new Set(contacts.map((contact) => contact.phoneNormalized));
 }
 
-async function loadRecentlySentJids(jids: string[], days: number) {
+async function loadRecentlySentJids(jids: string[], days: number, instanceId: string) {
   if (days <= 0 || jids.length === 0) {
     return new Set<string>();
   }
@@ -240,6 +241,7 @@ async function loadRecentlySentJids(jids: string[], days: number) {
   const [recipientRows, sendLogRows] = await Promise.all([
     prisma.campaignRecipient.findMany({
       where: {
+        instanceId,
         jid: {
           in: jids
         },
@@ -254,6 +256,7 @@ async function loadRecentlySentJids(jids: string[], days: number) {
     }),
     prisma.sendLog.findMany({
       where: {
+        instanceId,
         jid: {
           in: jids
         },
@@ -306,6 +309,7 @@ function emptyJidTypeCounts(): Record<AudienceJidType, number> {
 }
 
 export async function buildLabelAudience(options: {
+  instanceId: string;
   labelId: string;
   includeGroups?: boolean;
   excludeOptOut?: boolean;
@@ -317,6 +321,7 @@ export async function buildLabelAudience(options: {
   const label = await prisma.whatsappLabel.findFirst({
     where: {
       id: options.labelId,
+      instanceId: options.instanceId,
       deleted: false
     }
   });
@@ -339,8 +344,10 @@ export async function buildLabelAudience(options: {
   const associations = await prisma.whatsappChatLabel.findMany({
     where: {
       labelId: label.id,
+      instanceId: options.instanceId,
       chat: search
         ? {
+            instanceId: options.instanceId,
             OR: [
               { name: { contains: search, mode: "insensitive" } },
               { jid: { contains: search, mode: "insensitive" } }
@@ -416,10 +423,13 @@ export async function buildLabelAudience(options: {
     });
   }
 
-  const optedOutPhones = excludeOptOut ? await loadOptedOutPhones(phonesToCheck) : new Set<string>();
+  const optedOutPhones = excludeOptOut
+    ? await loadOptedOutPhones(phonesToCheck, options.instanceId)
+    : new Set<string>();
   const recentlySentJids = await loadRecentlySentJids(
     eligibleItems.map((item) => item.jid),
-    excludeAlreadySentDays
+    excludeAlreadySentDays,
+    options.instanceId
   );
 
   const finalEligible: AudiencePreviewItem[] = [];

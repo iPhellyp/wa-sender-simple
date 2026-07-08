@@ -216,7 +216,7 @@ export function LabelSendClient({ labelId }: { labelId: string }) {
               <strong>{audience.total}</strong>
             </article>
             <article className="metric-card">
-              <span>Elegiveis x1</span>
+              <span>Elegiveis individuais</span>
               <strong>{audience.eligible}</strong>
             </article>
             <article className="metric-card">

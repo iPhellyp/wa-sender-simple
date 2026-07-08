@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
 type ContactSendStatus = "sent" | "failed" | "pending" | "never_sent";
@@ -73,6 +74,8 @@ function formatDate(value: string | null) {
 }
 
 export function ContactsClient() {
+  const searchParams = useSearchParams();
+  const activeInstanceId = searchParams.get("instanceId") ?? "";
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [origins, setOrigins] = useState<string[]>([]);
   const [labels, setLabels] = useState<WhatsappLabel[]>([]);
@@ -108,7 +111,9 @@ export function ContactsClient() {
   );
   const selectedIds = Array.from(selectedContacts);
   const campaignIds = selectedIds.slice(0, CAMPAIGN_CONTACT_LIMIT);
-  const campaignUrl = `/campanhas?contactIds=${campaignIds.join(",")}`;
+  const campaignUrl = `/campanhas?contactIds=${campaignIds.join(",")}${
+    activeInstanceId ? `&instanceId=${activeInstanceId}` : ""
+  }`;
   const hasSelectionOverflow = selectedIds.length > CAMPAIGN_CONTACT_LIMIT;
   const visibleStart = total === 0 ? 0 : (page - 1) * pageSize + 1;
   const visibleEnd = Math.min(total, page * pageSize);
@@ -121,6 +126,7 @@ export function ContactsClient() {
     if (optedOut) params.set("optedOut", optedOut);
     if (sendStatus) params.set("sendStatus", sendStatus);
     if (search.trim()) params.set("search", search.trim());
+    if (activeInstanceId) params.set("instanceId", activeInstanceId);
     params.set("page", String(page));
     params.set("pageSize", String(pageSize));
 
@@ -151,7 +157,9 @@ export function ContactsClient() {
   }
 
   async function loadLabels() {
-    const response = await fetch("/api/etiquetas", { cache: "no-store" });
+    const params = new URLSearchParams();
+    if (activeInstanceId) params.set("instanceId", activeInstanceId);
+    const response = await fetch(`/api/etiquetas?${params.toString()}`, { cache: "no-store" });
     const data = (await response.json()) as { labels?: WhatsappLabel[] };
     setLabels(data.labels ?? []);
   }
@@ -174,6 +182,7 @@ export function ContactsClient() {
     const formData = new FormData();
     formData.append("file", file);
     formData.append("importLabel", String(new FormData(form).get("importLabel") ?? ""));
+    if (activeInstanceId) formData.append("instanceId", activeInstanceId);
 
     try {
       const response = await fetch("/api/import/excel", {
@@ -245,6 +254,7 @@ export function ContactsClient() {
         },
         body: JSON.stringify({
           contactIds: Array.from(selectedContacts),
+          instanceId: activeInstanceId || undefined,
           labelId: selectedLabelId
         })
       });
@@ -273,11 +283,11 @@ export function ContactsClient() {
 
   useEffect(() => {
     void loadContacts();
-  }, [source, optedOut, sendStatus, search, page, pageSize]);
+  }, [source, optedOut, sendStatus, search, page, pageSize, activeInstanceId]);
 
   useEffect(() => {
     void loadLabels();
-  }, []);
+  }, [activeInstanceId]);
 
   return (
     <section className="page-shell">
@@ -291,7 +301,10 @@ export function ContactsClient() {
           >
             Importar contatos
           </button>
-          <Link className="button secondary" href="/campanhas">
+          <Link
+            className="button secondary"
+            href={activeInstanceId ? `/campanhas?instanceId=${activeInstanceId}` : "/campanhas"}
+          >
             Criar campanha
           </Link>
         </div>
@@ -513,7 +526,9 @@ export function ContactsClient() {
                       <td>
                         <Link
                           className="button secondary compact-button"
-                          href={`/campanhas?contactIds=${contact.id}`}
+                          href={`/campanhas?contactIds=${contact.id}${
+                            activeInstanceId ? `&instanceId=${activeInstanceId}` : ""
+                          }`}
                         >
                           Campanha
                         </Link>

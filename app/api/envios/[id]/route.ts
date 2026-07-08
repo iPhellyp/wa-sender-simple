@@ -1,20 +1,23 @@
-﻿import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/src/lib/prisma/client";
+import { getActiveInstanceIdFromSearchOrDefault } from "@/src/lib/server/whatsapp-instances";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(
-  _request: Request,
+  request: NextRequest,
   context: {
     params: Promise<{ id: string }>;
   }
 ) {
   const { id } = await context.params;
+  const instanceId = await getActiveInstanceIdFromSearchOrDefault(request.nextUrl.searchParams);
 
-  const campaign = await prisma.campaign.findUnique({
+  const campaign = await prisma.campaign.findFirst({
     where: {
-      id
+      id,
+      instanceId
     },
     include: {
       targetLabel: {
@@ -25,6 +28,9 @@ export async function GET(
         }
       },
       recipients: {
+        where: {
+          instanceId
+        },
         orderBy: {
           createdAt: "asc"
         },
@@ -48,4 +54,3 @@ export async function GET(
 
   return NextResponse.json({ campaign });
 }
-

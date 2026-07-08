@@ -116,6 +116,7 @@ export async function GET(
     select: {
       id: true,
       jid: true,
+      instanceId: true,
       isGroup: true
     }
   });
@@ -124,13 +125,17 @@ export async function GET(
     return NextResponse.json({ error: "Conversa nao encontrada" }, { status: 404 });
   }
 
-  const where = getVisibleMessageWhere(chat.id, afterDate);
+  const where = {
+    ...getVisibleMessageWhere(chat.id, afterDate),
+    instanceId: chat.instanceId
+  };
   let cursor: { id: string } | undefined;
 
   if (before) {
     const cursorMessage = await prisma.whatsappMessage.findFirst({
       where: {
         id: before,
+        instanceId: chat.instanceId,
         chatId: chat.id
       },
       select: {
@@ -176,6 +181,7 @@ export async function GET(
   const contacts = contactJids.length > 0
     ? await prisma.whatsappContact.findMany({
         where: {
+          instanceId: chat.instanceId,
           jid: {
             in: contactJids
           }

@@ -1,13 +1,16 @@
-﻿import { CampaignRecipientStatus } from "@prisma/client";
-import { NextResponse } from "next/server";
+import { CampaignRecipientStatus } from "@prisma/client";
+import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/src/lib/prisma/client";
+import { getActiveInstanceIdFromSearchOrDefault } from "@/src/lib/server/whatsapp-instances";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const instanceId = await getActiveInstanceIdFromSearchOrDefault(request.nextUrl.searchParams);
   const labels = await prisma.whatsappLabel.findMany({
     where: {
+      instanceId,
       deleted: false
     },
     orderBy: {
@@ -20,6 +23,9 @@ export async function GET() {
         }
       },
       chats: {
+        where: {
+          instanceId
+        },
         select: {
           chatId: true,
           updatedAt: true,
@@ -31,6 +37,9 @@ export async function GET() {
         }
       },
       campaigns: {
+        where: {
+          instanceId
+        },
         orderBy: {
           updatedAt: "desc"
         },
@@ -49,12 +58,14 @@ export async function GET() {
     await Promise.all([
       prisma.whatsappLabel.count({
         where: {
+          instanceId,
           deleted: false
         }
       }),
       prisma.whatsappChatLabel.findMany({
         distinct: ["chatId"],
         where: {
+          instanceId,
           chat: {
             isGroup: false
           }
@@ -65,6 +76,7 @@ export async function GET() {
       }),
       prisma.whatsappChatLabel.count({
         where: {
+          instanceId,
           chat: {
             isGroup: false
           }
@@ -72,6 +84,7 @@ export async function GET() {
       }),
       prisma.whatsappChatLabel.count({
         where: {
+          instanceId,
           chat: {
             isGroup: true
           }
@@ -79,12 +92,15 @@ export async function GET() {
       }),
       prisma.whatsappChat.count({
         where: {
+          instanceId,
           isGroup: false
         }
       }),
       prisma.campaignRecipient.findMany({
         where: {
+          instanceId,
           campaign: {
+            instanceId,
             targetLabelId: {
               in: labelIds
             }
@@ -134,6 +150,7 @@ export async function GET() {
   }
 
   return NextResponse.json({
+    instanceId,
     metrics: {
       totalLabels: labels.length,
       activeLabels,
@@ -180,4 +197,3 @@ export async function GET() {
     })
   });
 }
-

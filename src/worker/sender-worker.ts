@@ -69,6 +69,7 @@ function buildFallbackMessageId(prefix: string, id: string | undefined) {
 }
 
 async function persistOutboundMessage(options: {
+  instanceId: string;
   jid: string;
   text: string;
   sentAt: Date;
@@ -85,18 +86,19 @@ async function persistOutboundMessage(options: {
     throw new Error("JID ignorado pelo modo de envio individual");
   }
 
-  const chat = await ensureChatForJid(normalizedJid);
+  const scopedChat = await ensureChatForJid(normalizedJid, undefined, options.instanceId);
   const waMessageId = options.sentMessage.waMessageId ?? options.fallbackMessageId;
 
   await prisma.whatsappMessage.upsert({
     where: {
-      jid_waMessageId: {
+      instanceId_jid_waMessageId: {
+        instanceId: options.instanceId,
         jid: normalizedJid,
         waMessageId
       }
     },
     update: {
-      chatId: chat.id,
+      chatId: scopedChat.id,
       fromMe: true,
       senderJid: options.sentMessage.senderJid,
       timestamp: options.sentAt,
@@ -105,7 +107,8 @@ async function persistOutboundMessage(options: {
       rawJson: options.sentMessage.rawJson
     },
     create: {
-      chatId: chat.id,
+      chatId: scopedChat.id,
+      instanceId: options.instanceId,
       jid: normalizedJid,
       waMessageId,
       fromMe: true,
@@ -119,7 +122,7 @@ async function persistOutboundMessage(options: {
 
   await prisma.whatsappChat.update({
     where: {
-      id: chat.id
+      id: scopedChat.id
     },
     data: {
       isGroup: isGroupJid(normalizedJid),
@@ -129,7 +132,7 @@ async function persistOutboundMessage(options: {
     }
   });
 
-  return chat.id;
+  return scopedChat.id;
 }
 
 function getPhoneFromRecipientJid(jid: string | null | undefined) {
@@ -144,6 +147,7 @@ function getPhoneFromRecipientJid(jid: string | null | undefined) {
 
 async function isRecipientOptedOut(
   recipient: {
+    instanceId: string;
     jid: string | null;
     contact: { optedOut: boolean; phoneNormalized: string } | null;
   },
@@ -159,8 +163,9 @@ async function isRecipientOptedOut(
     return false;
   }
 
-  const contact = await prisma.contact.findUnique({
+  const contact = await prisma.contact.findFirst({
     where: {
+      instanceId: recipient.instanceId,
       phoneNormalized: phone
     },
     select: {
@@ -188,6 +193,7 @@ function getSkippedRecipientError(reason: SkippedReason) {
 }
 
 async function resolveRecipientSendJid(recipient: {
+  instanceId: string;
   jid: string | null;
   chatId: string | null;
 }) {
@@ -199,9 +205,10 @@ async function resolveRecipientSendJid(recipient: {
     return resolveCampaignJid([]);
   }
 
-  const chat = await prisma.whatsappChat.findUnique({
+  const chat = await prisma.whatsappChat.findFirst({
     where: {
-      id: recipient.chatId
+      id: recipient.chatId,
+      instanceId: recipient.instanceId
     },
     select: {
       jid: true
@@ -257,6 +264,7 @@ async function processManualMessage(
     const sentMessage = await sendWhatsappMessageToJid(normalizedJid, text);
     const sentAt = new Date();
     await persistOutboundMessage({
+      instanceId: chat.instanceId,
       jid: normalizedJid,
       text,
       sentAt,
@@ -398,6 +406,7 @@ async function processRecipient(recipientId: string) {
 
     const sentAt = new Date();
     const persistedChatId = await persistOutboundMessage({
+      instanceId: recipient.instanceId,
       jid: sentJid,
       text: recipient.messageFinal,
       sentAt,
@@ -421,6 +430,7 @@ async function processRecipient(recipientId: string) {
     if (resolvedRecipientJid) {
       await prisma.sendLog.create({
         data: {
+          instanceId: recipient.instanceId,
           jid: sentJid,
           chatId: recipient.chatId ?? persistedChatId,
           campaignId: recipient.campaignId,
@@ -458,6 +468,7 @@ async function processRecipient(recipientId: string) {
     if (resolvedRecipientJid) {
       await prisma.sendLog.create({
         data: {
+          instanceId: recipient.instanceId,
           jid: resolvedRecipientJid,
           chatId: recipient.chatId,
           campaignId: recipient.campaignId,

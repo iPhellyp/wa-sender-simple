@@ -8,8 +8,22 @@ const openRecipientStatuses: CampaignRecipientStatus[] = [
 ];
 
 export async function completeCampaignIfDone(campaignId: string) {
+  const campaign = await prisma.campaign.findUnique({
+    where: {
+      id: campaignId
+    },
+    select: {
+      instanceId: true
+    }
+  });
+
+  if (!campaign) {
+    return;
+  }
+
   const remainingRecipients = await prisma.campaignRecipient.count({
     where: {
+      instanceId: campaign.instanceId,
       campaignId,
       status: {
         in: openRecipientStatuses
@@ -24,6 +38,7 @@ export async function completeCampaignIfDone(campaignId: string) {
   await prisma.campaign.updateMany({
     where: {
       id: campaignId,
+      instanceId: campaign.instanceId,
       status: CampaignStatus.running
     },
     data: {

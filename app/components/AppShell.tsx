@@ -1,5 +1,6 @@
 ﻿import Link from "next/link";
 import type { ReactNode } from "react";
+import { ActiveInstanceSelector } from "./ActiveInstanceSelector";
 import { NavLink } from "./NavLink";
 import { PageHeader } from "./ui/PageHeader";
 
@@ -30,6 +31,7 @@ export function AppShell({ title, subtitle, children, actions }: AppShellProps) 
             <NavLink href="/envios">Envios</NavLink>
             <NavLink href="/contatos">Contatos</NavLink>
             <NavLink href="/campanhas">Campanhas</NavLink>
+            <NavLink href="/instancias">Instancias</NavLink>
             <form action="/api/auth/logout" method="post">
               <button className="link-button" type="submit">
                 Sair
@@ -39,6 +41,7 @@ export function AppShell({ title, subtitle, children, actions }: AppShellProps) 
         </div>
       </header>
       <main className="page">
+        <ActiveInstanceSelector />
         <PageHeader title={title} subtitle={subtitle} actions={actions} />
         {children}
       </main>

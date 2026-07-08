@@ -40,7 +40,7 @@ function isKnownUniqueError(error: unknown) {
 export async function importContactsFromExcel(
   buffer: Buffer,
   filename: string,
-  options: { importLabel?: string | null } = {}
+  options: { importLabel?: string | null; instanceId: string }
 ) {
   const workbook = XLSX.read(buffer, { type: "buffer" });
   const firstSheetName = workbook.SheetNames[0];
@@ -88,7 +88,10 @@ export async function importContactsFromExcel(
 
     const existingContact = await prisma.contact.findUnique({
       where: {
-        phoneNormalized: normalizedPhone.normalized
+        instanceId_phoneNormalized: {
+          instanceId: options.instanceId,
+          phoneNormalized: normalizedPhone.normalized
+        }
       },
       select: {
         id: true,
@@ -130,6 +133,7 @@ export async function importContactsFromExcel(
       await prisma.contact.create({
         data: {
           name,
+          instanceId: options.instanceId,
           phoneRaw,
           phoneNormalized: normalizedPhone.normalized,
           message,

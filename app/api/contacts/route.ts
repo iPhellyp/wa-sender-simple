@@ -1,6 +1,7 @@
 ﻿import { NextRequest, NextResponse } from "next/server";
 import type { Prisma } from "@prisma/client";
 import { getSendStatsByContact } from "@/src/lib/server/contact-stats";
+import { getActiveInstanceIdFromSearchOrDefault } from "@/src/lib/server/whatsapp-instances";
 import { prisma } from "@/src/lib/prisma/client";
 
 export const runtime = "nodejs";
@@ -14,10 +15,12 @@ export async function GET(request: NextRequest) {
   const sendStatus = searchParams.get("sendStatus") ?? "";
   const page = Math.max(1, Number(searchParams.get("page") ?? 1));
   const pageSize = Math.min(100, Math.max(10, Number(searchParams.get("pageSize") ?? 25)));
+  const instanceId = await getActiveInstanceIdFromSearchOrDefault(searchParams);
   const optedOut =
     optedOutParam === "true" ? true : optedOutParam === "false" ? false : undefined;
 
   const where: Prisma.ContactWhereInput = {
+    instanceId,
     ...(source ? { source } : {}),
     ...(typeof optedOut === "boolean" ? { optedOut } : {}),
     ...(search
@@ -59,6 +62,9 @@ export async function GET(request: NextRequest) {
       }
     }),
     prisma.contact.findMany({
+      where: {
+        instanceId
+      },
       select: {
         source: true
       },
@@ -69,7 +75,8 @@ export async function GET(request: NextRequest) {
     })
   ]);
   const lastSendByContact = await getSendStatsByContact(
-    matchingContacts.map((contact) => contact.id)
+    matchingContacts.map((contact) => contact.id),
+    instanceId
   );
   const matchingWithStatus = matchingContacts.map((contact) => {
     const lastSend = lastSendByContact.get(contact.id) ?? null;
@@ -88,6 +95,7 @@ export async function GET(request: NextRequest) {
   const pageContacts = pageIds.length
     ? await prisma.contact.findMany({
         where: {
+          instanceId,
           id: {
             in: pageIds
           }
@@ -130,7 +138,8 @@ export async function GET(request: NextRequest) {
     pageSize,
     totalPages: Math.max(1, Math.ceil(total / pageSize)),
     summary,
-    origins: origins.map((origin) => origin.source)
+    origins: origins.map((origin) => origin.source),
+    instanceId
   });
 }
 

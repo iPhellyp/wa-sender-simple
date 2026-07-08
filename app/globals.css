@@ -1936,6 +1936,67 @@ button:disabled {
   width: auto;
 }
 
+.instance-switcher {
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  margin: 0 0 14px auto;
+  max-width: 420px;
+  padding: 8px 10px;
+}
+
+.instance-switcher > span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.instance-switcher strong {
+  font-size: 12px;
+}
+
+.instance-switcher small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.instance-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+}
+
+.instance-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+
+.instance-card-header {
+  align-items: flex-start;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.instance-card-header > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.instance-card-header span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
 .meta-list.compact .meta-row {
   grid-template-columns: 96px minmax(0, 1fr);
 }
@@ -1970,6 +2031,7 @@ button:disabled {
   }
 
   .page-actions,
+  .instance-switcher,
   .wizard-nav,
   .success-row {
     align-items: stretch;

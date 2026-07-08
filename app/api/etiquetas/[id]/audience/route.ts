@@ -5,6 +5,7 @@ import {
   DEFAULT_EXCLUDE_ALREADY_SENT_DAYS,
   DEFAULT_MAX_RECIPIENTS
 } from "@/src/lib/labels/audience";
+import { getActiveInstanceIdFromSearchOrDefault } from "@/src/lib/server/whatsapp-instances";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,6 +17,7 @@ export async function GET(
   }
 ) {
   const { id } = await context.params;
+  const instanceId = await getActiveInstanceIdFromSearchOrDefault(request.nextUrl.searchParams);
   const includeGroups = false;
   const excludeOptOut = request.nextUrl.searchParams.get("excludeOptOut") !== "false";
   const excludeAlreadySentDays = Number(
@@ -40,6 +42,7 @@ export async function GET(
   }
 
   const audience = await buildLabelAudience({
+    instanceId,
     labelId: id,
     includeGroups,
     excludeOptOut,

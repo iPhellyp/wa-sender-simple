@@ -11,11 +11,12 @@ type SendMessageResponse = {
 
 type SendMessageFormProps = {
   chatId: string;
+  instanceId?: string;
   isGroup: boolean;
   onSent?: () => void;
 };
 
-export function SendMessageForm({ chatId, isGroup, onSent }: SendMessageFormProps) {
+export function SendMessageForm({ chatId, instanceId, isGroup, onSent }: SendMessageFormProps) {
   const router = useRouter();
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
@@ -29,7 +30,9 @@ export function SendMessageForm({ chatId, isGroup, onSent }: SendMessageFormProp
     setError(null);
 
     try {
-      const response = await fetch(`/api/conversas/${chatId}/send`, {
+      const params = new URLSearchParams();
+      if (instanceId) params.set("instanceId", instanceId);
+      const response = await fetch(`/api/conversas/${chatId}/send?${params.toString()}`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json"

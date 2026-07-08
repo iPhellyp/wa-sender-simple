@@ -3,6 +3,7 @@ import { randomUUID } from "crypto";
 import { prisma } from "@/src/lib/prisma/client";
 import { enqueueApplyWhatsappLabels } from "@/src/lib/queue/campaign-queue";
 import { applyLocalContactLabel } from "@/src/lib/server/contact-labels";
+import { getActiveInstanceIdFromSearchOrDefault } from "@/src/lib/server/whatsapp-instances";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -10,8 +11,12 @@ export const dynamic = "force-dynamic";
 export async function PATCH(request: NextRequest) {
   const payload = (await request.json()) as {
     contactIds?: string[];
+    instanceId?: string;
     labelId?: string;
   };
+  const instanceId = await getActiveInstanceIdFromSearchOrDefault({
+    instanceId: payload.instanceId
+  });
   const contactIds = Array.isArray(payload.contactIds)
     ? Array.from(new Set(payload.contactIds.map((id) => String(id).trim()).filter(Boolean)))
     : [];
@@ -31,6 +36,7 @@ export async function PATCH(request: NextRequest) {
 
   const label = await prisma.whatsappLabel.findFirst({
     where: {
+      instanceId,
       id: labelId,
       deleted: false
     },
@@ -46,6 +52,7 @@ export async function PATCH(request: NextRequest) {
   }
 
   const result = await applyLocalContactLabel({
+    instanceId,
     contactIds,
     labelName: label.name
   });

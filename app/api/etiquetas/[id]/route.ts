@@ -3,6 +3,7 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "@/src/lib/prisma/client";
 import { getWhatsappDisplayName } from "@/src/lib/whatsapp/display-name";
 import { getLastSendByJids } from "@/src/lib/labels/send-stats";
+import { getActiveInstanceIdFromSearchOrDefault } from "@/src/lib/server/whatsapp-instances";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -31,6 +32,7 @@ export async function GET(
 ) {
   const { id } = await context.params;
   const search = request.nextUrl.searchParams.get("search")?.trim() ?? "";
+  const instanceId = await getActiveInstanceIdFromSearchOrDefault(request.nextUrl.searchParams);
   const page = getPage(request);
   const limit = getLimit(request);
   const skip = (page - 1) * limit;
@@ -38,6 +40,7 @@ export async function GET(
   const label = await prisma.whatsappLabel.findFirst({
     where: {
       id,
+      instanceId,
       deleted: false
     }
   });
@@ -47,6 +50,7 @@ export async function GET(
   }
 
   const chatWhere: Prisma.WhatsappChatWhereInput = {
+    instanceId,
     isGroup: false,
     ...(search
       ? {
@@ -74,6 +78,7 @@ export async function GET(
       : {})
   };
   const associationWhere: Prisma.WhatsappChatLabelWhereInput = {
+    instanceId,
     labelId: label.id,
     chat: chatWhere
   };
@@ -96,7 +101,9 @@ export async function GET(
     prisma.whatsappChatLabel.findMany({
       where: {
         labelId: label.id,
+        instanceId,
         chat: {
+          instanceId,
           isGroup: false
         }
       },
@@ -111,7 +118,9 @@ export async function GET(
     prisma.whatsappChatLabel.count({
       where: {
         labelId: label.id,
+        instanceId,
         chat: {
+          instanceId,
           isGroup: true
         }
       }
@@ -123,6 +132,7 @@ export async function GET(
   const [contacts, visibleLastSend, allLastSend] = await Promise.all([
     prisma.whatsappContact.findMany({
       where: {
+        instanceId,
         jid: {
           in: visibleJids
         }
@@ -133,8 +143,8 @@ export async function GET(
         pushName: true
       }
     }),
-    getLastSendByJids(visibleJids),
-    getLastSendByJids(allJids)
+    getLastSendByJids(visibleJids, instanceId),
+    getLastSendByJids(allJids, instanceId)
   ]);
   const contactByJid = new Map(contacts.map((contact) => [contact.jid, contact]));
   const sentCount = Array.from(allLastSend.values()).filter((item) => item.status === "sent").length;

@@ -1,6 +1,7 @@
-﻿import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { CampaignRecipientStatus } from "@prisma/client";
 import { prisma } from "@/src/lib/prisma/client";
+import { getActiveInstanceIdFromSearchOrDefault } from "@/src/lib/server/whatsapp-instances";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -28,8 +29,12 @@ function countRecipientsByStatus(
   return { statusCounts, skippedReasons };
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const instanceId = await getActiveInstanceIdFromSearchOrDefault(request.nextUrl.searchParams);
   const campaigns = await prisma.campaign.findMany({
+    where: {
+      instanceId
+    },
     include: {
       targetLabel: {
         select: {
@@ -39,6 +44,9 @@ export async function GET() {
         }
       },
       recipients: {
+        where: {
+          instanceId
+        },
         select: {
           status: true,
           skippedReason: true
@@ -51,6 +59,7 @@ export async function GET() {
   });
 
   return NextResponse.json({
+    instanceId,
     campaigns: campaigns.map((campaign) => {
       const counts = countRecipientsByStatus(campaign.recipients);
 
@@ -74,4 +83,3 @@ export async function GET() {
     })
   });
 }
-

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { AppShell } from "@/app/components/AppShell";
 import { prisma } from "@/src/lib/prisma/client";
+import { getActiveInstanceIdFromSearchOrDefault } from "@/src/lib/server/whatsapp-instances";
 import { CampaignsClient } from "./CampaignsClient";
 
 type ChatPreview = {
@@ -22,6 +23,7 @@ type CampaignsPageProps = {
     labelId?: string | string[];
     chatIds?: string | string[];
     contactIds?: string | string[];
+    instanceId?: string | string[];
   }>;
 };
 
@@ -31,6 +33,7 @@ function pickSingle(value: string | string[] | undefined) {
 
 export default async function CampaignsPage({ searchParams }: CampaignsPageProps) {
   const resolvedSearchParams = await searchParams;
+  const instanceId = await getActiveInstanceIdFromSearchOrDefault(resolvedSearchParams);
   const labelId = pickSingle(resolvedSearchParams?.labelId)?.trim() ?? "";
   const chatIds = (pickSingle(resolvedSearchParams?.chatIds) ?? "")
     .split(",")
@@ -45,6 +48,7 @@ export default async function CampaignsPage({ searchParams }: CampaignsPageProps
     ? await prisma.whatsappLabel.findFirst({
         where: {
           id: labelId,
+          instanceId,
           deleted: false
         },
         select: {
@@ -56,6 +60,7 @@ export default async function CampaignsPage({ searchParams }: CampaignsPageProps
   const [labels, chatPreview, contactPreview] = await Promise.all([
     prisma.whatsappLabel.findMany({
       where: {
+        instanceId,
         deleted: false
       },
       orderBy: {
@@ -73,6 +78,7 @@ export default async function CampaignsPage({ searchParams }: CampaignsPageProps
             id: {
               in: chatIds
             },
+            instanceId,
             isGroup: false
           },
           orderBy: {
@@ -91,6 +97,7 @@ export default async function CampaignsPage({ searchParams }: CampaignsPageProps
             id: {
               in: contactIds
             },
+            instanceId,
             optedOut: false
           },
           orderBy: {
@@ -112,7 +119,7 @@ export default async function CampaignsPage({ searchParams }: CampaignsPageProps
       title="Nova campanha"
       subtitle="Escolha o publico, escreva a mensagem e revise antes de enviar."
       actions={
-        <Link className="button secondary" href="/envios">
+        <Link className="button secondary" href={`/envios?instanceId=${instanceId}`}>
           Historico de envios
         </Link>
       }
@@ -121,6 +128,7 @@ export default async function CampaignsPage({ searchParams }: CampaignsPageProps
         prefillContext={{
           labelId: label?.id ?? (labelId || null),
           labelName: label?.name ?? null,
+          instanceId,
           chatIds,
           chatPreview,
           contactIds,

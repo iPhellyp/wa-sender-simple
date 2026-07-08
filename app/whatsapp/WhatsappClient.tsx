@@ -1,6 +1,7 @@
 ﻿"use client";
 
 import { useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { ButtonLink } from "@/app/components/ui/ButtonLink";
 import { SectionCard } from "@/app/components/ui/SectionCard";
 import { StatusBadge, statusToneFromValue } from "@/app/components/ui/StatusBadge";
@@ -42,6 +43,8 @@ function formatDateTime(value: string | null | undefined) {
 }
 
 export function WhatsappClient() {
+  const searchParams = useSearchParams();
+  const activeInstanceId = searchParams.get("instanceId") ?? "";
   const [session, setSession] = useState<WhatsappSession | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -51,7 +54,9 @@ export function WhatsappClient() {
 
   async function loadStatus() {
     try {
-      const response = await fetch("/api/whatsapp/status", { cache: "no-store" });
+      const params = new URLSearchParams();
+      if (activeInstanceId) params.set("instanceId", activeInstanceId);
+      const response = await fetch(`/api/whatsapp/status?${params.toString()}`, { cache: "no-store" });
       const data = (await response.json()) as WhatsappSession;
 
       if (!response.ok) {
@@ -72,7 +77,9 @@ export function WhatsappClient() {
     setError(null);
 
     try {
-      const response = await fetch(path, {
+      const params = new URLSearchParams();
+      if (activeInstanceId) params.set("instanceId", activeInstanceId);
+      const response = await fetch(`${path}?${params.toString()}`, {
         method: "POST"
       });
 
@@ -95,7 +102,9 @@ export function WhatsappClient() {
     setError(null);
 
     try {
-      const response = await fetch("/api/whatsapp/sync-catalog", {
+      const params = new URLSearchParams();
+      if (activeInstanceId) params.set("instanceId", activeInstanceId);
+      const response = await fetch(`/api/whatsapp/sync-catalog?${params.toString()}`, {
         method: "POST"
       });
       const data = (await response.json()) as { message?: string; error?: string };
@@ -119,7 +128,7 @@ export function WhatsappClient() {
     }, 3000);
 
     return () => window.clearInterval(interval);
-  }, []);
+  }, [activeInstanceId]);
 
   if (loading) {
     return <div className="card">Carregando...</div>;

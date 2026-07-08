@@ -1,5 +1,6 @@
-﻿import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { importContactsFromExcel } from "@/src/lib/excel/import-contacts";
+import { getActiveInstanceIdFromSearchOrDefault } from "@/src/lib/server/whatsapp-instances";
 
 export const runtime = "nodejs";
 
@@ -19,8 +20,11 @@ export async function POST(request: NextRequest) {
     }
 
     const importLabel = String(formData.get("importLabel") ?? "").trim() || null;
+    const instanceId = await getActiveInstanceIdFromSearchOrDefault({
+      instanceId: String(formData.get("instanceId") ?? "").trim() || undefined
+    });
     const buffer = Buffer.from(await file.arrayBuffer());
-    const result = await importContactsFromExcel(buffer, file.name, { importLabel });
+    const result = await importContactsFromExcel(buffer, file.name, { importLabel, instanceId });
 
     return NextResponse.json(result);
   } catch (error) {
@@ -32,4 +36,3 @@ export async function POST(request: NextRequest) {
     );
   }
 }
-

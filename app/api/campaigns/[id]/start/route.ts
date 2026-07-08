@@ -1,7 +1,8 @@
-﻿import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { CampaignStatus } from "@prisma/client";
 import { prisma } from "@/src/lib/prisma/client";
 import { schedulePendingRecipients } from "@/src/lib/campaigns/schedule";
+import { getActiveInstanceIdFromSearchOrDefault } from "@/src/lib/server/whatsapp-instances";
 
 export const runtime = "nodejs";
 
@@ -11,15 +12,17 @@ const finalCampaignStatuses: CampaignStatus[] = [
 ];
 
 export async function POST(
-  _request: Request,
+  request: NextRequest,
   context: {
     params: Promise<{ id: string }>;
   }
 ) {
   const { id } = await context.params;
-  const campaign = await prisma.campaign.findUnique({
+  const instanceId = await getActiveInstanceIdFromSearchOrDefault(request.nextUrl.searchParams);
+  const campaign = await prisma.campaign.findFirst({
     where: {
-      id
+      id,
+      instanceId
     }
   });
 
@@ -48,4 +51,3 @@ export async function POST(
 
   return NextResponse.json({ ok: true });
 }
-

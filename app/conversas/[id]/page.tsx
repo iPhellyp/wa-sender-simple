@@ -1,4 +1,5 @@
-﻿import Link from "next/link";
+﻿import { Suspense } from "react";
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AppShell } from "@/app/components/AppShell";
 import { prisma } from "@/src/lib/prisma/client";
@@ -7,6 +8,10 @@ import {
   getWhatsappIdentityLabel
 } from "@/src/lib/whatsapp/display-name";
 import { getWhatsappStatusPayload } from "@/src/lib/baileys/client";
+import {
+  DEFAULT_WHATSAPP_INSTANCE_ID,
+  getActiveInstanceIdFromSearchOrDefault
+} from "@/src/lib/server/whatsapp-instances";
 import { ConversationMessagesClient } from "./ConversationMessagesClient";
 
 export const runtime = "nodejs";
@@ -15,6 +20,9 @@ export const dynamic = "force-dynamic";
 type ConversationDetailPageProps = {
   params: Promise<{
     id: string;
+  }>;
+  searchParams?: Promise<{
+    instanceId?: string;
   }>;
 };
 
@@ -28,12 +36,17 @@ function formatDate(value: Date | null) {
   return value ? dateFormatter.format(value) : "-";
 }
 
-export default async function ConversationDetailPage({ params }: ConversationDetailPageProps) {
+export default async function ConversationDetailPage({ params, searchParams }: ConversationDetailPageProps) {
   const { id } = await params;
-  const [chat, whatsappSession] = await Promise.all([
-    prisma.whatsappChat.findUnique({
+  const resolvedSearchParams = await searchParams;
+  const instanceId = await getActiveInstanceIdFromSearchOrDefault(
+    new URLSearchParams(resolvedSearchParams?.instanceId ? { instanceId: resolvedSearchParams.instanceId } : {})
+  );
+  const [chat, whatsappSession, whatsappInstance] = await Promise.all([
+    prisma.whatsappChat.findFirst({
       where: {
-        id
+        id,
+        instanceId
       },
       include: {
         labels: {
@@ -41,6 +54,7 @@ export default async function ConversationDetailPage({ params }: ConversationDet
             label: {
               select: {
                 id: true,
+                instanceId: true,
                 name: true,
                 deleted: true
               }
@@ -54,15 +68,21 @@ export default async function ConversationDetailPage({ params }: ConversationDet
         }
       }
     }),
-    getWhatsappStatusPayload()
+    getWhatsappStatusPayload(),
+    prisma.whatsappInstance.findUnique({
+      where: {
+        id: instanceId
+      }
+    })
   ]);
 
   if (!chat) {
     notFound();
   }
 
-  const chatContact = await prisma.whatsappContact.findUnique({
+  const chatContact = await prisma.whatsappContact.findFirst({
     where: {
+      instanceId: chat.instanceId,
       jid: chat.jid
     },
     select: {
@@ -77,17 +97,21 @@ export default async function ConversationDetailPage({ params }: ConversationDet
     contactPushName: chatContact?.pushName,
     isGroup: chat.isGroup
   });
+  const whatsappStatus =
+    instanceId === DEFAULT_WHATSAPP_INSTANCE_ID
+      ? whatsappSession.status
+      : whatsappInstance?.status ?? "disconnected";
 
   return (
     <AppShell
       title="Conversa"
       actions={
         <div className="button-row">
-          <Link className="button secondary" href="/conversas">
+          <Link className="button secondary" href={`/conversas?instanceId=${instanceId}`}>
             Voltar
           </Link>
           {chat.isGroup ? (
-            <Link className="button secondary" href="/conversas">
+            <Link className="button secondary" href={`/conversas?instanceId=${instanceId}`}>
               Voltar para contatos
             </Link>
           ) : null}
@@ -118,7 +142,11 @@ export default async function ConversationDetailPage({ params }: ConversationDet
                 {chat.labels
                   .filter((item) => !item.label.deleted)
                   .map((item) => (
-                    <Link className="label-badge" href={`/etiquetas/${item.label.id}`} key={item.id}>
+                    <Link
+                      className="label-badge"
+                      href={`/etiquetas/${item.label.id}?instanceId=${instanceId}`}
+                      key={item.id}
+                    >
                       {item.label.name}
                     </Link>
                   ))}
@@ -128,7 +156,7 @@ export default async function ConversationDetailPage({ params }: ConversationDet
               <span>Ultima mensagem: {formatDate(chat.lastMessageAt)}</span>
               <span>{chat._count.messages} salvas</span>
               <span>{chat.unreadCount} nao lidas</span>
-              <span>Conexao: {whatsappSession.status}</span>
+              <span>Conexao: {whatsappStatus}</span>
             </div>
           </div>
         </header>
@@ -139,16 +167,20 @@ export default async function ConversationDetailPage({ params }: ConversationDet
             <span>Nenhum envio sera permitido para esta conversa.</span>
           </div>
         ) : (
-          <ConversationMessagesClient
+          <Suspense fallback={<div className="data-card empty-state compact">Carregando mensagens...</div>}>
+        <ConversationMessagesClient
             chatId={chat.id}
             isGroup={chat.isGroup}
             totalMessages={chat._count.messages}
-            whatsappStatus={whatsappSession.status}
+            whatsappStatus={whatsappStatus}
+            instanceId={instanceId}
           />
+      </Suspense>
         )}
       </section>
     </AppShell>
   );
 }
+
 
 

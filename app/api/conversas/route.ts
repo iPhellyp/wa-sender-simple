@@ -6,6 +6,7 @@ import {
   getWhatsappIdentityLabel
 } from "@/src/lib/whatsapp/display-name";
 import { getLastSendByJids, getSendJidSets } from "@/src/lib/labels/send-stats";
+import { getActiveInstanceIdFromSearchOrDefault } from "@/src/lib/server/whatsapp-instances";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -364,7 +365,7 @@ async function fetchRows(options: {
   return rows;
 }
 
-async function findMatchingContactJids(search: string) {
+async function findMatchingContactJids(search: string, instanceId: string) {
   if (!search) {
     return [];
   }
@@ -401,6 +402,7 @@ async function findMatchingContactJids(search: string) {
 
   const contacts = await prisma.whatsappContact.findMany({
     where: {
+      instanceId,
       OR: filters
     },
     select: {
@@ -422,14 +424,16 @@ export async function GET(request: NextRequest) {
     ""
   ).trim();
   const labelId = request.nextUrl.searchParams.get("labelId")?.trim() ?? "";
+  const instanceId = await getActiveInstanceIdFromSearchOrDefault(request.nextUrl.searchParams);
   const page = getPage(request);
   const limit = getLimit(request);
   const skip = (page - 1) * limit;
   const [jidSets, matchedContactJids] = await Promise.all([
-    getSendJidSets(),
-    findMatchingContactJids(search)
+    getSendJidSets(instanceId),
+    findMatchingContactJids(search, instanceId)
   ]);
   const where = andWhere(
+    { instanceId },
     getScopeWhere(type),
     getSearchWhere(search, matchedContactJids),
     getLabelWhere(labelId),
@@ -448,11 +452,13 @@ export async function GET(request: NextRequest) {
       prisma.whatsappChat.count({ where }),
       prisma.whatsappChat.count({
         where: {
+          instanceId,
           isGroup: false
         }
       }),
       prisma.whatsappChat.count({
         where: {
+          instanceId,
           isGroup: false,
           lastMessageAt: {
             not: null
@@ -461,12 +467,14 @@ export async function GET(request: NextRequest) {
       }),
       prisma.whatsappChat.count({
         where: {
+          instanceId,
           isGroup: false,
           lastMessageAt: null
         }
       }),
       prisma.whatsappChat.count({
         where: {
+          instanceId,
           isGroup: true
         }
       })
@@ -476,6 +484,7 @@ export async function GET(request: NextRequest) {
   const [contacts, lastSendByJid] = await Promise.all([
     prisma.whatsappContact.findMany({
       where: {
+        instanceId,
         jid: {
           in: contactJids
         }
@@ -486,12 +495,13 @@ export async function GET(request: NextRequest) {
         pushName: true
       }
     }),
-    getLastSendByJids(contactJids)
+    getLastSendByJids(contactJids, instanceId)
   ]);
   const contactByJid = new Map(contacts.map((contact) => [contact.jid, contact]));
 
   return NextResponse.json({
     type,
+    instanceId,
     search,
     labelId,
     sendStatus,

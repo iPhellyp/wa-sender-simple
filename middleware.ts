@@ -12,7 +12,8 @@ const protectedPagePrefixes = [
   "/contatos",
   "/campanhas",
   "/etiquetas",
-  "/envios"
+  "/envios",
+  "/instancias"
 ];
 
 const protectedApiPrefixes = [
@@ -20,6 +21,7 @@ const protectedApiPrefixes = [
   "/api/contacts",
   "/api/conversas",
   "/api/whatsapp",
+  "/api/instances",
   "/api/campaigns",
   "/api/etiquetas",
   "/api/envios"

@@ -34,6 +34,7 @@ export async function schedulePendingRecipients(campaignId: string, delayMs = 0)
 
   const alreadyScheduledOrSending = await prisma.campaignRecipient.count({
     where: {
+      instanceId: campaign.instanceId,
       campaignId,
       status: {
         in: blockingRecipientStatuses
@@ -68,6 +69,7 @@ export async function schedulePendingRecipients(campaignId: string, delayMs = 0)
     const updatedRecipient = await prisma.campaignRecipient.updateMany({
       where: {
         id: recipient.id,
+        instanceId: campaign.instanceId,
         status: CampaignRecipientStatus.pending
       },
       data: {

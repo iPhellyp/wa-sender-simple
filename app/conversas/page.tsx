@@ -9,6 +9,7 @@ import {
   getWhatsappIdentityLabel
 } from "@/src/lib/whatsapp/display-name";
 import { getLastSendByJids, getSendJidSets } from "@/src/lib/labels/send-stats";
+import { getActiveInstanceIdFromSearchOrDefault } from "@/src/lib/server/whatsapp-instances";
 import { CatalogSelectionClient, type CatalogConversationItem } from "./CatalogSelectionClient";
 import { StartConversationForm } from "./StartConversationForm";
 import { SyncHistoryButton } from "./SyncHistoryButton";
@@ -25,6 +26,7 @@ type ConversationsPageProps = {
     sort?: string | string[];
     page?: string | string[];
     limit?: string | string[];
+    instanceId?: string | string[];
   }>;
 };
 
@@ -426,7 +428,7 @@ function getPriorityWhere(
   return null;
 }
 
-async function findMatchingContactJids(query: string) {
+async function findMatchingContactJids(query: string, instanceId: string) {
   if (!query) {
     return [];
   }
@@ -463,6 +465,7 @@ async function findMatchingContactJids(query: string) {
 
   const contacts = await prisma.whatsappContact.findMany({
     where: {
+      instanceId,
       OR: filters
     },
     select: {
@@ -597,11 +600,13 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
   const page = getPageValue(resolvedSearchParams);
   const limit = getLimitValue(resolvedSearchParams);
   const skip = (page - 1) * limit;
+  const instanceId = await getActiveInstanceIdFromSearchOrDefault(resolvedSearchParams);
   const [matchedContactJids, jidSets] = await Promise.all([
-    findMatchingContactJids(query),
-    getSendJidSets()
+    findMatchingContactJids(query, instanceId),
+    getSendJidSets(instanceId)
   ]);
   const where = andWhere(
+    { instanceId },
     getScopeWhere(type),
     getSearchWhere(query, matchedContactJids),
     getLabelWhere(labelId),
@@ -622,6 +627,7 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
   ] = await Promise.all([
     prisma.whatsappLabel.findMany({
       where: {
+        instanceId,
         deleted: false
       },
       orderBy: {
@@ -644,11 +650,13 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
     }),
     prisma.whatsappChat.count({
       where: {
+        instanceId,
         isGroup: false
       }
     }),
     prisma.whatsappChat.count({
       where: {
+        instanceId,
         isGroup: false,
         lastMessageAt: {
           not: null
@@ -657,16 +665,19 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
     }),
     prisma.whatsappChat.count({
       where: {
+        instanceId,
         isGroup: false,
         lastMessageAt: null
       }
     }),
     prisma.whatsappChat.count({
       where: {
+        instanceId,
         isGroup: false,
         labels: {
           some: {
             label: {
+              instanceId,
               deleted: false
             }
           }
@@ -676,6 +687,7 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
     jidSets.sentJids.length > 0
       ? prisma.whatsappChat.count({
           where: {
+            instanceId,
             isGroup: false,
             jid: {
               in: jidSets.sentJids
@@ -686,6 +698,7 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
     jidSets.failedJids.length > 0
       ? prisma.whatsappChat.count({
           where: {
+            instanceId,
             isGroup: false,
             jid: {
               in: jidSets.failedJids
@@ -700,6 +713,7 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
   const [contacts, lastSendByJid] = await Promise.all([
     prisma.whatsappContact.findMany({
       where: {
+        instanceId,
         jid: {
           in: chatJids
         }
@@ -710,7 +724,7 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
         pushName: true
       }
     }),
-    getLastSendByJids(chatJids)
+    getLastSendByJids(chatJids, instanceId)
   ]);
   const contactByJid = new Map<string, ContactSummary>(
     contacts.map((contact) => [contact.jid, contact])
@@ -719,6 +733,7 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
     jidSets.anyRecipientJids.length > 0
       ? await prisma.whatsappChat.count({
           where: {
+            instanceId,
             isGroup: false,
             jid: {
               notIn: jidSets.anyRecipientJids
@@ -751,7 +766,7 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
 
     return {
       id: chat.id,
-      href: `/conversas/${chat.id}`,
+      href: `/conversas/${chat.id}?instanceId=${instanceId}`,
       displayName: name,
       identityLabel: getWhatsappIdentityLabel(chat.jid),
       avatarText: getAvatarText(name),
@@ -785,7 +800,7 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
             </p>
             <p className="muted">
               Conexao: {whatsappSession.status}. Alguns contatos sem mensagem sao ordenados pela
-              ultima atualizacao disponÃ­vel.
+              ultima atualizacao disponivel.
             </p>
           </div>
           <div className="inbox-actions">
@@ -800,7 +815,7 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
           <StatCard label="Sem mensagem" value={withoutMessageCount} helper="Ordenados por atualizacao" />
           <StatCard label="Etiquetados" value={labeledCount} helper="Com ao menos uma etiqueta" />
           <StatCard label="Ja enviados" value={sentChatCount} helper="Via CampaignRecipient" tone="success" />
-          <StatCard label="Nunca enviados" value={neverSentCount} helper="Sem destinatÃ¡rio criado" />
+          <StatCard label="Nunca enviados" value={neverSentCount} helper="Sem destinatario criado" />
           <StatCard label="Com falha" value={failedChatCount} helper="Falha em campanha" tone="warning" />
         </div>
 
@@ -869,8 +884,8 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
 
         {withoutMessageCount > 0 ? (
           <div className="message">
-            Alguns contatos sem mensagem sao ordenados pela ultima atualizacao disponÃ­vel porque o
-            modo rÃ¡pido nao salva historico pesado.
+            Alguns contatos sem mensagem sao ordenados pela ultima atualizacao disponivel porque o
+            modo rapido nao salva historico pesado.
           </div>
         ) : null}
 
@@ -921,5 +936,4 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
     </AppShell>
   );
 }
-
 
