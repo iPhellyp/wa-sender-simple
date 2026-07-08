@@ -3,6 +3,7 @@ import { prisma } from "../prisma/client";
 import { normalizeBrazilPhone } from "../phone/normalize";
 import { isGroupJid, normalizeChatJid } from "../baileys/sync";
 import { WHATSAPP_X1_ONLY_MODE } from "../whatsapp/jid";
+import { isEligibleIndividualWhatsappChat } from "../whatsapp/individual-chat-filter";
 
 export type SkippedReason =
   | "group_excluded"
@@ -83,8 +84,9 @@ function isBroadcastOrStatusJid(value: string) {
 
   return (
     normalized === "status@broadcast" ||
-    normalized.endsWith("@broadcast") ||
-    normalized.includes("newsletter")
+    normalized.includes("broadcast") ||
+    normalized.includes("newsletter") ||
+    normalized.includes("channel")
   );
 }
 
@@ -361,7 +363,12 @@ export async function buildLabelAudience(options: {
           id: true,
           jid: true,
           name: true,
-          isGroup: true
+          isGroup: true,
+          lastInboundAt: true,
+          lastOutboundAt: true,
+          lastMessageAt: true,
+          lastMessageText: true,
+          unreadCount: true
         }
       }
     },
@@ -407,6 +414,22 @@ export async function buildLabelAudience(options: {
         logRecipientSkipped("group_excluded");
         continue;
       }
+    }
+
+    if (
+      !isEligibleIndividualWhatsappChat({
+        jid,
+        isGroup,
+        lastInboundAt: association.chat.lastInboundAt,
+        lastOutboundAt: association.chat.lastOutboundAt,
+        lastMessageAt: association.chat.lastMessageAt,
+        lastMessageText: association.chat.lastMessageText,
+        unreadCount: association.chat.unreadCount
+      })
+    ) {
+      skippedReasons.unresolved_chat += 1;
+      logRecipientSkipped("unresolved_chat");
+      continue;
     }
 
     if (phoneNormalized) {

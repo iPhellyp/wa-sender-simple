@@ -6,6 +6,7 @@ import {
   getActiveInstanceIdFromSearchOrDefault,
   isWhatsappInstanceNotFoundError
 } from "@/src/lib/server/whatsapp-instances";
+import { getIndividualWhatsappChatWhere } from "@/src/lib/whatsapp/individual-chat-filter";
 import { CampaignsClient } from "./CampaignsClient";
 
 type ChatPreview = {
@@ -100,7 +101,7 @@ export default async function CampaignsPage({ searchParams }: CampaignsPageProps
               in: chatIds
             },
             instanceId,
-            isGroup: false
+            ...getIndividualWhatsappChatWhere()
           },
           orderBy: {
             name: "asc"

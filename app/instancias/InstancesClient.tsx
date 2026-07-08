@@ -184,7 +184,7 @@ export function InstancesClient() {
     }
   }
 
-  async function patchInstance(instanceId: string, payload: { name?: string; role?: string; isDefault?: boolean }) {
+  async function patchInstance(instanceId: string, payload: { name?: string; role?: string }) {
     setBusy(true);
     setError(null);
     setMessage(null);

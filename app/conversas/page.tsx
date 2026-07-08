@@ -17,7 +17,7 @@ import {
 import {
   getIndividualWhatsappChatWhere,
   getIndividualWhatsappContactWhere,
-  isIndividualWhatsappChat
+  isEligibleIndividualWhatsappChat
 } from "@/src/lib/whatsapp/individual-chat-filter";
 import { CatalogSelectionClient, type CatalogConversationItem } from "./CatalogSelectionClient";
 import { StartConversationForm } from "./StartConversationForm";
@@ -728,7 +728,15 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
 
   // Groups/broadcasts/newsletters are intentionally hidden from individual conversations for now.
   const visibleChats = chats.filter((chat) =>
-    isIndividualWhatsappChat({ jid: chat.jid, isGroup: chat.isGroup })
+    isEligibleIndividualWhatsappChat({
+      jid: chat.jid,
+      isGroup: chat.isGroup,
+      lastInboundAt: chat.lastInboundAt,
+      lastOutboundAt: chat.lastOutboundAt,
+      lastMessageAt: chat.lastMessageAt,
+      lastMessageText: chat.lastMessageText,
+      unreadCount: chat.unreadCount
+    })
   );
   const chatJids = visibleChats.map((chat) => chat.jid);
   const [contacts, lastSendByJid] = await Promise.all([
@@ -794,6 +802,7 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
       labels: activeLabels.map((item) => item.label.name),
       preview: chat.lastMessageText ?? "",
       hasMessage: Boolean(chat.lastMessageAt || chat.lastMessageText),
+      hasDirectConversation: true,
       lastDirection: getLastDirection(chat),
       unreadCount: chat.unreadCount,
       sortDateLabel: formatDate(sortDate),
@@ -956,4 +965,3 @@ export default async function ConversationsPage({ searchParams }: ConversationsP
     </AppShell>
   );
 }
-

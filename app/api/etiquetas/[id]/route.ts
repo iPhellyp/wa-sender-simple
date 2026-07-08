@@ -4,6 +4,7 @@ import { prisma } from "@/src/lib/prisma/client";
 import { getWhatsappDisplayName } from "@/src/lib/whatsapp/display-name";
 import { getLastSendByJids } from "@/src/lib/labels/send-stats";
 import { getActiveInstanceIdFromSearchOrDefault } from "@/src/lib/server/whatsapp-instances";
+import { getIndividualWhatsappChatWhere } from "@/src/lib/whatsapp/individual-chat-filter";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -51,7 +52,7 @@ export async function GET(
 
   const chatWhere: Prisma.WhatsappChatWhereInput = {
     instanceId,
-    isGroup: false,
+    ...getIndividualWhatsappChatWhere(),
     ...(search
       ? {
           OR: [
@@ -104,7 +105,7 @@ export async function GET(
         instanceId,
         chat: {
           instanceId,
-          isGroup: false
+          ...getIndividualWhatsappChatWhere()
         }
       },
       select: {

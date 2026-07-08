@@ -41,7 +41,6 @@ export async function PATCH(
   const payload = (await request.json()) as {
     name?: string;
     role?: WhatsappInstanceRole;
-    isDefault?: boolean;
   };
   const data: {
     name?: string;
@@ -78,25 +77,15 @@ export async function PATCH(
     return NextResponse.json({ error: "Instancia nao encontrada" }, { status: 404 });
   }
 
-  const instance = await prisma.$transaction(async (transaction) => {
-    if (payload.isDefault === true) {
-      await transaction.whatsappInstance.updateMany({
-        data: {
-          isDefault: false
-        }
-      });
-    }
-
-    return transaction.whatsappInstance.update({
-      where: {
-        id
-      },
-      data: {
-        ...data,
-        ...(payload.isDefault === true ? { isDefault: true } : {})
-      }
-    });
-  });
+  const instance =
+    Object.keys(data).length > 0
+      ? await prisma.whatsappInstance.update({
+          where: {
+            id
+          },
+          data
+        })
+      : existing;
 
   return NextResponse.json({
     instance,
@@ -163,6 +152,12 @@ export async function DELETE(
     await transaction.whatsappChat.deleteMany({ where: { instanceId: instance.id } });
     await transaction.whatsappSession.deleteMany({ where: { instanceId: instance.id } });
 
+    await transaction.whatsappInstance.delete({
+      where: {
+        id: instance.id
+      }
+    });
+
     if (replacementDefault) {
       await transaction.whatsappInstance.update({
         where: {
@@ -173,12 +168,6 @@ export async function DELETE(
         }
       });
     }
-
-    await transaction.whatsappInstance.delete({
-      where: {
-        id: instance.id
-      }
-    });
   });
 
   await removeInstanceSessionDir(instance);

@@ -129,12 +129,11 @@ export async function POST(request: NextRequest) {
   const payload = (await request.json()) as {
     name?: string;
     role?: WhatsappInstanceRole;
-    isDefault?: boolean;
   };
   const name = String(payload.name ?? "").trim();
   const role = String(payload.role ?? "GENERAL").trim();
   const existingCount = await prisma.whatsappInstance.count();
-  const isDefault = existingCount === 0 || payload.isDefault === true;
+  const isDefault = existingCount === 0;
 
   if (!name) {
     return NextResponse.json({ error: "Nome obrigatorio" }, { status: 400 });
@@ -144,23 +143,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Funcao de instancia invalida" }, { status: 400 });
   }
 
-  const instance = await prisma.$transaction(async (transaction) => {
-    if (isDefault) {
-      await transaction.whatsappInstance.updateMany({
-        data: {
-          isDefault: false
-        }
-      });
+  const instance = await prisma.whatsappInstance.create({
+    data: {
+      name,
+      role: role as WhatsappInstanceRole,
+      sessionKey: buildInstanceSessionKey(name),
+      isDefault
     }
-
-    return transaction.whatsappInstance.create({
-      data: {
-        name,
-        role: role as WhatsappInstanceRole,
-        sessionKey: buildInstanceSessionKey(name),
-        isDefault
-      }
-    });
   });
 
   return NextResponse.json(

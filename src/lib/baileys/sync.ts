@@ -592,10 +592,7 @@ export async function upsertContactFromBaileys(
     }
   });
 
-  if (!isGroupJid(jid)) {
-    await ensureChatForJid(jid, name ?? pushName, instanceId);
-  }
-
+  // Contacts discovered by history/catalog are not direct conversations by themselves.
   return true;
 }
 

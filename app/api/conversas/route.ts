@@ -10,7 +10,7 @@ import { getActiveInstanceIdFromSearchOrDefault } from "@/src/lib/server/whatsap
 import {
   getIndividualWhatsappChatWhere,
   getIndividualWhatsappContactWhere,
-  isIndividualWhatsappChat
+  isEligibleIndividualWhatsappChat
 } from "@/src/lib/whatsapp/individual-chat-filter";
 
 export const runtime = "nodejs";
@@ -479,7 +479,15 @@ export async function GET(request: NextRequest) {
 
   // Groups/broadcasts/newsletters are intentionally hidden from individual conversations for now.
   const visibleRows = rows.filter((chat) =>
-    isIndividualWhatsappChat({ jid: chat.jid, isGroup: chat.isGroup })
+    isEligibleIndividualWhatsappChat({
+      jid: chat.jid,
+      isGroup: chat.isGroup,
+      lastInboundAt: chat.lastInboundAt,
+      lastOutboundAt: chat.lastOutboundAt,
+      lastMessageAt: chat.lastMessageAt,
+      lastMessageText: chat.lastMessageText,
+      unreadCount: chat.unreadCount
+    })
   );
   const contactJids = visibleRows.map((chat) => chat.jid);
   const [contacts, lastSendByJid] = await Promise.all([

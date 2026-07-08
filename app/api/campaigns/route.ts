@@ -6,7 +6,7 @@ import { prisma } from "@/src/lib/prisma/client";
 import { getActiveInstanceIdFromSearchOrDefault } from "@/src/lib/server/whatsapp-instances";
 import {
   getIndividualWhatsappChatWhere,
-  isIndividualWhatsappChat
+  isEligibleIndividualWhatsappChat
 } from "@/src/lib/whatsapp/individual-chat-filter";
 
 export const runtime = "nodejs";
@@ -138,12 +138,25 @@ export async function POST(request: NextRequest) {
         id: true,
         name: true,
         jid: true,
-        isGroup: true
+        isGroup: true,
+        lastInboundAt: true,
+        lastOutboundAt: true,
+        lastMessageAt: true,
+        lastMessageText: true,
+        unreadCount: true
       }
     });
 
     const individualChats = chats.filter((chat) =>
-      isIndividualWhatsappChat({ jid: chat.jid, isGroup: chat.isGroup })
+      isEligibleIndividualWhatsappChat({
+        jid: chat.jid,
+        isGroup: chat.isGroup,
+        lastInboundAt: chat.lastInboundAt,
+        lastOutboundAt: chat.lastOutboundAt,
+        lastMessageAt: chat.lastMessageAt,
+        lastMessageText: chat.lastMessageText,
+        unreadCount: chat.unreadCount
+      })
     );
 
     if (individualChats.length === 0) {

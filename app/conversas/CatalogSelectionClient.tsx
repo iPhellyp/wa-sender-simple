@@ -2,7 +2,10 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { isIndividualWhatsappIdentifier } from "@/src/lib/whatsapp/individual-chat-filter";
+import {
+  hasDirectWhatsappConversationEvidence,
+  isIndividualWhatsappIdentifier
+} from "@/src/lib/whatsapp/individual-chat-filter";
 
 export type CatalogConversationItem = {
   id: string;
@@ -15,6 +18,7 @@ export type CatalogConversationItem = {
   labels: string[];
   preview: string;
   hasMessage: boolean;
+  hasDirectConversation: boolean;
   lastDirection: string | null;
   unreadCount: number;
   sortDateLabel: string;
@@ -47,7 +51,15 @@ function sendStatusClass(status: CatalogConversationItem["sendStatus"]) {
 export function CatalogSelectionClient({ items }: { items: CatalogConversationItem[] }) {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const visibleItems = useMemo(
-    () => items.filter((item) => isIndividualWhatsappIdentifier(item.jid)),
+    () =>
+      items.filter(
+        (item) =>
+          isIndividualWhatsappIdentifier(item.jid) &&
+          hasDirectWhatsappConversationEvidence({
+            hasMessage: item.hasDirectConversation || item.hasMessage,
+            unreadCount: item.unreadCount
+          })
+      ),
     [items]
   );
   const selected = useMemo(

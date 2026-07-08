@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { renderCampaignMessage } from "@/src/lib/campaigns/message-template";
 
 type ContactOption = {
@@ -84,6 +84,16 @@ type AudienceMode = "label" | "catalog" | "contacts";
 type DelayMode = "fixed_seconds" | "fixed_minutes" | "random_range";
 
 const steps = ["Publico", "Mensagem", "Seguranca", "Revisao"];
+const messageTokens = [
+  "{{nome}}",
+  "{{telefone}}",
+  "{{email}}",
+  "{{cidade}}",
+  "{{estado}}",
+  "{{origem}}",
+  "{{lista}}",
+  "{Oi|Ola|Bom dia}"
+];
 
 function statusClass(status: string) {
   if (["sent", "completed", "connected"].includes(status)) return "success";
@@ -157,7 +167,9 @@ export function CampaignsClient({
   const [batchLimit, setBatchLimit] = useState(100);
   const [testPhone, setTestPhone] = useState("");
   const [testBusy, setTestBusy] = useState(false);
+  const [testFeedback, setTestFeedback] = useState<{ tone: "success" | "error"; text: string } | null>(null);
   const [previewMessage, setPreviewMessage] = useState("");
+  const [showRecentCampaigns, setShowRecentCampaigns] = useState(true);
   const [audienceMode, setAudienceMode] = useState<AudienceMode>(initialMode);
   const [selectedLabelId, setSelectedLabelId] = useState(prefillContext?.labelId ?? labels[0]?.id ?? "");
   const [labelAudience, setLabelAudience] = useState<LabelAudience | null>(null);
@@ -169,6 +181,7 @@ export function CampaignsClient({
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const messageTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   const selectableContacts = useMemo(
     () => contacts.filter((contact) => !contact.optedOut),
@@ -196,6 +209,9 @@ export function CampaignsClient({
     audienceCount > 0 &&
     securityConfirmed;
   const sampleContact = prefilledContacts[0] ?? contacts[0] ?? null;
+  const renderedPreviewMessage = previewMessage || (
+    message.trim() ? renderCampaignMessage(message, sampleContact) : ""
+  );
 
   function updateIntervalFromDelay(nextMode = delayMode) {
     const seconds =
@@ -209,6 +225,25 @@ export function CampaignsClient({
 
   function generatePreview() {
     setPreviewMessage(renderCampaignMessage(message, sampleContact));
+  }
+
+  function insertMessageToken(token: string) {
+    const textarea = messageTextareaRef.current;
+
+    if (!textarea) {
+      setMessage((current) => `${current}${current ? " " : ""}${token}`);
+      return;
+    }
+
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const nextMessage = `${message.slice(0, start)}${token}${message.slice(end)}`;
+    setMessage(nextMessage);
+    requestAnimationFrame(() => {
+      textarea.focus();
+      const cursor = start + token.length;
+      textarea.setSelectionRange(cursor, cursor);
+    });
   }
 
   async function loadContacts() {
@@ -381,7 +416,7 @@ export function CampaignsClient({
 
   async function sendTestMessage() {
     setTestBusy(true);
-    setError(null);
+    setTestFeedback(null);
 
     try {
       const response = await fetch("/api/campaigns/test-message", {
@@ -400,9 +435,15 @@ export function CampaignsClient({
         throw new Error(String(data.error ?? "Erro ao enviar teste"));
       }
 
-      setCreatedMessage(String(data.message ?? "Mensagem de teste enviada."));
+      setTestFeedback({
+        tone: "success",
+        text: String(data.message ?? "Mensagem de teste enviada.")
+      });
     } catch (testError) {
-      setError(testError instanceof Error ? testError.message : "Erro inesperado");
+      setTestFeedback({
+        tone: "error",
+        text: testError instanceof Error ? testError.message : "Erro inesperado"
+      });
     } finally {
       setTestBusy(false);
     }
@@ -614,15 +655,28 @@ export function CampaignsClient({
                     className="textarea tall"
                     id="campaign-message"
                     maxLength={4000}
+                    ref={messageTextareaRef}
                     value={message}
                     onChange={(event) => setMessage(event.target.value)}
                   />
                   <span className="muted">{message.length}/4000 caracteres</span>
+                  <div className="token-row" aria-label="Inserir variaveis">
+                    {messageTokens.map((token) => (
+                      <button
+                        className="token-chip"
+                        key={token}
+                        type="button"
+                        onClick={() => insertMessageToken(token)}
+                      >
+                        {token}
+                      </button>
+                    ))}
+                  </div>
                   <div className="button-row">
                     <button className="button secondary compact-button" type="button" onClick={generatePreview}>
                       Gerar preview
                     </button>
-                    <span className="muted">Variaveis: {"{{nome}}"}, {"{{telefone}}"}, {"{{origem}}"}, {"{{lista}}"}</span>
+                    <span className="muted">O preview usa variaveis e spintax com dados de exemplo.</span>
                   </div>
                 </div>
                 <div className="filter-bar">
@@ -645,6 +699,11 @@ export function CampaignsClient({
                     {testBusy ? "Enviando..." : "Enviar teste para meu numero"}
                   </button>
                 </div>
+                {testFeedback ? (
+                  <div className={`message compact ${testFeedback.tone === "error" ? "error" : ""}`}>
+                    {testFeedback.text}
+                  </div>
+                ) : null}
                 <div className="field">
                   <label htmlFor="delay-mode">Delay seguro</label>
                   <select
@@ -831,31 +890,51 @@ export function CampaignsClient({
               <span>{intervalMinutes || 0} min</span>
             </div>
           </div>
-          <div className="message-preview">
-            {previewMessage || (message.trim() ? renderCampaignMessage(message, sampleContact) : "Digite a mensagem para visualizar o envio.")}
+          <div className="wa-preview">
+            <div className="wa-preview-top">
+              <span>WA</span>
+              <strong>{sampleContact?.name ?? "Contato exemplo"}</strong>
+            </div>
+            <div className="wa-preview-screen">
+              {renderedPreviewMessage ? (
+                <div className="wa-bubble">{renderedPreviewMessage}</div>
+              ) : (
+                <div className="wa-empty">Digite a mensagem para visualizar o envio.</div>
+              )}
+            </div>
           </div>
         </aside>
       </section>
 
-      <section className="data-card">
+      <section className="data-card campaigns-recent-card">
         <div className="table-toolbar">
           <div>
             <strong>Campanhas recentes</strong>
             <span className="muted">{campaigns.length} campanha(s)</span>
           </div>
-          <button className="button secondary compact-button" type="button" onClick={() => void refresh()}>
-            Atualizar
-          </button>
+          <div className="button-row">
+            <button
+              className="button secondary compact-button"
+              type="button"
+              onClick={() => setShowRecentCampaigns((current) => !current)}
+            >
+              {showRecentCampaigns ? "Recolher" : "Mostrar"}
+            </button>
+            <button className="button secondary compact-button" type="button" onClick={() => void refresh()}>
+              Atualizar
+            </button>
+          </div>
         </div>
-        {loading ? (
+        {showRecentCampaigns && loading ? (
           <div className="empty-state compact">Carregando campanhas...</div>
-        ) : campaigns.length === 0 ? (
+        ) : showRecentCampaigns && campaigns.length === 0 ? (
           <div className="empty-state compact">
             <strong>Nenhuma campanha criada</strong>
             <span>Crie um rascunho para iniciar os envios.</span>
           </div>
-        ) : (
-          <div className="table-wrap">
+        ) : showRecentCampaigns ? (
+          <>
+          <div className="table-wrap campaigns-table-wrap">
             <table className="data-table compact">
               <thead>
                 <tr>
@@ -893,14 +972,31 @@ export function CampaignsClient({
                         >
                           Ver
                         </button>
-                        <button
+                        {campaign.status === "running" || campaign.status === "scheduled" ? (
+                          <button
+                            className="button secondary compact-button"
+                            disabled={busy}
+                            type="button"
+                            onClick={() => void runAction(campaign.id, "pause")}
+                          >
+                            Pausar
+                          </button>
+                        ) : (
+                          <button
+                            className="button secondary compact-button"
+                            disabled={busy || !["draft", "paused"].includes(campaign.status)}
+                            type="button"
+                            onClick={() => void runAction(campaign.id, campaign.status === "paused" ? "resume" : "start")}
+                          >
+                            {campaign.status === "paused" ? "Retomar" : "Iniciar"}
+                          </button>
+                        )}
+                        <Link
                           className="button secondary compact-button"
-                          disabled={busy || !["draft", "paused"].includes(campaign.status)}
-                          type="button"
-                          onClick={() => void runAction(campaign.id, campaign.status === "paused" ? "resume" : "start")}
+                          href={`/envios?campaign=${campaign.id}${activeInstanceId ? `&instanceId=${activeInstanceId}` : ""}`}
                         >
-                          {campaign.status === "paused" ? "Retomar" : "Iniciar"}
-                        </button>
+                          Acompanhar
+                        </Link>
                         <button
                           className="button danger compact-button"
                           disabled={busy || ["completed", "canceled"].includes(campaign.status)}
@@ -916,9 +1012,73 @@ export function CampaignsClient({
               </tbody>
             </table>
           </div>
-        )}
+          <div className="campaign-mobile-list">
+            {campaigns.map((campaign) => (
+              <article className="campaign-mobile-card" key={campaign.id}>
+                <div>
+                  <strong>{campaign.name}</strong>
+                  <span className="muted">{campaign.targetLabel?.name ?? campaignAudienceLabel(campaign.targetMode)}</span>
+                </div>
+                <span className={`status-badge ${statusClass(campaign.status)}`}>
+                  {statusLabel(campaign.status)}
+                </span>
+                <p>
+                  {campaign.recipientCount} total | {campaign.recipientStatusCounts.sent ?? 0} enviados |{" "}
+                  {campaign.recipientStatusCounts.failed ?? 0} falhas |{" "}
+                  {getPendingCount(campaign.recipientStatusCounts)} pendentes
+                </p>
+                <div className="button-row">
+                  <button
+                    className="button secondary compact-button"
+                    type="button"
+                    onClick={() => {
+                      setSelectedCampaignId(campaign.id);
+                      void loadRecipients(campaign.id);
+                    }}
+                  >
+                    Ver
+                  </button>
+                  {campaign.status === "running" || campaign.status === "scheduled" ? (
+                    <button
+                      className="button secondary compact-button"
+                      disabled={busy}
+                      type="button"
+                      onClick={() => void runAction(campaign.id, "pause")}
+                    >
+                      Pausar
+                    </button>
+                  ) : (
+                    <button
+                      className="button secondary compact-button"
+                      disabled={busy || !["draft", "paused"].includes(campaign.status)}
+                      type="button"
+                      onClick={() => void runAction(campaign.id, campaign.status === "paused" ? "resume" : "start")}
+                    >
+                      {campaign.status === "paused" ? "Retomar" : "Iniciar"}
+                    </button>
+                  )}
+                  <Link
+                    className="button secondary compact-button"
+                    href={`/envios?campaign=${campaign.id}${activeInstanceId ? `&instanceId=${activeInstanceId}` : ""}`}
+                  >
+                    Acompanhar
+                  </Link>
+                  <button
+                    className="button danger compact-button"
+                    disabled={busy || ["completed", "canceled"].includes(campaign.status)}
+                    type="button"
+                    onClick={() => void runAction(campaign.id, "cancel")}
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              </article>
+            ))}
+          </div>
+          </>
+        ) : null}
 
-        {selectedCampaignId ? (
+        {showRecentCampaigns && selectedCampaignId ? (
           <div className="detail-panel compact">
             <div className="table-toolbar">
               <strong>Destinatarios da campanha</strong>

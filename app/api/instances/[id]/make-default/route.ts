@@ -21,22 +21,8 @@ export async function POST(
     return NextResponse.json({ error: "Instancia nao encontrada" }, { status: 404 });
   }
 
-  const instance = await prisma.$transaction(async (transaction) => {
-    await transaction.whatsappInstance.updateMany({
-      data: {
-        isDefault: false
-      }
-    });
-
-    return transaction.whatsappInstance.update({
-      where: {
-        id
-      },
-      data: {
-        isDefault: true
-      }
-    });
+  return NextResponse.json({
+    instance: existing,
+    message: "Instancia ativa deve ser controlada por URL, localStorage e cookie."
   });
-
-  return NextResponse.json({ instance });
 }

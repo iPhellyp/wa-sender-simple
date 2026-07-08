@@ -13,6 +13,9 @@
   --info: #175cd3;
   --shadow: 0 18px 48px rgb(15 23 42 / 8%);
   --radius: 8px;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --mobile-bottom-nav-height: 68px;
 }
 
 * {
@@ -26,6 +29,7 @@ body {
   font-family:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
     sans-serif;
+  overflow-x: hidden;
 }
 
 a {
@@ -137,6 +141,62 @@ button:disabled {
   margin: 0 auto;
   max-width: 1320px;
   padding: 30px 28px 44px;
+}
+
+.mobile-only,
+.mobile-bottom-nav {
+  display: none;
+}
+
+.safe-top {
+  padding-top: var(--safe-top);
+}
+
+.safe-bottom,
+.app-mobile-bottom-space {
+  padding-bottom: var(--safe-bottom);
+}
+
+.pwa-offline-banner {
+  background: #0f172a;
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 700;
+  left: 0;
+  padding: calc(8px + var(--safe-top)) 14px 8px;
+  position: fixed;
+  right: 0;
+  top: 0;
+  text-align: center;
+  z-index: 80;
+}
+
+.pwa-install-card {
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  bottom: calc(16px + var(--safe-bottom));
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  left: 16px;
+  max-width: 520px;
+  padding: 12px;
+  position: fixed;
+  z-index: 70;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 .page-header {
@@ -1330,11 +1390,54 @@ button:disabled {
   }
 
   .nav {
-    width: 100%;
+    display: none;
   }
 
   .page {
-    padding: 18px;
+    padding: 18px 14px calc(var(--mobile-bottom-nav-height) + 20px + var(--safe-bottom));
+  }
+
+  .desktop-only {
+    display: none !important;
+  }
+
+  .mobile-only {
+    display: initial;
+  }
+
+  .mobile-bottom-nav {
+    align-items: center;
+    background: rgb(255 255 255 / 96%);
+    border-top: 1px solid var(--line);
+    bottom: 0;
+    box-shadow: 0 -12px 28px rgb(15 23 42 / 8%);
+    display: grid;
+    gap: 4px;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    left: 0;
+    min-height: calc(var(--mobile-bottom-nav-height) + var(--safe-bottom));
+    padding: 7px 8px calc(7px + var(--safe-bottom));
+    position: fixed;
+    right: 0;
+    z-index: 60;
+  }
+
+  .mobile-bottom-nav a {
+    align-items: center;
+    border-radius: 8px;
+    color: var(--muted);
+    display: inline-flex;
+    font-size: 11px;
+    font-weight: 800;
+    justify-content: center;
+    min-height: 44px;
+    padding: 6px 4px;
+    text-align: center;
+  }
+
+  .mobile-bottom-nav a.active {
+    background: var(--surface-soft);
+    color: var(--primary-dark);
   }
 
   .two-column,
@@ -1371,6 +1474,27 @@ button:disabled {
 
   .catalog-card .conversation-avatar {
     display: none;
+  }
+
+  .conversation-grid.compact {
+    gap: 8px;
+  }
+
+  .compact-conversation-card {
+    grid-template-columns: 28px minmax(0, 1fr);
+    padding: 9px;
+  }
+
+  .compact-conversation-card .conversation-avatar {
+    display: none;
+  }
+
+  .pwa-install-card {
+    bottom: calc(var(--mobile-bottom-nav-height) + 12px + var(--safe-bottom));
+    left: 10px;
+    right: 10px;
+    flex-direction: column;
+    align-items: stretch;
   }
 
   .inbox-hero,
@@ -1941,6 +2065,111 @@ button:disabled {
   white-space: pre-wrap;
 }
 
+.token-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.token-chip {
+  background: #f8fafc;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 750;
+  min-height: 30px;
+  padding: 5px 9px;
+}
+
+.token-chip:hover {
+  border-color: var(--primary);
+  color: var(--primary-dark);
+}
+
+.wa-preview {
+  background: #e7f3ee;
+  border: 1px solid #c8ded6;
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.wa-preview-top {
+  align-items: center;
+  background: #0f766e;
+  color: #ffffff;
+  display: flex;
+  gap: 8px;
+  min-height: 42px;
+  padding: 8px 10px;
+}
+
+.wa-preview-top span {
+  align-items: center;
+  background: rgb(255 255 255 / 18%);
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: 11px;
+  font-weight: 800;
+  height: 26px;
+  justify-content: center;
+  width: 26px;
+}
+
+.wa-preview-screen {
+  background:
+    linear-gradient(45deg, rgb(255 255 255 / 45%) 25%, transparent 25%),
+    linear-gradient(-45deg, rgb(255 255 255 / 45%) 25%, transparent 25%),
+    #e4efe8;
+  background-size: 22px 22px;
+  display: grid;
+  min-height: 220px;
+  padding: 14px;
+}
+
+.wa-bubble {
+  align-self: start;
+  background: #dcf8c6;
+  border-radius: 8px 8px 2px 8px;
+  box-shadow: 0 1px 2px rgb(15 23 42 / 12%);
+  justify-self: end;
+  line-height: 1.45;
+  max-width: 88%;
+  overflow-wrap: anywhere;
+  padding: 10px 12px;
+  white-space: pre-wrap;
+}
+
+.wa-empty {
+  align-self: center;
+  color: var(--muted);
+  justify-self: center;
+  text-align: center;
+}
+
+.campaign-mobile-list {
+  display: none;
+}
+
+.campaign-mobile-card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+}
+
+.campaign-mobile-card > div:first-child {
+  display: grid;
+  gap: 3px;
+}
+
+.campaign-mobile-card p {
+  color: var(--muted);
+  font-size: 13px;
+  margin: 0;
+}
+
 .message.compact {
   padding: 9px 11px;
 }
@@ -2092,6 +2321,10 @@ button:disabled {
   .audience-grid {
     grid-template-columns: 1fr;
   }
+
+  .preview-panel {
+    order: -1;
+  }
 }
 
 @media (max-width: 760px) {
@@ -2124,5 +2357,56 @@ button:disabled {
   .detail-metrics,
   .recipient-row {
     grid-template-columns: 1fr;
+  }
+
+  .wizard-sidebar {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    overflow-x: auto;
+  }
+
+  .wizard-step {
+    grid-template-columns: 1fr;
+    justify-items: center;
+    min-width: 86px;
+    text-align: center;
+  }
+
+  .wizard-note {
+    grid-column: 1 / -1;
+  }
+
+  .filter-bar {
+    align-items: stretch;
+  }
+
+  .input,
+  .select,
+  .button {
+    min-height: 44px;
+  }
+
+  .textarea {
+    min-height: 132px;
+  }
+
+  .campaigns-table-wrap {
+    display: none;
+  }
+
+  .campaign-mobile-list {
+    display: grid;
+    gap: 8px;
+  }
+
+  .wa-preview-screen {
+    min-height: 170px;
+  }
+
+  .wa-bubble {
+    max-width: 96%;
+  }
+
+  .token-chip {
+    min-height: 34px;
   }
 }

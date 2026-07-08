@@ -2,6 +2,7 @@
 import { Suspense, type ReactNode } from "react";
 import { ActiveInstanceSelector } from "./ActiveInstanceSelector";
 import { NavLink } from "./NavLink";
+import { PwaStatus } from "./PwaStatus";
 import { PageHeader } from "./ui/PageHeader";
 
 type AppShellProps = {
@@ -14,6 +15,7 @@ type AppShellProps = {
 export function AppShell({ title, subtitle, children, actions }: AppShellProps) {
   return (
     <div className="shell">
+      <PwaStatus />
       <header className="topbar">
         <div className="topbar-inner">
           <Link className="brand" href="/dashboard">
@@ -46,6 +48,13 @@ export function AppShell({ title, subtitle, children, actions }: AppShellProps) 
         <PageHeader title={title} subtitle={subtitle} actions={actions} />
         {children}
       </main>
+      <nav className="mobile-bottom-nav" aria-label="Menu mobile">
+        <NavLink href="/dashboard">Dashboard</NavLink>
+        <NavLink href="/conversas">Conversas</NavLink>
+        <NavLink href="/campanhas">Campanhas</NavLink>
+        <NavLink href="/instancias">Instancias</NavLink>
+        <NavLink href="/envios">Envios</NavLink>
+      </nav>
     </div>
   );
 }
