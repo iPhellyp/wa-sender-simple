@@ -25,6 +25,11 @@ export type SyncWhatsappCatalogJobData = InstanceJobData & {
   forceSnapshot?: boolean;
 };
 
+export type SyncJobEnqueueResult = {
+  jobId: string | null;
+  deduped: boolean;
+};
+
 export type ApplyWhatsappLabelsJobData = InstanceJobData & {
   requestId: string;
   labelId: string;
@@ -76,6 +81,39 @@ async function removeStaleJob(jobId: string) {
   }
 
   await job.remove().catch(() => undefined);
+}
+
+async function enqueueDedupedSyncJob(
+  jobName: string,
+  jobId: string,
+  data: Record<string, unknown>
+): Promise<SyncJobEnqueueResult> {
+  const existingJob = await getCampaignQueue().getJob(jobId);
+
+  if (existingJob) {
+    const state = await existingJob.getState();
+
+    if (["active", "waiting", "delayed", "prioritized", "waiting-children"].includes(state)) {
+      return {
+        jobId: existingJob.id ?? jobId,
+        deduped: true
+      };
+    }
+
+    await existingJob.remove().catch(() => undefined);
+  }
+
+  const job = await getCampaignQueue().add(jobName, data, {
+    attempts: 1,
+    jobId,
+    removeOnComplete: true,
+    removeOnFail: 100
+  });
+
+  return {
+    jobId: job.id ?? null,
+    deduped: false
+  };
 }
 
 export async function enqueueRecipient(recipientId: string, delayMs: number, jobKey?: string) {
@@ -165,39 +203,26 @@ export async function enqueueManualMessage(data: SendManualMessageJobData) {
   return job.id ?? null;
 }
 
-export async function enqueueWhatsappHistorySync(instanceId: string) {
+export async function enqueueWhatsappHistorySync(instanceId: string): Promise<SyncJobEnqueueResult> {
   const normalizedInstanceId = requireInstanceId(instanceId, SYNC_WHATSAPP_HISTORY_JOB);
-  const job = await getCampaignQueue().add(
+  return enqueueDedupedSyncJob(
     SYNC_WHATSAPP_HISTORY_JOB,
-    { instanceId: normalizedInstanceId },
-    {
-      attempts: 1,
-      jobId: buildJobId(SYNC_WHATSAPP_HISTORY_JOB, normalizedInstanceId),
-      removeOnComplete: true,
-      removeOnFail: 100
-    }
+    buildJobId(SYNC_WHATSAPP_HISTORY_JOB, "quick", normalizedInstanceId),
+    { instanceId: normalizedInstanceId }
   );
-
-  return job.id ?? null;
 }
 
-export async function enqueueWhatsappCatalogSync(data: SyncWhatsappCatalogJobData = {}) {
+export async function enqueueWhatsappCatalogSync(data: SyncWhatsappCatalogJobData = {}): Promise<SyncJobEnqueueResult> {
   const instanceId = requireInstanceId(data.instanceId, SYNC_WHATSAPP_CATALOG_JOB);
-  const job = await getCampaignQueue().add(
+  const syncType = data.forceSnapshot === true ? "full" : "quick";
+  return enqueueDedupedSyncJob(
     SYNC_WHATSAPP_CATALOG_JOB,
+    buildJobId(SYNC_WHATSAPP_CATALOG_JOB, syncType, instanceId),
     {
       ...data,
       instanceId
-    },
-    {
-      attempts: 1,
-      jobId: buildJobId(SYNC_WHATSAPP_CATALOG_JOB, instanceId),
-      removeOnComplete: true,
-      removeOnFail: 100
     }
   );
-
-  return job.id ?? null;
 }
 
 export async function enqueueApplyWhatsappLabels(data: ApplyWhatsappLabelsJobData) {

@@ -32,6 +32,12 @@ type InstanceSummary = {
   hasMeId?: boolean;
   isPairingPartial?: boolean;
   isRecoverableSession?: boolean;
+  isConnectingStale?: boolean;
+  isQrStale?: boolean;
+  canGenerateQr?: boolean;
+  canResumeSession?: boolean;
+  canSyncQuick?: boolean;
+  canSyncHistory?: boolean;
   lastOpenAt?: string | null;
 };
 
@@ -66,11 +72,16 @@ function hasConfirmedSession(instance: InstanceSummary) {
 }
 
 function getConnectionActionLabel(instance: InstanceSummary) {
-  if (instance.isPairingPartial) {
+  if (instance.isPairingPartial || instance.isQrStale) {
     return "Gerar novo QR";
   }
 
-  return hasConfirmedSession(instance) ? "Retomar sessao" : "Gerar QR";
+  if (instance.isConnectingStale) {
+    return instance.canResumeSession ? "Retomar sessao agora" : "Gerar QR";
+  }
+
+  const canResume = instance.canResumeSession ?? hasConfirmedSession(instance);
+  return canResume ? "Retomar sessao" : "Gerar QR";
 }
 
 export function InstancesClient() {
@@ -78,6 +89,7 @@ export function InstancesClient() {
   const [roles, setRoles] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [busyInstanceId, setBusyInstanceId] = useState<string | null>(null);
+  const [busyAction, setBusyAction] = useState<string | null>(null);
   const [cardErrors, setCardErrors] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -336,16 +348,29 @@ export function InstancesClient() {
     }
   }
 
-  async function postWhatsappAction(instance: InstanceSummary, action: "reconnect" | "sync-catalog" | "sync-history") {
+  async function postWhatsappAction(
+    instance: InstanceSummary,
+    action: "reconnect" | "sync-catalog" | "sync-catalog-full" | "sync-history"
+  ) {
+    const actionPath = action === "sync-catalog-full" ? "sync-catalog" : action;
     setBusy(true);
     setBusyInstanceId(instance.id);
+    setBusyAction(action);
     setError(null);
     setMessage(null);
     setCardErrors((current) => ({ ...current, [instance.id]: "" }));
 
     try {
-      const response = await fetch(`/api/whatsapp/${action}?instanceId=${encodeURIComponent(instance.id)}`, {
-        method: "POST"
+      const response = await fetch(`/api/whatsapp/${actionPath}?instanceId=${encodeURIComponent(instance.id)}`, {
+        method: "POST",
+        headers: action === "sync-catalog-full" || action === "sync-catalog"
+          ? { "Content-Type": "application/json" }
+          : undefined,
+        body: action === "sync-catalog-full"
+          ? JSON.stringify({ forceSnapshot: true })
+          : action === "sync-catalog"
+            ? JSON.stringify({ forceSnapshot: false })
+            : undefined
       });
       const data = (await response.json()) as { error?: string; message?: string };
 
@@ -377,11 +402,15 @@ export function InstancesClient() {
       refreshSoon();
     } catch (actionError) {
       const nextError = actionError instanceof Error ? actionError.message : "Erro inesperado";
-      setCardErrors((current) => ({ ...current, [instance.id]: nextError }));
+      const syncError = action.startsWith("sync")
+        ? "Sincronizacao falhou, mas WhatsApp continua conectado."
+        : nextError;
+      setCardErrors((current) => ({ ...current, [instance.id]: syncError }));
       setError(nextError);
     } finally {
       setBusy(false);
       setBusyInstanceId(null);
+      setBusyAction(null);
     }
   }
 
@@ -509,6 +538,18 @@ export function InstancesClient() {
               </div>
             ) : null}
 
+            {instance.isConnectingStale ? (
+              <div className="message warning compact">
+                Conexao nao concluiu. Tente novamente.
+              </div>
+            ) : null}
+
+            {instance.isQrStale ? (
+              <div className="message warning compact">
+                QR expirou. Gere novo QR.
+              </div>
+            ) : null}
+
             {instance.qrCode ? (
               <div className="qr-card compact">
                 <img className="qr" src={instance.qrCode} alt={`QR Code da instancia ${instance.name}`} />
@@ -551,21 +592,45 @@ export function InstancesClient() {
                   ? "Aguarde..."
                   : getConnectionActionLabel(instance)}
               </button>
+              {instance.status === "connecting" && instance.canResumeSession ? (
+                <button
+                  className="button secondary compact-button"
+                  disabled={busy}
+                  type="button"
+                  onClick={() => void postWhatsappAction(instance, "reconnect")}
+                >
+                  Retomar sessao agora
+                </button>
+              ) : null}
               <button
                 className="button secondary compact-button"
-                disabled={busy}
+                disabled={busy || instance.canSyncQuick === false}
                 type="button"
                 onClick={() => void postWhatsappAction(instance, "sync-catalog")}
               >
-                Sincronizar catalogo
+                {busyInstanceId === instance.id && busyAction === "sync-catalog"
+                  ? "Sincronizando..."
+                  : "Sincronizar rapido"}
               </button>
               <button
                 className="button secondary compact-button"
-                disabled={busy}
+                disabled={busy || instance.canSyncQuick === false}
+                type="button"
+                onClick={() => void postWhatsappAction(instance, "sync-catalog-full")}
+              >
+                {busyInstanceId === instance.id && busyAction === "sync-catalog-full"
+                  ? "Sincronizando..."
+                  : "Sincronizacao completa"}
+              </button>
+              <button
+                className="button secondary compact-button"
+                disabled={busy || instance.canSyncHistory === false}
                 type="button"
                 onClick={() => void postWhatsappAction(instance, "sync-history")}
               >
-                Sincronizar historico
+                {busyInstanceId === instance.id && busyAction === "sync-history"
+                  ? "Verificando..."
+                  : "Verificar historico"}
               </button>
               <button
                 className="button secondary compact-button"

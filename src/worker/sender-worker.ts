@@ -24,6 +24,7 @@ import {
 import {
   applyWhatsappLabelsForInstance,
   disconnectWhatsappInstance,
+  getWhatsappInstanceRuntimeStatus,
   reconnectWhatsappInstance,
   requestWhatsappCatalogSyncForInstance,
   requestWhatsappHistorySyncForInstance,
@@ -67,6 +68,70 @@ function getRequiredJobInstanceId(data: unknown, jobName: string) {
   }
 
   return instanceId;
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function canResumeForSync(status: Awaited<ReturnType<typeof getWhatsappInstanceRuntimeStatus>>) {
+  return Boolean(
+    status.status === "connected" ||
+    status.connectedPhone ||
+    status.hasRegisteredSession ||
+    status.hasMeId ||
+    status.isRecoverableSession
+  );
+}
+
+async function ensureWhatsappReadyForSync(instanceId: string, syncType: string, jobId: string | undefined) {
+  const before = await getWhatsappInstanceRuntimeStatus(instanceId);
+
+  console.log("[worker] sync socket check", {
+    action: "sync_socket_check",
+    instanceId,
+    syncType,
+    jobId,
+    socketStatusBefore: before.status,
+    hasRegisteredSession: before.hasRegisteredSession ?? false,
+    hasMeId: before.hasMeId ?? false,
+    isPairingPartial: before.isPairingPartial ?? false
+  });
+
+  if (!canResumeForSync(before)) {
+    throw new Error("Conecte esta instancia antes de sincronizar.");
+  }
+
+  if (before.status !== "connected") {
+    try {
+      await reconnectWhatsappInstance(instanceId);
+    } catch (error) {
+      if (!isBaileysStartSkippedError(error)) {
+        throw error;
+      }
+    }
+  }
+
+  const deadline = Date.now() + 20_000;
+  let after = await getWhatsappInstanceRuntimeStatus(instanceId);
+
+  while (after.status === "connecting" && Date.now() < deadline) {
+    await sleep(500);
+    after = await getWhatsappInstanceRuntimeStatus(instanceId);
+  }
+
+  console.log("[worker] sync socket ready check finished", {
+    action: "sync_socket_ready_check",
+    instanceId,
+    syncType,
+    jobId,
+    socketStatusBefore: before.status,
+    socketStatusAfter: after.status
+  });
+
+  if (after.status !== "connected") {
+    throw new Error(`WhatsApp nao conectado para sincronizacao: ${after.status}`);
+  }
 }
 
 async function requeueRecipient(recipientId: string, delayMs = PAUSED_RECHECK_DELAY_MS) {
@@ -624,14 +689,31 @@ const worker = new Worker(
 
     if (job.name === SYNC_WHATSAPP_HISTORY_JOB) {
       const instanceId = getRequiredJobInstanceId(job.data, SYNC_WHATSAPP_HISTORY_JOB);
-      console.log("[worker] sync-whatsapp-history job received", { instanceId });
+      const startedAt = Date.now();
+      console.log("[worker] sync-whatsapp-history job received", { instanceId, jobId: job.id });
+      console.log("[worker] sync_started", { instanceId, syncType: "history", jobId: job.id });
 
-      const result = await requestWhatsappHistorySyncForInstance(instanceId);
-      console.log("[worker] sync-whatsapp-history finished", {
-        instanceId,
-        ok: result.ok,
-        mode: result.mode
-      });
+      try {
+        await ensureWhatsappReadyForSync(instanceId, "history", job.id);
+        const result = await requestWhatsappHistorySyncForInstance(instanceId);
+        console.log("[worker] sync_finished", {
+          instanceId,
+          syncType: "history",
+          jobId: job.id,
+          ok: result.ok,
+          mode: result.mode,
+          durationMs: Date.now() - startedAt
+        });
+      } catch (error) {
+        console.error("[worker] sync_failed", {
+          instanceId,
+          syncType: "history",
+          jobId: job.id,
+          error: getErrorMessage(error),
+          durationMs: Date.now() - startedAt
+        });
+        throw error;
+      }
 
       return;
     }
@@ -639,14 +721,31 @@ const worker = new Worker(
     if (job.name === SYNC_WHATSAPP_CATALOG_JOB) {
       const data = job.data as Partial<SyncWhatsappCatalogJobData>;
       const instanceId = getRequiredJobInstanceId(data, SYNC_WHATSAPP_CATALOG_JOB);
-      console.log("[worker] sync-whatsapp-catalog job received", { instanceId });
+      const syncType = data.forceSnapshot === true ? "catalog-full" : "catalog-quick";
+      const startedAt = Date.now();
+      console.log("[worker] sync_started", { instanceId, syncType, jobId: job.id });
 
-      const result = await requestWhatsappCatalogSyncForInstance(instanceId, data);
-      console.log("[worker] sync-whatsapp-catalog finished", {
-        instanceId,
-        ok: result.ok,
-        mode: result.mode
-      });
+      try {
+        await ensureWhatsappReadyForSync(instanceId, syncType, job.id);
+        const result = await requestWhatsappCatalogSyncForInstance(instanceId, data);
+        console.log("[worker] sync_finished", {
+          instanceId,
+          syncType,
+          jobId: job.id,
+          ok: result.ok,
+          mode: result.mode,
+          durationMs: Date.now() - startedAt
+        });
+      } catch (error) {
+        console.error("[worker] sync_failed", {
+          instanceId,
+          syncType,
+          jobId: job.id,
+          error: getErrorMessage(error),
+          durationMs: Date.now() - startedAt
+        });
+        throw error;
+      }
 
       return;
     }

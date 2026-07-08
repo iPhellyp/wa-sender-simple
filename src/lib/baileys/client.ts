@@ -15,7 +15,6 @@ import QRCode from "qrcode";
 import { WhatsappStatus, type Prisma } from "@prisma/client";
 import { prisma } from "../prisma/client";
 import { normalizeBrazilPhone, toWhatsappJid } from "../phone/normalize";
-import { enqueueWhatsappCatalogSync } from "../queue/campaign-queue";
 import { clearWhatsappOperationalData } from "../server/whatsapp-session-data";
 import { DEFAULT_WHATSAPP_INSTANCE_ID } from "../server/whatsapp-instances";
 import { CATALOG_BOOTSTRAP_MODE, shouldIgnoreJidForX1Only } from "../whatsapp/jid";
@@ -56,7 +55,7 @@ let lastAutoCatalogSyncAt = 0;
 let lastAutoCatalogSyncPhone: string | null = null;
 
 const MAX_GENERAL_RECONNECT_ATTEMPTS = 5;
-const TRANSIENT_RECONNECT_BACKOFF_MS = [5_000, 15_000, 30_000] as const;
+const TRANSIENT_RECONNECT_BACKOFF_MS = [3_000, 8_000, 15_000] as const;
 const CATALOG_BOOTSTRAP_WINDOW_MS = 3 * 60_000;
 const AUTO_CATALOG_SYNC_COOLDOWN_MS = 10 * 60_000;
 const TERMINAL_COOLDOWN_MS = 15_000;
@@ -199,13 +198,9 @@ async function requestAutoCatalogSyncAfterOpen(connectedPhone: string | null) {
   lastAutoCatalogSyncAt = now;
   lastAutoCatalogSyncPhone = connectedPhone;
 
-  console.log("[catalog] auto sync requested after connection open", {
-    connectedPhone: connectedPhone ? "present" : "unknown"
-  });
-
-  await enqueueWhatsappCatalogSync({
-    instanceId: DEFAULT_WHATSAPP_INSTANCE_ID,
-    forceSnapshot: true
+  console.log("[catalog] auto sync skipped after connection open", {
+    connectedPhone: connectedPhone ? "present" : "unknown",
+    reason: "manual-sync-required"
   });
 }
 
@@ -670,7 +665,7 @@ async function createSocket(options: {
   const sessionDir = getSessionDir();
   clearReconnectTimer();
   hasReceivedQr = false;
-  const shouldSyncCatalogHistory = CATALOG_BOOTSTRAP_MODE && !isCleanPairing;
+  const shouldSyncCatalogHistory = false;
   console.log("[baileys] creating socket");
   console.log("[baileys] session dir:", sessionDir);
 
@@ -898,6 +893,21 @@ async function createSocket(options: {
           currentSession.status === WhatsappStatus.connected ||
           Boolean(currentSession.connectedPhone);
         const hasSavedSession = sessionInfo.hasRegisteredSession || sessionInfo.hasMeId || wasConnected;
+
+        if (
+          hasSavedSession &&
+          shouldRestartInPairingMode &&
+          statusCode !== DisconnectReason.loggedOut
+        ) {
+          pairingPending = false;
+          await scheduleTransientReconnect({
+            statusCode,
+            lastError: "QR lido. Finalizando conexao...",
+            currentConnectedPhone: currentSession.connectedPhone,
+            sessionInfo
+          });
+          return;
+        }
 
         if (statusCode === 428 && hasSavedSession && !shouldPreserveQrDuringPairing && !isCleanPairing) {
           await scheduleTransientReconnect({

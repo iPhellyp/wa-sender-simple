@@ -12,7 +12,6 @@ import P from "pino";
 import QRCode from "qrcode";
 import { WhatsappStatus, type WhatsappInstance } from "@prisma/client";
 import { prisma } from "../prisma/client";
-import { enqueueWhatsappCatalogSync } from "../queue/campaign-queue";
 import { clearWhatsappOperationalData } from "../server/whatsapp-session-data";
 import {
   DEFAULT_WHATSAPP_INSTANCE_ID,
@@ -52,7 +51,10 @@ const RECOVERABLE_SESSION_MESSAGE =
   "Sessao salva, aguardando retomada. Clique em Retomar sessao se nao reconectar automaticamente.";
 const PAIRING_INCOMPLETE_MESSAGE =
   "QR expirou ou pareamento nao foi concluido. Gere um novo QR.";
+const TEMPORARY_SOCKET_FAILURE_MESSAGE =
+  "Falha temporaria do socket. Clique em Retomar sessao.";
 const RECOVERABLE_RECONNECT_BACKOFF_MS = [5_000, 15_000, 30_000] as const;
+const STREAM_RESTART_BACKOFF_MS = [3_000, 8_000, 15_000] as const;
 const runtimeByInstanceId = new Map<string, WhatsappRuntime>();
 const startPromiseByInstanceId = new Map<string, Promise<WASocket>>();
 
@@ -198,6 +200,28 @@ function getDisconnectStatusCode(error: unknown) {
   return (error as { output?: { statusCode?: number } } | undefined)?.output?.statusCode ?? null;
 }
 
+function isStreamRestartError(statusCode: number | null, message: string | null) {
+  return (
+    statusCode === DisconnectReason.restartRequired ||
+    statusCode === 515 ||
+    /stream errored.*restart required|restart required/i.test(message ?? "")
+  );
+}
+
+function hasResumableSession(options: {
+  hasRegisteredSession?: boolean;
+  hasMeId?: boolean;
+  connectedPhone?: string | null;
+  instancePhone?: string | null;
+}) {
+  return Boolean(
+    options.hasRegisteredSession ||
+    options.hasMeId ||
+    options.connectedPhone ||
+    options.instancePhone
+  );
+}
+
 async function scheduleRecoverableReconnect(
   instance: WhatsappInstance,
   runtime: WhatsappRuntime,
@@ -209,6 +233,7 @@ async function scheduleRecoverableReconnect(
       sessionFilesCount: number;
       hasCredsJson: boolean;
       hasRegisteredSession?: boolean;
+      hasMeId?: boolean;
       isPairingPartial?: boolean;
     };
   }
@@ -239,6 +264,7 @@ async function scheduleRecoverableReconnect(
       sessionFilesCount: options.sessionInfo.sessionFilesCount,
       hasCredsJson: options.sessionInfo.hasCredsJson,
       hasRegisteredSession: options.sessionInfo.hasRegisteredSession,
+      hasMeId: options.sessionInfo.hasMeId,
       isPairingPartial: options.sessionInfo.isPairingPartial,
       isRecoverable: true
     });
@@ -269,6 +295,7 @@ async function scheduleRecoverableReconnect(
     sessionFilesCount: options.sessionInfo.sessionFilesCount,
     hasCredsJson: options.sessionInfo.hasCredsJson,
     hasRegisteredSession: options.sessionInfo.hasRegisteredSession,
+    hasMeId: options.sessionInfo.hasMeId,
     isPairingPartial: options.sessionInfo.isPairingPartial,
     isRecoverable: true
   });
@@ -289,6 +316,99 @@ async function scheduleRecoverableReconnect(
       });
     });
   }, delayMs);
+}
+
+async function scheduleSocketRestart(
+  instance: WhatsappInstance,
+  runtime: WhatsappRuntime,
+  options: {
+    action: "stream_error_restart_socket" | "post_qr_auto_resume";
+    statusCode: number | null;
+    errorMessage: string | null;
+    sessionInfo: {
+      sessionDir: string;
+      sessionFilesCount: number;
+      hasCredsJson: boolean;
+      hasRegisteredSession?: boolean;
+      hasMeId?: boolean;
+      isPairingPartial?: boolean;
+    };
+  }
+) {
+  if (runtime.reconnectTimer) {
+    console.log("[instance-manager] socket restart already scheduled", {
+      action: options.action,
+      instanceId: instance.id,
+      statusCode: options.statusCode
+    });
+    return;
+  }
+
+  if (runtime.reconnectAttempts >= STREAM_RESTART_BACKOFF_MS.length) {
+    runtime.status = WhatsappStatus.disconnected;
+    runtime.qrCode = null;
+    runtime.lastError = TEMPORARY_SOCKET_FAILURE_MESSAGE;
+    await updateInstanceSession(instance.id, {
+      status: WhatsappStatus.disconnected,
+      qrCode: null,
+      lastError: TEMPORARY_SOCKET_FAILURE_MESSAGE
+    });
+    console.warn("[instance-manager] socket restart attempts exhausted", {
+      action: options.action,
+      instanceId: instance.id,
+      statusCode: options.statusCode,
+      errorMessage: options.errorMessage,
+      retryAttempt: runtime.reconnectAttempts,
+      hasRegisteredSession: options.sessionInfo.hasRegisteredSession,
+      hasMeId: options.sessionInfo.hasMeId
+    });
+    return;
+  }
+
+  const retryAttempt = runtime.reconnectAttempts + 1;
+  const nextDelay = STREAM_RESTART_BACKOFF_MS[runtime.reconnectAttempts] ?? STREAM_RESTART_BACKOFF_MS[0];
+  runtime.reconnectAttempts = retryAttempt;
+  runtime.status = WhatsappStatus.connecting;
+  runtime.qrCode = null;
+  runtime.lastError = options.action === "post_qr_auto_resume"
+    ? "QR lido. Finalizando conexao..."
+    : TEMPORARY_SOCKET_FAILURE_MESSAGE;
+  await updateInstanceSession(instance.id, {
+    status: WhatsappStatus.connecting,
+    qrCode: null,
+    lastError: runtime.lastError
+  });
+
+  console.warn("[instance-manager] socket restart scheduled", {
+    action: options.action,
+    instanceId: instance.id,
+    statusCode: options.statusCode,
+    errorMessage: options.errorMessage,
+    retryAttempt,
+    nextDelay,
+    hasRegisteredSession: options.sessionInfo.hasRegisteredSession,
+    hasMeId: options.sessionInfo.hasMeId
+  });
+
+  runtime.reconnectTimer = setTimeout(() => {
+    runtime.reconnectTimer = null;
+    if (startPromiseByInstanceId.has(instance.id)) {
+      console.log("[instance-manager] socket restart skipped; start already running", {
+        action: options.action,
+        instanceId: instance.id
+      });
+      return;
+    }
+
+    void startSecondaryWhatsappInstance(instance).catch((error) => {
+      console.warn("[instance-manager] socket restart failed", {
+        action: options.action,
+        instanceId: instance.id,
+        retryAttempt,
+        error: errorMessage(error)
+      });
+    });
+  }, nextDelay);
 }
 
 async function handleIncomingOptOutMessages(
@@ -486,10 +606,10 @@ async function startSecondaryWhatsappInstance(instance: WhatsappInstance) {
             await clearWhatsappOperationalData("phone-changed-instance", instance.id);
           }
 
-          runtime.lastSyncRequestedAt = new Date();
-          await enqueueWhatsappCatalogSync({
+          runtime.lastSyncRequestedAt = null;
+          console.log("[catalog] auto sync skipped after instance open", {
             instanceId: instance.id,
-            forceSnapshot: true
+            reason: "manual-sync-required"
           });
           return;
         }
@@ -497,18 +617,41 @@ async function startSecondaryWhatsappInstance(instance: WhatsappInstance) {
         if (update.connection === "close") {
           const statusCode = getDisconnectStatusCode(update.lastDisconnect?.error);
           const sessionInfo = await getBaileysSessionFilesInfoForInstance(instance);
-          const hasSavedSession =
-            sessionInfo.hasRegisteredSession ||
-            sessionInfo.hasMeId ||
-            Boolean(runtime.connectedPhone) ||
-            Boolean(instance.phone);
-          runtime.socket = null;
-          runtime.lastError = update.lastDisconnect?.error
+          const closeErrorMessage = update.lastDisconnect?.error
             ? errorMessage(update.lastDisconnect.error)
             : null;
+          const hasSavedSession = hasResumableSession({
+            hasRegisteredSession: sessionInfo.hasRegisteredSession,
+            hasMeId: sessionInfo.hasMeId,
+            connectedPhone: runtime.connectedPhone,
+            instancePhone: instance.phone
+          });
+          const hadPairingQr = Boolean(runtime.qrCode);
+          runtime.socket = null;
+          runtime.lastError = closeErrorMessage;
 
           if (sessionInfo.isPairingPartial && !hasSavedSession) {
             runtime.lastError = PAIRING_INCOMPLETE_MESSAGE;
+          }
+
+          if (hasSavedSession && isStreamRestartError(statusCode, closeErrorMessage)) {
+            await scheduleSocketRestart(instance, runtime, {
+              action: "stream_error_restart_socket",
+              statusCode,
+              errorMessage: closeErrorMessage,
+              sessionInfo
+            });
+            return;
+          }
+
+          if (hasSavedSession && hadPairingQr) {
+            await scheduleSocketRestart(instance, runtime, {
+              action: "post_qr_auto_resume",
+              statusCode,
+              errorMessage: closeErrorMessage,
+              sessionInfo
+            });
+            return;
           }
 
           if (statusCode === 428 && hasSavedSession) {

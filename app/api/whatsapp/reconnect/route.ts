@@ -11,6 +11,7 @@ import {
 } from "@/src/lib/server/whatsapp-instances";
 
 export const runtime = "nodejs";
+const QR_STALE_MS = 180_000;
 
 async function getRequestedInstanceId(request: NextRequest) {
   const queryInstanceId = request.nextUrl.searchParams.get("instanceId");
@@ -49,8 +50,13 @@ export async function POST(request: NextRequest) {
     currentSession.status === WhatsappStatus.connected
   );
   const action = hasConfirmedSession ? "resume_session" : "generate_qr";
+  const currentUpdatedAt = currentSession.updatedAt ? new Date(currentSession.updatedAt).getTime() : Date.now();
+  const isQrStale =
+    currentSession.status === "qr" &&
+    !currentSession.connectedPhone &&
+    Date.now() - currentUpdatedAt > QR_STALE_MS;
 
-  if (currentSession.status === "qr" && currentSession.hasQrCode && !currentSession.isPairingPartial) {
+  if (currentSession.status === "qr" && currentSession.hasQrCode && !currentSession.isPairingPartial && !isQrStale) {
     return NextResponse.json({
       ...currentSession,
       message: "Conexao WhatsApp ja esta em andamento"

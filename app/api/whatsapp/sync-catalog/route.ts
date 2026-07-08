@@ -10,6 +10,16 @@ import {
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+function canAttemptSync(session: Awaited<ReturnType<typeof getWhatsappInstanceRuntimeStatus>>) {
+  return Boolean(
+    session.status === "connected" ||
+    session.connectedPhone ||
+    session.hasRegisteredSession ||
+    session.hasMeId ||
+    session.isRecoverableSession
+  );
+}
+
 async function getRequestPayload(request: NextRequest) {
   const payload = (await request.json().catch(() => null)) as {
     instanceId?: string;
@@ -29,12 +39,12 @@ export async function POST(request: NextRequest) {
   try {
     instance = await requireWhatsappInstance(payload.instanceId);
   } catch (error) {
-    if (isWhatsappInstanceNotFoundError(error)) {
-      return NextResponse.json({ error: "Instancia nao encontrada" }, { status: 404 });
-    }
-
     if (isNoWhatsappInstanceError(error)) {
       return NextResponse.json({ error: "Crie uma instancia antes de sincronizar" }, { status: 404 });
+    }
+
+    if (isWhatsappInstanceNotFoundError(error)) {
+      return NextResponse.json({ error: "Instancia nao encontrada" }, { status: 404 });
     }
 
     throw error;
@@ -42,30 +52,36 @@ export async function POST(request: NextRequest) {
 
   const session = await getWhatsappInstanceRuntimeStatus(instance.id);
 
-  if (session.status === "qr") {
+  if (session.status === "qr" && !session.hasRegisteredSession && !session.hasMeId && !session.connectedPhone) {
     return NextResponse.json(
       { error: "WhatsApp aguardando leitura do QR Code" },
       { status: 409 }
     );
   }
 
-  if (session.status !== "connected" && !session.connectedPhone) {
+  if (!canAttemptSync(session)) {
     return NextResponse.json(
-      { error: "WhatsApp precisa estar conectado antes de sincronizar catalogo" },
+      { error: "Conecte esta instancia antes de sincronizar catalogo" },
       { status: 409 }
     );
   }
 
-  const jobId = await enqueueWhatsappCatalogSync({
+  const syncJob = await enqueueWhatsappCatalogSync({
     instanceId: instance.id,
-    forceSnapshot: payload.forceSnapshot ?? true
+    forceSnapshot: payload.forceSnapshot ?? false
   });
+  const syncType = payload.forceSnapshot ? "full" : "quick";
 
   return NextResponse.json({
     ok: true,
-    jobId,
+    jobId: syncJob.jobId,
+    deduped: syncJob.deduped,
     instanceId: instance.id,
-    message:
-      "Resync de catalogo/app-state enviado para esta instancia. Aguarde 1 a 3 minutos."
+    syncType,
+    message: syncJob.deduped
+      ? "Sincronizacao ja esta em andamento para esta instancia."
+      : syncType === "full"
+        ? "Sincronizacao completa enfileirada. Pode demorar alguns minutos."
+        : "Sincronizacao rapida enfileirada."
   });
 }

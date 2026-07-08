@@ -11,7 +11,11 @@ import {
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+const CONNECTING_STALE_MS = 120_000;
+const QR_STALE_MS = 180_000;
+
 export async function GET() {
+  const now = Date.now();
   const instances = await prisma.whatsappInstance.findMany({
     orderBy: [
       {
@@ -49,23 +53,57 @@ export async function GET() {
   return NextResponse.json({
     instances: instances.map((instance) => {
       const runtimeStatus = runtimeStatusByInstanceId.get(instance.id);
+      const updatedAt = sessionUpdatedAtByInstanceId.get(instance.id) ?? instance.updatedAt;
+      const status = runtimeStatus?.status ?? instance.status;
+      const hasQrCode = runtimeStatus?.hasQrCode ?? false;
+      const connectedPhone = runtimeStatus?.connectedPhone ?? instance.phone ?? null;
+      const hasRegisteredSession = runtimeStatus?.hasRegisteredSession ?? false;
+      const hasMeId = runtimeStatus?.hasMeId ?? false;
+      const isPairingPartial = runtimeStatus?.isPairingPartial ?? false;
+      const hasConfirmedSession = Boolean(
+        hasRegisteredSession ||
+        hasMeId ||
+        connectedPhone ||
+        status === "connected"
+      );
+      const isConnectingStale =
+        status === "connecting" &&
+        !hasQrCode &&
+        !connectedPhone &&
+        now - updatedAt.getTime() > CONNECTING_STALE_MS;
+      const isQrStale =
+        status === "qr" &&
+        !connectedPhone &&
+        now - updatedAt.getTime() > QR_STALE_MS;
+      const canResumeSession = hasConfirmedSession;
+      const canGenerateQr = !hasConfirmedSession || isPairingPartial || isQrStale || isConnectingStale;
+      const canSyncQuick = hasConfirmedSession && !isPairingPartial;
+      const canSyncHistory = canSyncQuick;
+
       return {
         ...instance,
+        status,
         displayName: runtimeStatus?.displayName ?? null,
         profilePictureUrl: runtimeStatus?.profilePictureUrl ?? null,
         qrCode: runtimeStatus?.qrCode ?? null,
-        hasQrCode: runtimeStatus?.hasQrCode ?? false,
-        connectedPhone: runtimeStatus?.connectedPhone ?? instance.phone ?? null,
+        hasQrCode,
+        connectedPhone,
         hasSessionFiles: runtimeStatus?.hasSessionFiles ?? false,
         sessionFilesCount: runtimeStatus?.sessionFilesCount ?? 0,
         hasCredsJson: runtimeStatus?.hasCredsJson ?? false,
-        hasRegisteredSession: runtimeStatus?.hasRegisteredSession ?? false,
+        hasRegisteredSession,
         hasMe: runtimeStatus?.hasMe ?? false,
-        hasMeId: runtimeStatus?.hasMeId ?? false,
-        isPairingPartial: runtimeStatus?.isPairingPartial ?? false,
+        hasMeId,
+        isPairingPartial,
         isRecoverableSession: runtimeStatus?.isRecoverableSession ?? false,
+        isConnectingStale,
+        isQrStale,
+        canGenerateQr,
+        canResumeSession,
+        canSyncQuick,
+        canSyncHistory,
         lastOpenAt: runtimeStatus?.lastOpenAt ?? null,
-        updatedAt: sessionUpdatedAtByInstanceId.get(instance.id)?.toISOString() ?? instance.updatedAt.toISOString(),
+        updatedAt: updatedAt.toISOString(),
         lastError: runtimeStatus?.lastError ?? lastErrorByInstanceId.get(instance.id) ?? null,
         roleLabel: WHATSAPP_INSTANCE_ROLE_LABELS[instance.role]
       };
