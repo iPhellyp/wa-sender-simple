@@ -87,7 +87,7 @@ export async function ensureDefaultWhatsappInstance() {
   return prisma.whatsappInstance.create({
     data: {
       id: "default",
-      name: "Principal",
+      name: "Numero inicial",
       role: "GENERAL",
       sessionKey: "default",
       isDefault: true

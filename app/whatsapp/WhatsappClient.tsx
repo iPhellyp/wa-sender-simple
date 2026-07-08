@@ -102,7 +102,7 @@ export function WhatsappClient() {
     }
 
     if (options.dangerous === "reset") {
-      const expected = instanceId === "default" ? "RESETAR PRINCIPAL" : instanceName;
+      const expected = instanceName;
       const typed = window.prompt(
         `Resetar sessao remove a sessao local e exige novo QR. Essa acao afeta apenas a instancia ${instanceName}.\nDigite ${expected} para confirmar.`
       );
@@ -180,7 +180,7 @@ export function WhatsappClient() {
 
   const qrRecoveryMessage = getQrRecoveryMessage(session);
   const isTransientReconnect = isTransientReconnectStatus(session);
-  const reconnectDisabled = busy || session?.status === "connecting" || session?.status === "qr";
+  const reconnectDisabled = busy || (session?.status === "qr" && session.hasQrCode);
   const status = session?.status ?? "disconnected";
   const statusTone = statusToneFromValue(status);
 
@@ -203,7 +203,7 @@ export function WhatsappClient() {
             <div className="meta-list">
               <div className="meta-row">
                 <span>Instancia ativa</span>
-                <span>{session?.instanceName ?? session?.instanceId ?? "Principal"}</span>
+                <span>{session?.instanceName ?? session?.instanceId ?? "Instancia ativa"}</span>
               </div>
               <div className="meta-row">
                 <span>Funcao</span>
@@ -295,6 +295,10 @@ export function WhatsappClient() {
         </div>
       ) : session?.status === "connecting" ? (
         <div className="message">Aguardando QR Code. Isso pode levar alguns segundos.</div>
+      ) : null}
+
+      {session && session.status !== "connected" && session.status !== "qr" && !session.qrCode ? (
+        <div className="message">QR ainda nao gerado. Clique em reconectar e aguarde alguns segundos.</div>
       ) : null}
 
       {!qrRecoveryMessage && session?.status === "error" && session.lastError ? (

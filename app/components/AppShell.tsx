@@ -23,7 +23,7 @@ export function AppShell({ title, subtitle, children, actions }: AppShellProps) 
               <small>Operacao WhatsApp</small>
             </span>
           </Link>
-          <nav className="nav" aria-label="Principal">
+          <nav className="nav" aria-label="Menu">
             <NavLink href="/dashboard">Dashboard</NavLink>
             <NavLink href="/whatsapp">WhatsApp</NavLink>
             <NavLink href="/conversas">Conversas</NavLink>

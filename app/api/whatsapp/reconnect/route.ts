@@ -34,7 +34,7 @@ export async function POST(request: NextRequest) {
 
   const currentSession = await getWhatsappInstanceRuntimeStatus(instance.id);
 
-  if (currentSession.status === "connecting" || currentSession.status === "qr") {
+  if (currentSession.status === "qr" && currentSession.hasQrCode) {
     return NextResponse.json({
       ...currentSession,
       message: "Conexao WhatsApp ja esta em andamento"

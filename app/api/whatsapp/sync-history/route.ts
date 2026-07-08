@@ -35,7 +35,7 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const jobId = await enqueueWhatsappHistorySync();
+    const jobId = await enqueueWhatsappHistorySync(instance.id);
 
     return NextResponse.json({
       ok: true,

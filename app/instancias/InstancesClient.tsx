@@ -60,6 +60,17 @@ export function InstancesClient() {
 
     setInstances(data.instances);
     setRoles(data.roles);
+    setActiveInstanceId((current) => {
+      if (current && data.instances.some((instance) => instance.id === current)) {
+        return current;
+      }
+
+      const nextInstanceId = data.instances[0]?.id ?? "";
+      if (nextInstanceId) {
+        setStoredActiveInstanceId(nextInstanceId);
+      }
+      return nextInstanceId;
+    });
   }
 
   useEffect(() => {
@@ -137,7 +148,7 @@ export function InstancesClient() {
     setMessage(`Instancia ativa alterada para ${instance.name}.`);
   }
 
-  async function postAction(instance: InstanceSummary, action: "make-default" | "disconnect" | "reset") {
+  async function postAction(instance: InstanceSummary, action: "disconnect" | "reset") {
     if (action === "disconnect") {
       const confirmed = window.confirm(`Essa acao afeta apenas a instancia ${instance.name}. Desconectar agora?`);
 
@@ -147,7 +158,7 @@ export function InstancesClient() {
     }
 
     if (action === "reset") {
-      const expected = instance.isDefault ? "RESETAR PRINCIPAL" : instance.name;
+      const expected = instance.name;
       const typed = window.prompt(
         `Resetar sessao remove a sessao local e exige novo QR. Essa acao afeta apenas a instancia ${instance.name}.\nDigite ${expected} para confirmar.`
       );
@@ -176,6 +187,58 @@ export function InstancesClient() {
       await loadInstances();
     } catch (actionError) {
       setError(actionError instanceof Error ? actionError.message : "Erro inesperado");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function deleteInstance(instance: InstanceSummary) {
+    const typed = window.prompt(
+      `Essa acao remove a instancia, sessao local e dados operacionais vinculados a ela. Nao afeta outras instancias.\nDigite o nome da instancia para confirmar: ${instance.name}`
+    );
+
+    if (typed !== instance.name) {
+      setError("Confirmacao invalida. Delete cancelado.");
+      return;
+    }
+
+    setBusy(true);
+    setError(null);
+    setMessage(null);
+
+    try {
+      const response = await fetch(`/api/instances/${instance.id}`, {
+        method: "DELETE",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          confirmationName: typed
+        })
+      });
+      const data = (await response.json()) as {
+        error?: string;
+        message?: string;
+        nextActiveInstanceId?: string | null;
+      };
+
+      if (!response.ok || data.error) {
+        throw new Error(data.error ?? "Erro ao deletar instancia");
+      }
+
+      const remainingInstances = instances.filter((item) => item.id !== instance.id);
+      const nextActiveInstanceId =
+        data.nextActiveInstanceId ?? remainingInstances.find((item) => item.id !== instance.id)?.id ?? "";
+
+      if (activeInstanceId === instance.id) {
+        setStoredActiveInstanceId(nextActiveInstanceId);
+        setActiveInstanceId(nextActiveInstanceId);
+      }
+
+      setMessage(data.message ?? "Instancia deletada.");
+      await loadInstances();
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : "Erro inesperado");
     } finally {
       setBusy(false);
     }
@@ -242,7 +305,6 @@ export function InstancesClient() {
               </div>
               <div className="button-row">
                 {activeInstanceId === instance.id ? <span className="status-badge info">ativa</span> : null}
-                {instance.isDefault ? <span className="status-badge success">Principal</span> : null}
                 <span className={`status-badge ${statusClass(instance.status)}`}>{instance.status}</span>
               </div>
             </div>
@@ -251,10 +313,6 @@ export function InstancesClient() {
               <div className="meta-row">
                 <span>Funcao</span>
                 <span>{instance.roleLabel}</span>
-              </div>
-              <div className="meta-row">
-                <span>Padrao</span>
-                <span>{instance.isDefault ? "Sim" : "Nao"}</span>
               </div>
               <div className="meta-row">
                 <span>Ultima conexao</span>
@@ -296,16 +354,6 @@ export function InstancesClient() {
               >
                 Usar esta instancia
               </button>
-              {!instance.isDefault ? (
-                <button
-                  className="button secondary compact-button"
-                  disabled={busy}
-                  type="button"
-                  onClick={() => void postAction(instance, "make-default")}
-                >
-                  Tornar padrao
-                </button>
-              ) : null}
               <Link
                 className="button secondary compact-button"
                 href={appendInstanceIdToHref("/whatsapp", instance.id)}
@@ -319,7 +367,7 @@ export function InstancesClient() {
                 type="button"
                 onClick={() => void postWhatsappAction(instance.id, "reconnect")}
               >
-                Conectar
+                Conectar/Recarregar QR
               </button>
               <button
                 className="button secondary compact-button"
@@ -343,7 +391,15 @@ export function InstancesClient() {
                 type="button"
                 onClick={() => void postAction(instance, "reset")}
               >
-                Resetar
+                Resetar sessao
+              </button>
+              <button
+                className="button danger compact-button"
+                disabled={busy}
+                type="button"
+                onClick={() => void deleteInstance(instance)}
+              >
+                Deletar
               </button>
             </div>
           </article>

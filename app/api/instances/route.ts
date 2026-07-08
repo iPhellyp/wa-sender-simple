@@ -17,9 +17,6 @@ export async function GET() {
   const instances = await prisma.whatsappInstance.findMany({
     orderBy: [
       {
-        isDefault: "desc"
-      },
-      {
         createdAt: "asc"
       }
     ]

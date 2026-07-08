@@ -2,13 +2,13 @@
 
 ## Visao
 
-`/instancias` gerencia os numeros cadastrados. `/whatsapp` opera a instancia ativa indicada por `?instanceId=...`, pelo cookie `wa_sender_active_instance_id` ou pela instancia padrao quando nao existe escolha salva.
+`/instancias` gerencia os numeros cadastrados. `/whatsapp` opera a instancia ativa indicada por `?instanceId=...`, pelo cookie `wa_sender_active_instance_id` ou pela instancia tecnica inicial quando nao existe escolha salva.
 
 Cada instancia possui status, QR, telefone conectado, pasta de sessao e dados operacionais isolados por `instanceId`.
 
 ## Sessao Baileys
 
-A instancia Principal preserva o caminho legado:
+A instancia tecnica inicial preserva o caminho legado por compatibilidade com producao existente:
 
 ```text
 data/baileys-session
@@ -20,13 +20,13 @@ Instancias secundarias usam subpastas por `sessionKey`:
 data/baileys-session/{sessionKey}
 ```
 
-A Fase 2 nao move nem apaga a pasta da Principal.
+O produto nao trata essa instancia como superior. Todas as instancias devem conectar, gerar QR, sincronizar, enviar mensagens e criar campanhas com o proprio `instanceId`.
 
 ## Status e QR
 
 `GET /api/whatsapp/status?instanceId=...` retorna o status da instancia solicitada.
 
-Para a Principal, o manager delega ao client legado. Para instancias secundarias, o manager le o runtime em memoria e o registro `WhatsappSession` da propria instancia.
+Para a instancia tecnica inicial, o manager delega ao client legado para preservar compatibilidade. Para as demais, o manager le o runtime em memoria e o registro `WhatsappSession` da propria instancia.
 
 ## Campanhas e envio manual
 
@@ -48,7 +48,7 @@ sync-whatsapp-catalog:{instanceId}
 
 Disconnect para apenas o socket da instancia solicitada.
 
-Reset da Principal usa o fluxo legado. Reset de instancia secundaria remove apenas:
+Reset da instancia tecnica inicial usa o fluxo legado. Reset das demais remove apenas:
 
 ```text
 data/baileys-session/{sessionKey}
@@ -58,7 +58,9 @@ A limpeza operacional recebe `instanceId` e nao toca outras instancias.
 
 Reset e desconexao exigem `instanceId` explicito nas rotas perigosas e confirmacao visual na UI.
 
-## Smoke test Fase 3
+Delete de instancia exige o nome exato da instancia, bloqueia a ultima instancia, bloqueia instancia conectada/conectando/QR e remove apenas dados com o `instanceId` selecionado.
+
+## Smoke test final
 
 ### Persistencia da instancia ativa
 
@@ -72,36 +74,36 @@ Reset e desconexao exigem `instanceId` explicito nas rotas perigosas e confirmac
 8. Recarregar a pagina.
 9. Confirmar que continua na mesma instancia.
 
-### Principal/default
+### QR multi-instancia
 
-1. Abrir `/instancias`.
-2. Escolher Principal.
-3. Abrir `/whatsapp?instanceId=default`.
-4. Conectar ou reconectar.
-5. Confirmar QR.
-6. Confirmar `connectedPhone`.
-
-### Instancia secundaria
-
-1. Criar instancia teste.
-2. Marcar como ativa.
-3. Abrir `/whatsapp?instanceId=ID`.
-4. Gerar QR.
-5. Confirmar pasta `data/baileys-session/{sessionKey}`.
-6. Sincronizar.
-7. Confirmar dados isolados.
+1. Criar Instancia A.
+2. Abrir `/whatsapp?instanceId=A`.
+3. Clicar reconectar.
+4. Confirmar QR da Instancia A.
+5. Escanear com numero A.
+6. Confirmar `connectedPhone` A.
+7. Criar Instancia B.
+8. Abrir `/whatsapp?instanceId=B`.
+9. Clicar reconectar.
+10. Confirmar QR da Instancia B.
+11. Confirmar que QR de B nao altera A.
+12. Escanear com numero B.
+13. Confirmar A e B conectadas.
 
 ### Protecao
 
 1. Reset exige confirmacao.
 2. Disconnect exige confirmacao.
-3. Principal exige confirmacao forte: `RESETAR PRINCIPAL`.
+3. Reset exige digitar o nome exato da instancia.
 4. Cancelar confirmacao nao executa acao.
+5. Delete exige digitar o nome exato da instancia.
+6. Delete de instancia conectada deve pedir desconectar antes.
+7. Delete da ultima instancia deve ser bloqueado.
 
 ### Envio
 
-1. Conversa da Principal envia pela Principal.
-2. Conversa da secundaria envia pela secundaria.
+1. Conversa da Instancia A envia pela A.
+2. Conversa da Instancia B envia pela B.
 3. Trocar de pagina nao muda a instancia usada.
 
 ### Campanha
@@ -110,8 +112,14 @@ Reset e desconexao exigem `instanceId` explicito nas rotas perigosas e confirmac
 2. Envio usa `campaign.instanceId`.
 3. Sem conexao na instancia correta, falha claro.
 
+### URL invalida
+
+1. Abrir `/conversas?instanceId=nao-existe`.
+2. Confirmar erro de instancia nao encontrada.
+3. Confirmar que dados de outra instancia nao aparecem.
+
 ## Limites conhecidos
 
-- A Principal continua no client legado para preservar a sessao em producao.
-- O reconnect automatico avancado e o QR safe mode completo continuam mais maduros na Principal.
+- A instancia tecnica inicial continua no client legado para preservar a sessao em producao.
+- `isDefault` existe apenas para compatibilidade interna e nao deve aparecer como privilegio operacional.
 - Instancias secundarias usam runtime multi-instancia simplificado, com isolamento real de socket e sessao.

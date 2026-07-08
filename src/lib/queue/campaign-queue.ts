@@ -11,8 +11,6 @@ export const SYNC_WHATSAPP_HISTORY_JOB = "sync-whatsapp-history";
 export const SYNC_WHATSAPP_CATALOG_JOB = "sync-whatsapp-catalog";
 export const APPLY_WHATSAPP_LABELS_JOB = "apply-whatsapp-labels";
 
-const SYNC_WHATSAPP_HISTORY_JOB_ID = "sync-whatsapp-history";
-
 type InstanceJobData = {
   instanceId?: string;
 };
@@ -44,6 +42,16 @@ function buildJobId(...parts: string[]) {
   return parts.map(safeJobIdPart).filter(Boolean).join("-");
 }
 
+function requireInstanceId(instanceId: string | undefined, jobName: string) {
+  const normalizedInstanceId = String(instanceId ?? "").trim();
+
+  if (!normalizedInstanceId) {
+    throw new Error(`${jobName} requires instanceId`);
+  }
+
+  return normalizedInstanceId;
+}
+
 export function getCampaignQueue() {
   if (!queue) {
     queue = new Queue(CAMPAIGN_QUEUE_NAME, {
@@ -70,39 +78,42 @@ export async function enqueueRecipient(recipientId: string, delayMs: number, job
   );
 }
 
-export async function enqueueWhatsappConnect(instanceId = "default") {
+export async function enqueueWhatsappConnect(instanceId: string) {
+  const normalizedInstanceId = requireInstanceId(instanceId, CONNECT_WHATSAPP_JOB);
   await getCampaignQueue().add(
     CONNECT_WHATSAPP_JOB,
-    { instanceId },
+    { instanceId: normalizedInstanceId },
     {
       attempts: 1,
-      jobId: buildJobId(CONNECT_WHATSAPP_JOB, instanceId),
+      jobId: buildJobId(CONNECT_WHATSAPP_JOB, normalizedInstanceId),
       removeOnComplete: true,
       removeOnFail: 100
     }
   );
 }
 
-export async function enqueueWhatsappDisconnect(instanceId = "default") {
+export async function enqueueWhatsappDisconnect(instanceId: string) {
+  const normalizedInstanceId = requireInstanceId(instanceId, DISCONNECT_WHATSAPP_JOB);
   await getCampaignQueue().add(
     DISCONNECT_WHATSAPP_JOB,
-    { instanceId },
+    { instanceId: normalizedInstanceId },
     {
       attempts: 1,
-      jobId: buildJobId(DISCONNECT_WHATSAPP_JOB, instanceId),
+      jobId: buildJobId(DISCONNECT_WHATSAPP_JOB, normalizedInstanceId),
       removeOnComplete: true,
       removeOnFail: 100
     }
   );
 }
 
-export async function enqueueWhatsappReset(instanceId = "default") {
+export async function enqueueWhatsappReset(instanceId: string) {
+  const normalizedInstanceId = requireInstanceId(instanceId, RESET_WHATSAPP_JOB);
   await getCampaignQueue().add(
     RESET_WHATSAPP_JOB,
-    { instanceId },
+    { instanceId: normalizedInstanceId },
     {
       attempts: 1,
-      jobId: buildJobId(RESET_WHATSAPP_JOB, instanceId),
+      jobId: buildJobId(RESET_WHATSAPP_JOB, normalizedInstanceId),
       removeOnComplete: true,
       removeOnFail: 100
     }
@@ -110,7 +121,7 @@ export async function enqueueWhatsappReset(instanceId = "default") {
 }
 
 export async function enqueueManualMessage(data: SendManualMessageJobData) {
-  const instanceId = data.instanceId ?? "default";
+  const instanceId = requireInstanceId(data.instanceId, SEND_MANUAL_MESSAGE_JOB);
   const job = await getCampaignQueue().add(
     SEND_MANUAL_MESSAGE_JOB,
     {
@@ -128,13 +139,14 @@ export async function enqueueManualMessage(data: SendManualMessageJobData) {
   return job.id ?? null;
 }
 
-export async function enqueueWhatsappHistorySync() {
+export async function enqueueWhatsappHistorySync(instanceId: string) {
+  const normalizedInstanceId = requireInstanceId(instanceId, SYNC_WHATSAPP_HISTORY_JOB);
   const job = await getCampaignQueue().add(
     SYNC_WHATSAPP_HISTORY_JOB,
-    {},
+    { instanceId: normalizedInstanceId },
     {
       attempts: 1,
-      jobId: SYNC_WHATSAPP_HISTORY_JOB_ID,
+      jobId: buildJobId(SYNC_WHATSAPP_HISTORY_JOB, normalizedInstanceId),
       removeOnComplete: true,
       removeOnFail: 100
     }
@@ -163,7 +175,7 @@ export async function enqueueWhatsappCatalogSync(data: SyncWhatsappCatalogJobDat
 }
 
 export async function enqueueApplyWhatsappLabels(data: ApplyWhatsappLabelsJobData) {
-  const instanceId = data.instanceId ?? "default";
+  const instanceId = requireInstanceId(data.instanceId, APPLY_WHATSAPP_LABELS_JOB);
   const job = await getCampaignQueue().add(
     APPLY_WHATSAPP_LABELS_JOB,
     {

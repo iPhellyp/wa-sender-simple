@@ -1,12 +1,12 @@
 # WA Sender Simple
 
-Command Center WhatsApp interno em evolucao para inbox, campanhas, labels e envios controlados.
+Sistema WhatsApp multi-numero para contatos, conversas, etiquetas, campanhas e envios controlados.
 
 ## Funcionalidades atuais
 
 - Login admin por `ADMIN_PASSWORD`.
-- Conexao de 1 WhatsApp via QR com Baileys.
-- QR Safe Mode para pareamento limpo em estabilizacao.
+- Multi-instancia WhatsApp com QR por numero.
+- Instancia ativa persistente por URL, localStorage e cookie.
 - Importacao Excel de contatos e mensagens.
 - Contatos, opt-out e campanhas originais.
 - Envio serializado via worker BullMQ.
@@ -14,13 +14,15 @@ Command Center WhatsApp interno em evolucao para inbox, campanhas, labels e envi
 - Detalhe `/conversas/[id]`.
 - Envio manual por conversa via fila `send-manual-message`.
 - Sync read-only de chats, contatos e mensagens.
-- Labels/envio por etiqueta implementados, dependentes de conexao estavel.
+- Labels/envio por etiqueta por instancia.
 - `/envios` para auditoria operacional.
+- Reset, desconexao e delete de instancia com confirmacao.
 
 ## Rotas principais
 
 - `/dashboard`
 - `/whatsapp`
+- `/instancias`
 - `/conversas`
 - `/contatos`
 - `/campanhas`
@@ -29,9 +31,8 @@ Command Center WhatsApp interno em evolucao para inbox, campanhas, labels e envi
 
 ## Avisos operacionais
 
-- O projeto ainda e single WhatsApp.
-- Multi-numeros ainda e futuro.
-- QR/conexao devem estar estaveis antes de testar labels/envio por etiqueta.
+- Confira sempre a instancia ativa antes de enviar.
+- Comece campanhas com baixo volume e aumente gradualmente.
 - O worker precisa estar rodando para gerar QR, sincronizar eventos e enviar mensagens.
 - Baileys nao e API oficial do WhatsApp; sessao, QR e envio podem falhar por mudancas externas.
 
@@ -57,5 +58,11 @@ nome | telefone | mensagem | origem
 - [Inbox, historico e UI](docs/INBOX_HISTORY_SYNC_AND_UI.md)
 - [Envio manual](docs/INBOX_MANUAL_SEND.md)
 - [Labels e envio por etiqueta](docs/WHATSAPP_LABELS_AND_BULK_SEND.md)
+- [Runtime multi-instancia](docs/specs/multi-instance-runtime.md)
+- [Entrega cliente v1 beta](docs/production/ENTREGA_CLIENTE.md)
+- [Manual rapido](docs/production/MANUAL_RAPIDO.md)
+- [Checklist de operacao](docs/production/CHECKLIST_OPERACAO.md)
+- [Suporte e rollback](docs/production/SUPORTE_ROLLBACK.md)
+- [Boas praticas anti-spam](docs/production/BOAS_PRATICAS_ANTISPAM.md)
 - [SDD macro](docs/COMMAND_CENTER_WHATSAPP_SDD.md)
 - [Deploy](README_DEPLOY.md)

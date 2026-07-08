@@ -59,6 +59,16 @@ function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Erro desconhecido";
 }
 
+function getRequiredJobInstanceId(data: unknown, jobName: string) {
+  const instanceId = String((data as { instanceId?: string } | undefined)?.instanceId ?? "").trim();
+
+  if (!instanceId) {
+    throw new Error(`${jobName} sem instanceId`);
+  }
+
+  return instanceId;
+}
+
 async function requeueRecipient(recipientId: string, delayMs = PAUSED_RECHECK_DELAY_MS) {
   await enqueueRecipient(recipientId, delayMs);
 }
@@ -531,7 +541,7 @@ const worker = new Worker(
     });
 
     if (job.name === CONNECT_WHATSAPP_JOB) {
-      const instanceId = String((job.data as { instanceId?: string })?.instanceId ?? "default");
+      const instanceId = getRequiredJobInstanceId(job.data, CONNECT_WHATSAPP_JOB);
       console.log("[worker] connect-whatsapp job received", { instanceId });
 
       try {
@@ -557,7 +567,7 @@ const worker = new Worker(
     }
 
     if (job.name === DISCONNECT_WHATSAPP_JOB) {
-      const instanceId = String((job.data as { instanceId?: string })?.instanceId ?? "default");
+      const instanceId = getRequiredJobInstanceId(job.data, DISCONNECT_WHATSAPP_JOB);
       console.log("[worker] disconnect-whatsapp job received", { instanceId });
 
       try {
@@ -577,7 +587,7 @@ const worker = new Worker(
     }
 
     if (job.name === RESET_WHATSAPP_JOB) {
-      const instanceId = String((job.data as { instanceId?: string })?.instanceId ?? "default");
+      const instanceId = getRequiredJobInstanceId(job.data, RESET_WHATSAPP_JOB);
       console.log("[worker] reset-whatsapp job received", { instanceId });
 
       try {
@@ -597,10 +607,12 @@ const worker = new Worker(
     }
 
     if (job.name === SYNC_WHATSAPP_HISTORY_JOB) {
-      console.log("[worker] sync-whatsapp-history job received");
+      const instanceId = getRequiredJobInstanceId(job.data, SYNC_WHATSAPP_HISTORY_JOB);
+      console.log("[worker] sync-whatsapp-history job received", { instanceId });
 
       const result = await requestWhatsappHistorySync();
       console.log("[worker] sync-whatsapp-history finished", {
+        instanceId,
         ok: result.ok,
         mode: result.mode
       });
@@ -610,7 +622,7 @@ const worker = new Worker(
 
     if (job.name === SYNC_WHATSAPP_CATALOG_JOB) {
       const data = job.data as Partial<SyncWhatsappCatalogJobData>;
-      const instanceId = String(data.instanceId ?? "default");
+      const instanceId = getRequiredJobInstanceId(data, SYNC_WHATSAPP_CATALOG_JOB);
       console.log("[worker] sync-whatsapp-catalog job received", { instanceId });
 
       const result = await requestWhatsappCatalogSyncForInstance(instanceId, data);
@@ -627,7 +639,7 @@ const worker = new Worker(
       const data = job.data as Partial<ApplyWhatsappLabelsJobData>;
       const jids = Array.isArray(data.jids) ? data.jids : [];
       const waLabelId = String(data.waLabelId ?? "").trim();
-      const instanceId = String(data.instanceId ?? "default");
+      const instanceId = getRequiredJobInstanceId(data, APPLY_WHATSAPP_LABELS_JOB);
 
       console.log("[contacts-labels] apply requested", {
         instanceId,

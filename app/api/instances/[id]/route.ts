@@ -1,10 +1,13 @@
-﻿import { NextRequest, NextResponse } from "next/server";
+import { rm } from "fs/promises";
+import { resolve } from "path";
+import { WhatsappStatus, type WhatsappInstanceRole } from "@prisma/client";
+import { NextRequest, NextResponse } from "next/server";
+import { getBaileysSessionDirForInstance } from "@/src/lib/baileys/instance-manager";
+import { prisma } from "@/src/lib/prisma/client";
 import {
   WHATSAPP_INSTANCE_ROLE_LABELS,
   isWhatsappInstanceRole
 } from "@/src/lib/server/whatsapp-instances";
-import { prisma } from "@/src/lib/prisma/client";
-import type { WhatsappInstanceRole } from "@prisma/client";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -82,6 +85,107 @@ export async function PATCH(
   });
 }
 
+export async function DELETE(
+  request: NextRequest,
+  context: {
+    params: Promise<{ id: string }>;
+  }
+) {
+  const { id } = await context.params;
+  const payload = (await request.json().catch(() => null)) as { confirmationName?: string } | null;
+  const confirmationName = String(payload?.confirmationName ?? "");
+  const instance = await prisma.whatsappInstance.findUnique({
+    where: {
+      id
+    }
+  });
 
+  if (!instance) {
+    return NextResponse.json({ error: "Instancia nao encontrada" }, { status: 404 });
+  }
 
+  if (confirmationName !== instance.name) {
+    return NextResponse.json({ error: "Digite o nome da instancia para confirmar" }, { status: 400 });
+  }
 
+  const instanceCount = await prisma.whatsappInstance.count();
+
+  if (instanceCount <= 1) {
+    return NextResponse.json(
+      { error: "Crie outra instancia antes de deletar esta." },
+      { status: 400 }
+    );
+  }
+
+  if (
+    instance.status === WhatsappStatus.connected ||
+    instance.status === WhatsappStatus.connecting ||
+    instance.status === WhatsappStatus.qr
+  ) {
+    return NextResponse.json(
+      { error: "Desconecte a instancia antes de deletar." },
+      { status: 409 }
+    );
+  }
+
+  const replacementDefault = instance.isDefault
+    ? await prisma.whatsappInstance.findFirst({
+        where: {
+          id: {
+            not: instance.id
+          }
+        },
+        orderBy: {
+          createdAt: "asc"
+        }
+      })
+    : null;
+
+  if (instance.isDefault && !replacementDefault) {
+    return NextResponse.json(
+      { error: "Crie outra instancia antes de deletar esta." },
+      { status: 400 }
+    );
+  }
+
+  const sessionDir = resolve(getBaileysSessionDirForInstance(instance));
+
+  await prisma.$transaction(async (transaction) => {
+    await transaction.sendLog.deleteMany({ where: { instanceId: instance.id } });
+    await transaction.campaignRecipient.deleteMany({ where: { instanceId: instance.id } });
+    await transaction.campaign.deleteMany({ where: { instanceId: instance.id } });
+    await transaction.contact.deleteMany({ where: { instanceId: instance.id } });
+    await transaction.whatsappChatLabel.deleteMany({ where: { instanceId: instance.id } });
+    await transaction.whatsappMessage.deleteMany({ where: { instanceId: instance.id } });
+    await transaction.whatsappLabel.deleteMany({ where: { instanceId: instance.id } });
+    await transaction.whatsappContact.deleteMany({ where: { instanceId: instance.id } });
+    await transaction.whatsappChat.deleteMany({ where: { instanceId: instance.id } });
+    await transaction.whatsappSession.deleteMany({ where: { instanceId: instance.id } });
+
+    if (replacementDefault) {
+      await transaction.whatsappInstance.update({
+        where: {
+          id: replacementDefault.id
+        },
+        data: {
+          isDefault: true
+        }
+      });
+    }
+
+    await transaction.whatsappInstance.delete({
+      where: {
+        id: instance.id
+      }
+    });
+  });
+
+  await rm(sessionDir, { recursive: true, force: true });
+
+  return NextResponse.json({
+    ok: true,
+    deletedInstanceId: instance.id,
+    nextActiveInstanceId: replacementDefault?.id ?? null,
+    message: "Instancia deletada com seguranca."
+  });
+}
