@@ -8,7 +8,7 @@
 - Verificar telefone conectado.
 - Verificar ultimo erro.
 - Verificar se existe sessao salva.
-- Se houver sessao salva, usar Retomar sessao antes de reset.
+- Se houver sessao salva, usar Retomar sessao em `/instancias` antes de reset.
 - Verificar logs do app e worker.
 - Verificar fila Redis.
 - Verificar Postgres.

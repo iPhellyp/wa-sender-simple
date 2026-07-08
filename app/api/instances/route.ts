@@ -27,11 +27,15 @@ export async function GET() {
     },
     select: {
       instanceId: true,
-      lastError: true
+      lastError: true,
+      updatedAt: true
     }
   });
   const lastErrorByInstanceId = new Map(
     sessions.map((session) => [session.instanceId, session.lastError])
+  );
+  const sessionUpdatedAtByInstanceId = new Map(
+    sessions.map((session) => [session.instanceId, session.updatedAt])
   );
   const runtimeStatusByInstanceId = new Map(
     await Promise.all(
@@ -49,10 +53,16 @@ export async function GET() {
         ...instance,
         displayName: runtimeStatus?.displayName ?? null,
         profilePictureUrl: runtimeStatus?.profilePictureUrl ?? null,
+        qrCode: runtimeStatus?.qrCode ?? null,
+        hasQrCode: runtimeStatus?.hasQrCode ?? false,
+        connectedPhone: runtimeStatus?.connectedPhone ?? instance.phone ?? null,
         hasSessionFiles: runtimeStatus?.hasSessionFiles ?? false,
         sessionFilesCount: runtimeStatus?.sessionFilesCount ?? 0,
+        hasCredsJson: runtimeStatus?.hasCredsJson ?? false,
         isRecoverableSession: runtimeStatus?.isRecoverableSession ?? false,
-        lastError: lastErrorByInstanceId.get(instance.id) ?? null,
+        lastOpenAt: runtimeStatus?.lastOpenAt ?? null,
+        updatedAt: sessionUpdatedAtByInstanceId.get(instance.id)?.toISOString() ?? instance.updatedAt.toISOString(),
+        lastError: runtimeStatus?.lastError ?? lastErrorByInstanceId.get(instance.id) ?? null,
         roleLabel: WHATSAPP_INSTANCE_ROLE_LABELS[instance.role]
       };
     }),

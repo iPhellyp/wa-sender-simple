@@ -846,7 +846,12 @@ async function createSocket(options: {
           connectedPhone: null,
           lastError: null
         });
-        console.log("[baileys] qr received and saved");
+        console.log("[baileys] qr received and saved", {
+          action: "generate_qr",
+          instanceId: DEFAULT_WHATSAPP_INSTANCE_ID,
+          hasQr: true,
+          persistedQr: true
+        });
         console.log("[baileys] pairing pending after qr saved");
         if (cleanPairingProfile) {
           console.log("[baileys] qr generated with safe profile", {

@@ -8,7 +8,7 @@
 - Conectar WhatsApp.
 - Confirmar status conectado.
 - Confirmar telefone conectado.
-- Confirmar se ha sessao salva em `/whatsapp`.
+- Confirmar se ha sessao salva em `/instancias`.
 - Se necessario, testar `Retomar sessao` sem reset.
 - Importar contatos.
 - Enviar mensagem teste.
@@ -21,19 +21,19 @@
 ## Smoke test final
 
 1. Criar Instancia A.
-2. Abrir `/whatsapp?instanceId=A`.
+2. Usar Instancia A em `/instancias`.
 3. Clicar reconectar.
 4. Confirmar QR da Instancia A.
 5. Escanear com numero A.
 6. Confirmar `connectedPhone` A.
 7. Criar Instancia B.
-8. Abrir `/whatsapp?instanceId=B`.
+8. Usar Instancia B em `/instancias`.
 9. Clicar reconectar.
 10. Confirmar QR da Instancia B.
 11. Confirmar que QR de B nao altera A.
 12. Escanear com numero B.
 13. Confirmar A e B conectadas.
-14. Trocar entre `/conversas`, `/etiquetas`, `/campanhas`, `/envios` e `/whatsapp`.
+14. Trocar entre `/conversas`, `/etiquetas`, `/campanhas`, `/envios` e `/instancias`.
 15. Confirmar que a instancia ativa permanece.
 16. Enviar mensagem manual pela A.
 17. Enviar mensagem manual pela B.
@@ -83,7 +83,7 @@
 
 1. Manter numero ja conectado no celular.
 2. Fazer deploy/restart com backup.
-3. Abrir `/whatsapp`.
+3. Abrir `/instancias`.
 4. Confirmar que a sessao continua salva.
 5. Se nao conectar sozinho, clicar `Retomar sessao`.
 6. Confirmar reconexao sem QR.

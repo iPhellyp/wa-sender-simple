@@ -112,30 +112,38 @@ export async function enqueueWhatsappConnect(instanceId: string) {
 
 export async function enqueueWhatsappDisconnect(instanceId: string) {
   const normalizedInstanceId = requireInstanceId(instanceId, DISCONNECT_WHATSAPP_JOB);
-  await getCampaignQueue().add(
+  const jobId = buildJobId(DISCONNECT_WHATSAPP_JOB, normalizedInstanceId);
+  await removeStaleJob(jobId);
+  const job = await getCampaignQueue().add(
     DISCONNECT_WHATSAPP_JOB,
     { instanceId: normalizedInstanceId },
     {
       attempts: 1,
-      jobId: buildJobId(DISCONNECT_WHATSAPP_JOB, normalizedInstanceId),
+      jobId,
       removeOnComplete: true,
       removeOnFail: 100
     }
   );
+
+  return job.id ?? null;
 }
 
 export async function enqueueWhatsappReset(instanceId: string) {
   const normalizedInstanceId = requireInstanceId(instanceId, RESET_WHATSAPP_JOB);
-  await getCampaignQueue().add(
+  const jobId = buildJobId(RESET_WHATSAPP_JOB, normalizedInstanceId);
+  await removeStaleJob(jobId);
+  const job = await getCampaignQueue().add(
     RESET_WHATSAPP_JOB,
     { instanceId: normalizedInstanceId },
     {
       attempts: 1,
-      jobId: buildJobId(RESET_WHATSAPP_JOB, normalizedInstanceId),
+      jobId,
       removeOnComplete: true,
       removeOnFail: 100
     }
   );
+
+  return job.id ?? null;
 }
 
 export async function enqueueManualMessage(data: SendManualMessageJobData) {

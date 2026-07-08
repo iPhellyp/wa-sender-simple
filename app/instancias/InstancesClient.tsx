@@ -1,9 +1,7 @@
 "use client";
 
-import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
 import {
-  appendInstanceIdToHref,
   getStoredActiveInstanceId,
   setStoredActiveInstanceId
 } from "@/src/lib/client/active-instance";
@@ -20,11 +18,17 @@ type InstanceSummary = {
   lastConnectedAt: string | null;
   lastSyncAt: string | null;
   lastError: string | null;
+  updatedAt?: string | null;
+  connectedPhone?: string | null;
+  qrCode?: string | null;
+  hasQrCode?: boolean;
   displayName: string | null;
   profilePictureUrl: string | null;
   hasSessionFiles?: boolean;
   sessionFilesCount?: number;
+  hasCredsJson?: boolean;
   isRecoverableSession?: boolean;
+  lastOpenAt?: string | null;
 };
 
 type InstancesResponse = {
@@ -52,9 +56,12 @@ export function InstancesClient() {
   const [roles, setRoles] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [busyInstanceId, setBusyInstanceId] = useState<string | null>(null);
+  const [cardErrors, setCardErrors] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [activeInstanceId, setActiveInstanceId] = useState("");
+  const [name, setName] = useState("");
+  const [role, setRole] = useState("GENERAL");
 
   async function loadInstances() {
     const response = await fetch("/api/instances", { cache: "no-store" });
@@ -86,11 +93,32 @@ export function InstancesClient() {
     });
   }, []);
 
+  useEffect(() => {
+    const shouldPoll = instances.some((instance) =>
+      ["connecting", "qr"].includes(instance.status) || Boolean(instance.hasQrCode)
+    );
+
+    if (!shouldPoll) {
+      return;
+    }
+
+    const interval = window.setInterval(() => {
+      void loadInstances().catch((loadError) => {
+        setError(loadError instanceof Error ? loadError.message : "Erro inesperado");
+      });
+    }, 3000);
+
+    return () => window.clearInterval(interval);
+  }, [instances]);
+
+  function refreshSoon() {
+    window.setTimeout(() => void loadInstances().catch(() => undefined), 1500);
+    window.setTimeout(() => void loadInstances().catch(() => undefined), 5000);
+  }
+
   async function createInstance(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const formData = new FormData(event.currentTarget);
-    const name = String(formData.get("name") ?? "");
-    const role = String(formData.get("role") ?? "GENERAL");
+    const normalizedName = name.trim();
 
     setBusy(true);
     setError(null);
@@ -102,7 +130,7 @@ export function InstancesClient() {
         headers: {
           "Content-Type": "application/json"
         },
-        body: JSON.stringify({ name, role })
+        body: JSON.stringify({ name: normalizedName, role })
       });
       const data = (await response.json()) as { error?: string };
 
@@ -110,7 +138,8 @@ export function InstancesClient() {
         throw new Error(data.error ?? "Erro ao criar instancia");
       }
 
-      event.currentTarget.reset();
+      setName("");
+      setRole("GENERAL");
       setMessage("Instancia criada.");
       await loadInstances();
     } catch (createError) {
@@ -156,7 +185,7 @@ export function InstancesClient() {
 
   async function postAction(instance: InstanceSummary, action: "disconnect" | "reset") {
     if (action === "disconnect") {
-      const confirmed = window.confirm(`Essa acao afeta apenas a instancia ${instance.name}. Desconectar agora?`);
+      const confirmed = window.confirm(`Essa acao fecha apenas o socket da instancia ${instance.name}. A sessao salva nao sera apagada. Desconectar agora?`);
 
       if (!confirmed) {
         return;
@@ -179,6 +208,7 @@ export function InstancesClient() {
     setBusyInstanceId(instance.id);
     setError(null);
     setMessage(null);
+    setCardErrors((current) => ({ ...current, [instance.id]: "" }));
 
     try {
       const response = await fetch(`/api/instances/${instance.id}/${action}`, {
@@ -191,9 +221,33 @@ export function InstancesClient() {
       }
 
       setMessage(data.message ?? "Acao concluida.");
-      await loadInstances();
+      if (action === "reset") {
+        setInstances((current) =>
+          current.map((item) =>
+            item.id === instance.id
+              ? {
+                  ...item,
+                  status: "disconnected",
+                  qrCode: null,
+                  hasQrCode: false,
+                  connectedPhone: null,
+                  phone: null,
+                  hasSessionFiles: false,
+                  sessionFilesCount: 0,
+                  hasCredsJson: false,
+                  lastError: null
+                }
+              : item
+          )
+        );
+      } else {
+        await loadInstances();
+      }
+      refreshSoon();
     } catch (actionError) {
-      setError(actionError instanceof Error ? actionError.message : "Erro inesperado");
+      const nextError = actionError instanceof Error ? actionError.message : "Erro inesperado";
+      setCardErrors((current) => ({ ...current, [instance.id]: nextError }));
+      setError(nextError);
     } finally {
       setBusy(false);
       setBusyInstanceId(null);
@@ -256,14 +310,15 @@ export function InstancesClient() {
     }
   }
 
-  async function postWhatsappAction(instanceId: string, action: "reconnect" | "sync-catalog") {
+  async function postWhatsappAction(instance: InstanceSummary, action: "reconnect" | "sync-catalog" | "sync-history") {
     setBusy(true);
-    setBusyInstanceId(instanceId);
+    setBusyInstanceId(instance.id);
     setError(null);
     setMessage(null);
+    setCardErrors((current) => ({ ...current, [instance.id]: "" }));
 
     try {
-      const response = await fetch(`/api/whatsapp/${action}?instanceId=${encodeURIComponent(instanceId)}`, {
+      const response = await fetch(`/api/whatsapp/${action}?instanceId=${encodeURIComponent(instance.id)}`, {
         method: "POST"
       });
       const data = (await response.json()) as { error?: string; message?: string };
@@ -273,9 +328,28 @@ export function InstancesClient() {
       }
 
       setMessage(data.message ?? "Acao concluida.");
-      await loadInstances();
+      if (action === "reconnect") {
+        setInstances((current) =>
+          current.map((item) =>
+            item.id === instance.id
+              ? {
+                  ...item,
+                  status: "connecting",
+                  qrCode: null,
+                  hasQrCode: false,
+                  lastError: null
+                }
+              : item
+          )
+        );
+      } else {
+        await loadInstances();
+      }
+      refreshSoon();
     } catch (actionError) {
-      setError(actionError instanceof Error ? actionError.message : "Erro inesperado");
+      const nextError = actionError instanceof Error ? actionError.message : "Erro inesperado";
+      setCardErrors((current) => ({ ...current, [instance.id]: nextError }));
+      setError(nextError);
     } finally {
       setBusy(false);
       setBusyInstanceId(null);
@@ -291,11 +365,24 @@ export function InstancesClient() {
         <form className="filter-bar import-panel" onSubmit={(event) => void createInstance(event)}>
           <div className="field">
             <label htmlFor="instance-name">Nome</label>
-            <input className="input" id="instance-name" name="name" placeholder="Ex: Vendas 2" />
+            <input
+              className="input"
+              id="instance-name"
+              name="name"
+              placeholder="Ex: Vendas 2"
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+            />
           </div>
           <div className="field">
             <label htmlFor="instance-role">Funcao</label>
-            <select className="select" id="instance-role" name="role" defaultValue="GENERAL">
+            <select
+              className="select"
+              id="instance-role"
+              name="role"
+              value={role}
+              onChange={(event) => setRole(event.target.value)}
+            >
               {Object.entries(roles).map(([value, label]) => (
                 <option key={value} value={value}>
                   {label}
@@ -303,7 +390,7 @@ export function InstancesClient() {
               ))}
             </select>
           </div>
-          <button className="button" disabled={busy} type="submit">
+          <button className="button" disabled={busy || !name.trim()} type="submit">
             Criar instancia
           </button>
         </form>
@@ -332,7 +419,7 @@ export function InstancesClient() {
                   )}
                   <span>
                     <strong>{instance.name}</strong>
-                    <span>{instance.displayName ?? instance.phone ?? "Telefone nao conectado"}</span>
+                    <span>{instance.displayName ?? instance.connectedPhone ?? instance.phone ?? "Telefone nao conectado"}</span>
                   </span>
                 </div>
               </div>
@@ -352,18 +439,40 @@ export function InstancesClient() {
                 <span>{formatDate(instance.lastConnectedAt)}</span>
               </div>
               <div className="meta-row">
+                <span>Ultima atividade</span>
+                <span>{formatDate(instance.updatedAt ?? null)}</span>
+              </div>
+              <div className="meta-row">
                 <span>Ultima sincronizacao</span>
                 <span>{formatDate(instance.lastSyncAt)}</span>
+              </div>
+              <div className="meta-row">
+                <span>Telefone conectado</span>
+                <span>{instance.connectedPhone ?? instance.phone ?? "Nao conectado"}</span>
               </div>
               <div className="meta-row">
                 <span>Sessao salva</span>
                 <span>{instance.hasSessionFiles ? `Sim (${instance.sessionFilesCount ?? 0})` : "Nao"}</span>
               </div>
               <div className="meta-row">
+                <span>QR aguardando</span>
+                <span>{instance.hasQrCode ? "Sim" : "Nao"}</span>
+              </div>
+              <div className="meta-row">
                 <span>Erro recente</span>
                 <span>{instance.lastError ?? "-"}</span>
               </div>
             </div>
+
+            {cardErrors[instance.id] ? (
+              <div className="message error compact">{cardErrors[instance.id]}</div>
+            ) : null}
+
+            {instance.qrCode ? (
+              <div className="qr-card compact">
+                <img className="qr" src={instance.qrCode} alt={`QR Code da instancia ${instance.name}`} />
+              </div>
+            ) : null}
 
             <div className="field">
               <label htmlFor={`role-${instance.id}`}>Editar funcao</label>
@@ -391,18 +500,11 @@ export function InstancesClient() {
               >
                 Usar esta instancia
               </button>
-              <Link
-                className="button secondary compact-button"
-                href={appendInstanceIdToHref("/whatsapp", instance.id)}
-                onClick={() => useInstance(instance)}
-              >
-                Abrir WhatsApp
-              </Link>
               <button
                 className="button compact-button"
                 disabled={busy}
                 type="button"
-                onClick={() => void postWhatsappAction(instance.id, "reconnect")}
+                onClick={() => void postWhatsappAction(instance, "reconnect")}
               >
                 {busyInstanceId === instance.id
                   ? "Aguarde..."
@@ -414,9 +516,17 @@ export function InstancesClient() {
                 className="button secondary compact-button"
                 disabled={busy}
                 type="button"
-                onClick={() => void postWhatsappAction(instance.id, "sync-catalog")}
+                onClick={() => void postWhatsappAction(instance, "sync-catalog")}
               >
-                Sincronizar
+                Sincronizar catalogo
+              </button>
+              <button
+                className="button secondary compact-button"
+                disabled={busy}
+                type="button"
+                onClick={() => void postWhatsappAction(instance, "sync-history")}
+              >
+                Sincronizar historico
               </button>
               <button
                 className="button secondary compact-button"
@@ -424,7 +534,7 @@ export function InstancesClient() {
                 type="button"
                 onClick={() => void postAction(instance, "disconnect")}
               >
-                Desconectar
+                Desconectar socket
               </button>
               <button
                 className="button danger compact-button"

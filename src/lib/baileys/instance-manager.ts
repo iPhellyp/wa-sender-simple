@@ -444,8 +444,11 @@ async function startSecondaryWhatsappInstance(instance: WhatsappInstance) {
             lastError: null
           });
           console.log("[instance-manager] qr updated", {
+            action: "generate_qr",
             instanceId: instance.id,
-            hasQr: true
+            sessionKey: instance.sessionKey,
+            hasQr: true,
+            persistedQr: true
           });
           return;
         }

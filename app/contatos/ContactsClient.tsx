@@ -204,7 +204,9 @@ export function ContactsClient() {
       }
 
       setResult(data as ImportResult);
-      form.reset();
+      if (form.isConnected) {
+        HTMLFormElement.prototype.reset.call(form);
+      }
       if (page === 1) {
         await loadContacts();
       } else {

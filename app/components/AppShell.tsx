@@ -25,7 +25,6 @@ export function AppShell({ title, subtitle, children, actions }: AppShellProps) 
           </Link>
           <nav className="nav" aria-label="Menu">
             <NavLink href="/dashboard">Dashboard</NavLink>
-            <NavLink href="/whatsapp">WhatsApp</NavLink>
             <NavLink href="/conversas">Conversas</NavLink>
             <NavLink href="/etiquetas">Etiquetas</NavLink>
             <NavLink href="/envios">Envios</NavLink>

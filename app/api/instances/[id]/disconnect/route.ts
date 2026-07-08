@@ -23,7 +23,13 @@ export async function POST(
     return NextResponse.json({ error: "Instancia nao encontrada" }, { status: 404 });
   }
 
-  await enqueueWhatsappDisconnect(instance.id);
+  const jobId = await enqueueWhatsappDisconnect(instance.id);
+  console.log("[instances-api] disconnect enqueued", {
+    action: "disconnect_socket",
+    instanceId: instance.id,
+    sessionKey: instance.sessionKey,
+    jobId
+  });
 
   return NextResponse.json({
     instance: await getWhatsappInstanceRuntimeStatus(instance.id),

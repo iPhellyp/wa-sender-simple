@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
+import { WhatsappStatus } from "@prisma/client";
 import { getWhatsappInstanceRuntimeStatus } from "@/src/lib/baileys/instance-manager";
 import { enqueueWhatsappReset } from "@/src/lib/queue/campaign-queue";
+import { prisma } from "@/src/lib/prisma/client";
 import { clearWhatsappOperationalData } from "@/src/lib/server/whatsapp-session-data";
 import {
   isWhatsappInstanceNotFoundError,
@@ -41,7 +43,33 @@ export async function POST(request: NextRequest) {
 
   try {
     await clearWhatsappOperationalData("manual-reset", instance.id);
-    await enqueueWhatsappReset(instance.id);
+    await prisma.whatsappSession.updateMany({
+      where: {
+        instanceId: instance.id
+      },
+      data: {
+        status: WhatsappStatus.disconnected,
+        qrCode: null,
+        connectedPhone: null,
+        lastError: null
+      }
+    });
+    await prisma.whatsappInstance.update({
+      where: {
+        id: instance.id
+      },
+      data: {
+        status: WhatsappStatus.disconnected,
+        phone: null
+      }
+    });
+    const jobId = await enqueueWhatsappReset(instance.id);
+    console.log("[whatsapp-api] reset enqueued", {
+      action: "reset_session",
+      instanceId: instance.id,
+      sessionKey: instance.sessionKey,
+      jobId
+    });
 
     return NextResponse.json({
       ...(await getWhatsappInstanceRuntimeStatus(instance.id)),

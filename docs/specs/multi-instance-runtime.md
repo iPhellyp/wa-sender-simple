@@ -2,7 +2,7 @@
 
 ## Visao
 
-`/instancias` gerencia os numeros cadastrados. `/whatsapp` opera a instancia ativa indicada por `?instanceId=...`, pelo cookie `wa_sender_active_instance_id` ou pela instancia tecnica inicial quando nao existe escolha salva.
+`/instancias` e a central unica de operacao WhatsApp. Ela gerencia os numeros cadastrados, a instancia ativa, QR, retomada de sessao, reset, disconnect, delete, sincronizacao e erros. A rota `/whatsapp` redireciona para `/instancias`.
 
 Cada instancia possui status, QR, telefone conectado, pasta de sessao e dados operacionais isolados por `instanceId`.
 
@@ -86,7 +86,7 @@ Na Fase 5, o produto permite zero instancias: deletar a ultima instancia deixa o
 3. Ir para `/etiquetas`.
 4. Ir para `/campanhas`.
 5. Ir para `/envios`.
-6. Ir para `/whatsapp`.
+6. Ir para `/instancias`.
 7. Confirmar que a mesma instancia permanece ativa.
 8. Recarregar a pagina.
 9. Confirmar que continua na mesma instancia.
@@ -94,13 +94,13 @@ Na Fase 5, o produto permite zero instancias: deletar a ultima instancia deixa o
 ### QR multi-instancia
 
 1. Criar Instancia A.
-2. Abrir `/whatsapp?instanceId=A`.
+2. Usar Instancia A em `/instancias`.
 3. Clicar reconectar.
 4. Confirmar QR da Instancia A.
 5. Escanear com numero A.
 6. Confirmar `connectedPhone` A.
 7. Criar Instancia B.
-8. Abrir `/whatsapp?instanceId=B`.
+8. Usar Instancia B em `/instancias`.
 9. Clicar reconectar.
 10. Confirmar QR da Instancia B.
 11. Confirmar que QR de B nao altera A.
@@ -136,7 +136,7 @@ Na Fase 5, o produto permite zero instancias: deletar a ultima instancia deixa o
 
 1. Manter numero conectado no celular.
 2. Reiniciar/deployar app e worker.
-3. Abrir `/whatsapp`.
+3. Abrir `/instancias`.
 4. Confirmar `Sessao salva`.
 5. Clicar `Retomar sessao`.
 6. Confirmar reconexao sem QR.

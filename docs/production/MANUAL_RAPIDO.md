@@ -12,21 +12,22 @@
 2. Informe nome e funcao.
 3. Clique em `Criar instancia`.
 4. Clique em `Usar esta instancia`.
-5. Clique em `Abrir WhatsApp`.
+5. Gere QR ou retome sessao no proprio card.
 
 Se nao houver nenhuma instancia cadastrada, `/instancias` mostra estado vazio e botao para criar a primeira.
 
 ## 3. Conectar WhatsApp
 
-1. Abra `/whatsapp?instanceId=ID`.
-2. Se nao houver sessao salva, clique em `Gerar QR`.
-3. Aguarde o QR.
-4. Escaneie com o aparelho correto.
-5. Confirme status conectado e telefone conectado.
+1. Abra `/instancias`.
+2. Use o card da instancia desejada.
+3. Se nao houver sessao salva, clique em `Gerar QR`.
+4. Aguarde o QR no card.
+5. Escaneie com o aparelho correto.
+6. Confirme status conectado e telefone conectado.
 
 ## 4. Retomar sessao apos deploy ou queda
 
-1. Abra `/whatsapp`.
+1. Abra `/instancias`.
 2. Confirme se aparece `Sessao salva`.
 3. Clique em `Retomar sessao`.
 4. Aguarde o socket reabrir sem resetar.

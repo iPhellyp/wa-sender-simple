@@ -7,6 +7,8 @@ WA Sender Simple e um sistema de envio e gestao WhatsApp multi-numero. Cada inst
 ## Incluido na v1 beta
 
 - Multi-instancia WhatsApp.
+- `/instancias` como central unica de operacao WhatsApp.
+- `/whatsapp` redirecionando para `/instancias`.
 - QR por instancia.
 - Retomada de sessao salva apos deploy/restart.
 - Selecao de instancia ativa.

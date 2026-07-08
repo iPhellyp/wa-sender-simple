@@ -1,15 +1,5 @@
-﻿import { Suspense } from "react";
-import { AppShell } from "@/app/components/AppShell";
-import { WhatsappClient } from "./WhatsappClient";
+import { redirect } from "next/navigation";
 
 export default function WhatsappPage() {
-  return (
-    <AppShell title="WhatsApp" subtitle="Conexao, catalogo e manutencao da instancia ativa.">
-      <Suspense fallback={<div className="data-card empty-state compact">Carregando WhatsApp...</div>}>
-        <WhatsappClient />
-      </Suspense>
-    </AppShell>
-  );
+  redirect("/instancias");
 }
-
-

@@ -25,7 +25,6 @@ Sistema WhatsApp multi-numero para contatos, conversas, etiquetas, campanhas e e
 ## Rotas principais
 
 - `/dashboard`
-- `/whatsapp`
 - `/instancias`
 - `/conversas`
 - `/contatos`
@@ -39,6 +38,7 @@ Sistema WhatsApp multi-numero para contatos, conversas, etiquetas, campanhas e e
 - Use `Retomar sessao` quando ja existe sessao salva e o painel ficou desconectado apos deploy/restart.
 - Use `Gerar QR` apenas quando nao existe sessao local para a instancia.
 - Use `Resetar sessao` somente quando for necessario apagar a sessao local e parear de novo.
+- A central operacional do WhatsApp e `/instancias`; `/whatsapp` redireciona para `/instancias`.
 - Comece campanhas com baixo volume e aumente gradualmente.
 - Nao rode campanhas simultaneas no mesmo numero.
 - Respeite opt-out, consentimento e qualidade da base.
