@@ -7,6 +7,7 @@ import { renderCampaignMessage } from "@/src/lib/campaigns/message-template";
 type ContactOption = {
   id: string;
   name: string;
+  phoneRaw?: string;
   phoneNormalized: string;
   message: string | null;
   source: string;
@@ -48,6 +49,9 @@ type CampaignSummary = {
 type RecipientDetail = {
   id: string;
   jid: string | null;
+  displayName: string;
+  displayPhone: string | null;
+  displaySubtitle: string;
   messageFinal: string;
   status: string;
   scheduledAt: string | null;
@@ -1091,8 +1095,10 @@ export function CampaignsClient({
                 {recipients.slice(0, 12).map((recipient) => (
                   <div className="recipient-row" key={recipient.id}>
                     <div>
-                      <strong>{recipient.contact?.name ?? recipient.jid ?? recipient.id}</strong>
-                      <span className="muted">{recipient.contact?.phoneNormalized ?? recipient.jid}</span>
+                      <strong>{recipient.displayName || "Contato sem numero resolvido"}</strong>
+                      <span className="muted">
+                        {recipient.displayPhone || recipient.displaySubtitle}
+                      </span>
                     </div>
                     <span className={`status-badge ${statusClass(recipient.status)}`}>
                       {statusLabel(recipient.status)}
