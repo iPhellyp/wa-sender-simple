@@ -72,6 +72,9 @@ type LabelAudience = {
     chatId: string;
     jid: string;
     name: string | null;
+    displayName?: string;
+    displayPhone?: string | null;
+    displaySubtitle?: string | null;
     jidType: string;
   }>;
 };
@@ -145,7 +148,7 @@ function safeWhatsappPreviewName(name: string | null | undefined, jid: string | 
   }
 
   if (normalizedJid.endsWith("@lid")) {
-    return "Contato sem numero resolvido";
+    return "Contato sem número resolvido";
   }
 
   return jid ?? "Contato WhatsApp";
@@ -664,8 +667,10 @@ export function CampaignsClient({
                     <ul className="list-plain">
                       {(labelAudience?.recipientsPreview ?? []).map((recipient) => (
                         <li key={recipient.chatId}>
-                          {safeWhatsappPreviewName(recipient.name, recipient.jid)}{" "}
-                          <span className="muted">({recipient.jidType})</span>
+                          {recipient.displayName ?? safeWhatsappPreviewName(recipient.name, recipient.jid)}{" "}
+                          <span className="muted">
+                            {recipient.displayPhone || recipient.displaySubtitle || `(${recipient.jidType})`}
+                          </span>
                         </li>
                       ))}
                     </ul>
@@ -1230,7 +1235,7 @@ export function CampaignsClient({
                 {recipients.slice(0, 12).map((recipient) => (
                   <div className="recipient-row" key={recipient.id}>
                     <div>
-                      <strong>{recipient.displayName || "Contato sem numero resolvido"}</strong>
+                      <strong>{recipient.displayName || "Contato sem número resolvido"}</strong>
                       <span className="muted">
                         {recipient.displayPhone || recipient.displaySubtitle}
                       </span>

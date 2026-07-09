@@ -486,7 +486,7 @@ export function EnviosClient({ selectedCampaignId }: { selectedCampaignId?: stri
                         <tr key={recipient.id}>
                           <td>
                             <div className="identity-cell">
-                              <strong>{recipient.displayName || "Contato sem numero resolvido"}</strong>
+                              <strong>{recipient.displayName || "Contato sem número resolvido"}</strong>
                               <span className="muted">
                                 {recipient.displayPhone || recipient.displaySubtitle || "-"}
                               </span>

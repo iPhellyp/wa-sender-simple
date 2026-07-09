@@ -997,7 +997,35 @@ button:disabled {
 }
 
 .label-detail-card {
-  grid-template-columns: 24px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  grid-template-columns: 24px minmax(240px, 1fr) minmax(150px, auto) auto;
+  padding: 9px 10px;
+}
+
+.label-detail-card .identity-cell {
+  align-items: center;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 34px minmax(0, 1fr);
+}
+
+.label-detail-card .button-row {
+  justify-content: flex-end;
+}
+
+.avatar-small {
+  align-items: center;
+  background: #dff7ef;
+  border: 1px solid #abefc6;
+  border-radius: 999px;
+  color: var(--primary-dark);
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 800;
+  height: 34px;
+  justify-content: center;
+  width: 34px;
 }
 
 .catalog-checkbox {
@@ -1749,6 +1777,32 @@ button:disabled {
   display: flex;
   flex-wrap: wrap;
   gap: 5px;
+}
+
+.label-detail-card .identity-cell > span:last-child {
+  align-items: start;
+  display: grid;
+  gap: 4px;
+}
+
+.label-detail-card .avatar-small {
+  display: inline-flex;
+  flex-wrap: nowrap;
+}
+
+@media (max-width: 820px) {
+  .label-detail-card {
+    grid-template-columns: 24px minmax(0, 1fr);
+  }
+
+  .label-detail-card > .row-meta,
+  .label-detail-card > .button-row {
+    grid-column: 2;
+  }
+
+  .label-detail-card .button-row {
+    justify-content: flex-start;
+  }
 }
 
 .status-badge {

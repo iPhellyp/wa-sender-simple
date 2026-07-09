@@ -1,9 +1,10 @@
-import { createHash } from "crypto";
+﻿import { createHash } from "crypto";
 import { prisma } from "../prisma/client";
 import { normalizeBrazilPhone } from "../phone/normalize";
 import { isGroupJid, normalizeChatJid } from "../baileys/sync";
 import { WHATSAPP_X1_ONLY_MODE } from "../whatsapp/jid";
 import { isEligibleIndividualWhatsappChat } from "../whatsapp/individual-chat-filter";
+import { resolveContactDisplay } from "../whatsapp/contact-display";
 
 export type SkippedReason =
   | "group_excluded"
@@ -31,6 +32,10 @@ export type AudiencePreviewItem = {
   chatId: string;
   jid: string;
   name: string | null;
+  displayName?: string;
+  displayPhone?: string | null;
+  displaySubtitle?: string | null;
+  rawJid?: string | null;
   isGroup: boolean;
   phoneNormalized: string | null;
   jidType: AudienceJidType;
@@ -476,7 +481,14 @@ export async function buildLabelAudience(options: {
       continue;
     }
 
-    finalEligible.push(item);
+    finalEligible.push({
+      ...item,
+      ...resolveContactDisplay({
+        jid: item.jid,
+        chatName: item.name,
+        phoneNormalized: item.phoneNormalized
+      })
+    });
   }
 
   const skipped = associations.length - finalEligible.length;
@@ -516,3 +528,4 @@ export function buildCampaignDedupeKey(campaignId: string, jid: string) {
 }
 
 export { hashMessage, DEFAULT_MAX_RECIPIENTS, DEFAULT_EXCLUDE_ALREADY_SENT_DAYS, ABSOLUTE_MAX_RECIPIENTS };
+

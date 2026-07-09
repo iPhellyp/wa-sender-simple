@@ -1,10 +1,10 @@
 ﻿import { NextRequest, NextResponse } from "next/server";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/src/lib/prisma/client";
-import { getWhatsappDisplayName } from "@/src/lib/whatsapp/display-name";
 import { getLastSendByJids } from "@/src/lib/labels/send-stats";
 import { getActiveInstanceIdFromSearchOrDefault } from "@/src/lib/server/whatsapp-instances";
 import { getIndividualWhatsappChatWhere } from "@/src/lib/whatsapp/individual-chat-filter";
+import { resolveContactDisplay } from "@/src/lib/whatsapp/contact-display";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -141,7 +141,8 @@ export async function GET(
       select: {
         jid: true,
         name: true,
-        pushName: true
+        pushName: true,
+        phone: true
       }
     }),
     getLastSendByJids(visibleJids, instanceId),
@@ -181,18 +182,22 @@ export async function GET(
       const chat = association.chat;
       const contact = contactByJid.get(chat.jid);
       const lastSend = visibleLastSend.get(chat.jid);
-      const name = getWhatsappDisplayName({
+      const display = resolveContactDisplay({
         jid: chat.jid,
         chatName: chat.name,
         contactName: contact?.name,
-        contactPushName: contact?.pushName,
-        isGroup: chat.isGroup
+        pushName: contact?.pushName,
+        phone: contact?.phone
       });
 
       return {
         chatId: chat.id,
         jid: chat.jid,
-        name,
+        name: display.displayName,
+        displayName: display.displayName,
+        displayPhone: display.displayPhone,
+        displaySubtitle: display.displaySubtitle,
+        rawJid: display.rawJid,
         isGroup: chat.isGroup,
         lastMessageAt: chat.lastMessageAt,
         updatedAt: chat.updatedAt,

@@ -16,6 +16,9 @@ type AudienceResponse = {
     chatId: string;
     jid: string;
     name: string | null;
+    displayName?: string;
+    displayPhone?: string | null;
+    displaySubtitle?: string | null;
     isGroup: boolean;
     phoneNormalized: string | null;
     jidType: string;
@@ -270,15 +273,11 @@ export function LabelSendClient({ labelId }: { labelId: string }) {
           <ul className="list-plain">
             {audience.recipientsPreview.map((recipient) => (
               <li key={recipient.jid}>
-                {recipient.name ?? recipient.phoneNormalized ?? recipient.jid}{" "}
+                {recipient.displayName ?? recipient.name ?? recipient.phoneNormalized ?? "Contato WhatsApp"}{" "}
                 <span className="muted">
-                  (
-                  {recipient.isGroup
-                    ? "grupo"
-                    : recipient.jidType === "lid_jid"
-                      ? "@lid"
-                      : recipient.phoneNormalized ?? "contato"}
-                  )
+                  {recipient.displayPhone ||
+                    recipient.displaySubtitle ||
+                    (recipient.isGroup ? "grupo" : recipient.phoneNormalized ?? "contato")}
                 </span>
               </li>
             ))}

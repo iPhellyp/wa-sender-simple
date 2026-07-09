@@ -31,6 +31,10 @@ type LabelDetailResponse = {
     chatId: string;
     jid: string;
     name: string;
+    displayName: string;
+    displayPhone: string | null;
+    displaySubtitle: string | null;
+    rawJid: string | null;
     isGroup: boolean;
     lastMessageAt: string | null;
     updatedAt: string;
@@ -75,6 +79,11 @@ function sendStatusClass(status: string) {
   }
 
   return "neutral";
+}
+
+function getAvatarText(value: string) {
+  const text = value.trim();
+  return text ? text.slice(0, 2).toUpperCase() : "WA";
 }
 
 export function LabelDetailClient({ labelId }: { labelId: string }) {
@@ -249,9 +258,9 @@ export function LabelDetailClient({ labelId }: { labelId: string }) {
           <span>Altere a busca ou force resync de catalogo/app-state na pagina WhatsApp.</span>
         </div>
       ) : (
-        <div className="conversation-grid">
+        <div className="grid">
           {conversations.map((conversation) => (
-            <article className="inbox-conversation-card label-detail-card" key={conversation.chatId}>
+            <article className="data-card compact label-detail-card" key={conversation.chatId}>
               <label className="catalog-checkbox" title="Selecionar contato">
                 <input
                   checked={selectedIds.has(conversation.chatId)}
@@ -259,35 +268,38 @@ export function LabelDetailClient({ labelId }: { labelId: string }) {
                   onChange={() => toggle(conversation.chatId)}
                 />
               </label>
-              <span className="conversation-card-body">
-                <span className="conversation-card-top">
-                  <span className="conversation-title-block">
-                    <strong>{conversation.name}</strong>
-                    <span>{conversation.jid}</span>
+              <span className="identity-cell">
+                <span className="avatar-small" aria-hidden="true">
+                  {getAvatarText(conversation.displayName)}
+                </span>
+                <span>
+                  <strong>{conversation.displayName}</strong>
+                  <span className="muted">
+                    {conversation.displayPhone || conversation.displaySubtitle || "Sem identificador"}
                   </span>
-                  <span className="conversation-time">
-                    {new Date(conversation.lastMessageAt ?? conversation.updatedAt).toLocaleString("pt-BR")}
+                  <span className="row-meta">
+                    <span className="status-badge neutral">contato</span>
+                    <span className={`status-badge ${sendStatusClass(conversation.sendStatus)}`}>
+                      {sendStatusLabel(conversation.sendStatus)}
+                    </span>
+                    {!conversation.lastMessageText ? <span className="muted">Sem mensagem salva</span> : null}
+                    {conversation.rawJid?.endsWith("@lid") && !conversation.displayPhone ? (
+                      <span className="muted">lid</span>
+                    ) : null}
                   </span>
                 </span>
-                <span className="conversation-card-meta">
-                  <span className="badge success">contato</span>
-                  <span className={`badge ${sendStatusClass(conversation.sendStatus)}`}>
-                    {sendStatusLabel(conversation.sendStatus)}
-                  </span>
-                  {conversation.sentAt ? (
-                    <span>enviado em {new Date(conversation.sentAt).toLocaleString("pt-BR")}</span>
-                  ) : null}
-                  {conversation.campaignName ? <span>{conversation.campaignName}</span> : null}
-                </span>
-                <span className="conversation-preview">
-                  {conversation.lastMessageText ?? "Sem mensagem salva"}
-                </span>
-                <span className="conversation-card-footer">
+              </span>
+              <span className="row-meta">
+                <span>{new Date(conversation.lastMessageAt ?? conversation.updatedAt).toLocaleString("pt-BR")}</span>
+                {conversation.sentAt ? <span>enviado em {new Date(conversation.sentAt).toLocaleString("pt-BR")}</span> : null}
+                {conversation.campaignName ? <span>{conversation.campaignName}</span> : null}
+              </span>
+              <span className="button-row">
                   <Link
                     className="button secondary compact-button"
                     href={appendInstanceIdToHref(`/conversas/${conversation.chatId}`, activeInstanceId)}
                   >
-                    Abrir contato
+                    Abrir
                   </Link>
                   <Link
                     className="button secondary compact-button"
@@ -296,7 +308,6 @@ export function LabelDetailClient({ labelId }: { labelId: string }) {
                     Campanha
                   </Link>
                   {conversation.error ? <span className="send-error">{conversation.error}</span> : null}
-                </span>
               </span>
             </article>
           ))}
