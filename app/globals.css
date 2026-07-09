@@ -1887,6 +1887,15 @@ button:disabled {
   min-width: 0;
 }
 
+.envios-detail-heading {
+  align-items: flex-start;
+}
+
+.envios-detail-heading strong {
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
 .progress-block {
   display: grid;
   gap: 8px;
@@ -1926,6 +1935,19 @@ button:disabled {
   padding: 7px 8px;
 }
 
+.detail-metrics span strong {
+  color: var(--text);
+  display: block;
+  font-size: 16px;
+  line-height: 1.2;
+}
+
+.envios-detail-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+}
+
 .campaign-list {
   display: grid;
   gap: 10px;
@@ -1938,6 +1960,7 @@ button:disabled {
 .campaign-row {
   border: 1px solid var(--line);
   border-radius: var(--radius);
+  cursor: pointer;
   display: grid;
   gap: 8px;
   padding: 12px;
@@ -1946,6 +1969,22 @@ button:disabled {
 .campaign-row.active {
   border-color: var(--primary);
   box-shadow: 0 0 0 3px rgb(15 118 110 / 10%);
+}
+
+.campaign-row:focus-visible {
+  border-color: var(--primary);
+  outline: 3px solid rgb(15 118 110 / 16%);
+  outline-offset: 2px;
+}
+
+.recipient-list {
+  display: grid;
+  gap: 0;
+  min-width: 0;
+}
+
+.recipient-list.compact {
+  margin-top: 8px;
 }
 
 .recipient-row {
@@ -1965,6 +2004,12 @@ button:disabled {
   display: grid;
   gap: 2px;
   min-width: 0;
+}
+
+.recipient-row strong,
+.recipient-row .muted,
+.recipient-row .send-error {
+  overflow-wrap: anywhere;
 }
 
 .send-error {

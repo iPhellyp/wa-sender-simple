@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { getStoredActiveInstanceId } from "@/src/lib/client/active-instance";
 
 type EnvioSummary = {
@@ -112,8 +112,10 @@ export function EnviosClient({ selectedCampaignId }: { selectedCampaignId?: stri
   const [periodFilter, setPeriodFilter] = useState("all");
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
+  const [loadingDetails, setLoadingDetails] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const detailRequestRef = useRef(0);
 
   const filteredCampaigns = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase();
@@ -145,8 +147,11 @@ export function EnviosClient({ selectedCampaignId }: { selectedCampaignId?: stri
     );
   }, [filteredCampaigns]);
 
+  const selectedCampaign = campaigns.find((campaign) => campaign.id === selectedId) ?? null;
+  const selectedDetails = details?.id === selectedId ? details : null;
+
   const detailGroups = useMemo(() => {
-    const recipients = details?.recipients ?? [];
+    const recipients = selectedDetails?.recipients ?? [];
     return {
       sent: recipients.filter((recipient) => recipient.status === "sent"),
       failed: recipients.filter((recipient) => recipient.status === "failed"),
@@ -154,10 +159,9 @@ export function EnviosClient({ selectedCampaignId }: { selectedCampaignId?: stri
         ["pending", "scheduled", "sending"].includes(recipient.status)
       )
     };
-  }, [details]);
+  }, [selectedDetails]);
 
-  const selectedCampaign = campaigns.find((campaign) => campaign.id === selectedId) ?? null;
-  const detailTotal = details?.recipients.length ?? 0;
+  const detailTotal = selectedDetails?.recipients.length ?? 0;
   const progressPercent = detailTotal > 0 ? Math.round((detailGroups.sent.length / detailTotal) * 100) : 0;
 
   async function loadCampaigns() {
@@ -169,7 +173,7 @@ export function EnviosClient({ selectedCampaignId }: { selectedCampaignId?: stri
     return data.campaigns;
   }
 
-  async function loadDetails(campaignId: string) {
+  async function fetchDetails(campaignId: string) {
     const params = new URLSearchParams();
     if (activeInstanceId) params.set("instanceId", activeInstanceId);
     const response = await fetch(`/api/envios/${campaignId}?${params.toString()}`, { cache: "no-store" });
@@ -177,17 +181,24 @@ export function EnviosClient({ selectedCampaignId }: { selectedCampaignId?: stri
     if (!response.ok || !data.campaign) {
       throw new Error(String(data.error ?? "Erro ao carregar detalhes"));
     }
-    setDetails(data.campaign);
+    return data.campaign;
   }
 
   async function refresh() {
     await loadCampaigns();
-    if (selectedId) await loadDetails(selectedId);
+    if (selectedId) {
+      const nextDetails = await fetchDetails(selectedId);
+      setDetails(nextDetails);
+    }
   }
 
-  async function selectCampaign(campaignId: string, updateUrl = true) {
+  async function selectCampaign(campaignId: string, options: { updateUrl?: boolean } = {}) {
+    const updateUrl = options.updateUrl ?? true;
+    const requestId = detailRequestRef.current + 1;
+    detailRequestRef.current = requestId;
     setSelectedId(campaignId);
     setDetails(null);
+    setLoadingDetails(true);
     setError(null);
 
     if (updateUrl) {
@@ -198,7 +209,21 @@ export function EnviosClient({ selectedCampaignId }: { selectedCampaignId?: stri
       router.replace(`/envios?${params.toString()}`, { scroll: false });
     }
 
-    await loadDetails(campaignId);
+    try {
+      const nextDetails = await fetchDetails(campaignId);
+
+      if (detailRequestRef.current === requestId) {
+        setDetails(nextDetails);
+      }
+    } catch (loadError) {
+      if (detailRequestRef.current === requestId) {
+        setError(loadError instanceof Error ? loadError.message : "Erro inesperado");
+      }
+    } finally {
+      if (detailRequestRef.current === requestId) {
+        setLoadingDetails(false);
+      }
+    }
   }
 
   async function refreshWithErrorHandling() {
@@ -242,11 +267,11 @@ export function EnviosClient({ selectedCampaignId }: { selectedCampaignId?: stri
       return;
     }
 
-    if (selectedId === targetCampaign.id && details?.id === targetCampaign.id) {
+    if (selectedId === targetCampaign.id && (selectedDetails?.id === targetCampaign.id || loadingDetails)) {
       return;
     }
 
-    void selectCampaign(targetCampaign.id, false);
+    void selectCampaign(targetCampaign.id, { updateUrl: false });
   }, [campaigns, loading, urlCampaignId]);
 
   async function runCampaignAction(campaignId: string, action: "start" | "pause" | "resume" | "cancel") {
@@ -369,7 +394,19 @@ export function EnviosClient({ selectedCampaignId }: { selectedCampaignId?: stri
                 const isSelected = selectedId === campaign.id;
 
                 return (
-                  <article className={`campaign-row ${isSelected ? "active" : ""}`} key={campaign.id}>
+                  <article
+                    className={`campaign-row ${isSelected ? "active" : ""}`}
+                    key={campaign.id}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => void selectCampaign(campaign.id)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        void selectCampaign(campaign.id);
+                      }
+                    }}
+                  >
                     <div className="campaign-row-main">
                       <div>
                         <strong>{campaign.name}</strong>
@@ -390,7 +427,10 @@ export function EnviosClient({ selectedCampaignId }: { selectedCampaignId?: stri
                       <button
                         className="button secondary compact-button"
                         type="button"
-                        onClick={() => void selectCampaign(campaign.id)}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void selectCampaign(campaign.id);
+                        }}
                       >
                         Ver detalhes
                       </button>
@@ -399,7 +439,10 @@ export function EnviosClient({ selectedCampaignId }: { selectedCampaignId?: stri
                           className="button compact-button"
                           disabled={busy}
                           type="button"
-                          onClick={() => void runCampaignAction(campaign.id, "start")}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void runCampaignAction(campaign.id, "start");
+                          }}
                         >
                           Iniciar
                         </button>
@@ -409,7 +452,10 @@ export function EnviosClient({ selectedCampaignId }: { selectedCampaignId?: stri
                           className="button compact-button"
                           disabled={busy}
                           type="button"
-                          onClick={() => void runCampaignAction(campaign.id, "resume")}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void runCampaignAction(campaign.id, "resume");
+                          }}
                         >
                           Retomar
                         </button>
@@ -419,7 +465,10 @@ export function EnviosClient({ selectedCampaignId }: { selectedCampaignId?: stri
                           className="button secondary compact-button"
                           disabled={busy}
                           type="button"
-                          onClick={() => void runCampaignAction(campaign.id, "pause")}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void runCampaignAction(campaign.id, "pause");
+                          }}
                         >
                           Pausar
                         </button>
@@ -432,16 +481,23 @@ export function EnviosClient({ selectedCampaignId }: { selectedCampaignId?: stri
           )}
         </div>
 
-        <aside className="detail-panel">
-          {details ? (
+        <aside className="detail-panel" key={selectedId ?? "empty"}>
+          {selectedId && loadingDetails ? (
+            <div className="empty-state compact">
+              <strong>Carregando detalhes...</strong>
+              <span>Buscando progresso e destinatarios da campanha selecionada.</span>
+            </div>
+          ) : selectedDetails ? (
             <div className="detail-stack">
-              <div className="detail-heading">
+              <div className="detail-heading envios-detail-heading">
                 <div>
-                  <strong>{details.name}</strong>
-                  <span className="muted">{details.targetLabel?.name ?? details.targetMode}</span>
+                  <strong>{selectedDetails.name}</strong>
+                  <span className="muted">
+                    Publico: {selectedDetails.targetLabel?.name ?? selectedDetails.targetMode}
+                  </span>
                 </div>
-                <span className={`status-badge ${statusClass(details.status)}`}>
-                  {statusLabel(details.status)}
+                <span className={`status-badge ${statusClass(selectedDetails.status)}`}>
+                  {statusLabel(selectedDetails.status)}
                 </span>
               </div>
 
@@ -456,14 +512,14 @@ export function EnviosClient({ selectedCampaignId }: { selectedCampaignId?: stri
               </div>
 
               <div className="detail-metrics">
-                <span>{detailTotal} total</span>
-                <span>{detailGroups.sent.length} enviados</span>
-                <span>{detailGroups.failed.length} falhas</span>
-                <span>{detailGroups.pending.length} pendentes</span>
+                <span><strong>{detailTotal}</strong> total</span>
+                <span><strong>{detailGroups.sent.length}</strong> enviados</span>
+                <span><strong>{detailGroups.failed.length}</strong> falhas</span>
+                <span><strong>{detailGroups.pending.length}</strong> pendentes</span>
               </div>
 
               {selectedCampaign ? (
-                <div className="button-row">
+                <div className="button-row envios-detail-actions">
                   {selectedCampaign.status === "draft" ? (
                     <button
                       className="button compact-button"
@@ -509,43 +565,36 @@ export function EnviosClient({ selectedCampaignId }: { selectedCampaignId?: stri
 
               <div>
                 <strong>Destinatarios recentes</strong>
-                <div className="table-wrap">
-                  <table className="data-table compact">
-                    <thead>
-                      <tr>
-                        <th>Destinatario</th>
-                        <th>Status</th>
-                        <th>Quando</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {details.recipients.slice(0, 10).map((recipient) => (
-                        <tr key={recipient.id}>
-                          <td>
-                            <div className="identity-cell">
-                              <strong>{recipient.displayName || "Contato sem número resolvido"}</strong>
-                              <span className="muted">
-                                {recipient.displayPhone || recipient.displaySubtitle || "-"}
-                              </span>
-                              {recipient.error ? <span className="send-error">{recipient.error}</span> : null}
-                            </div>
-                          </td>
-                          <td>
-                            <span className={`status-badge ${statusClass(recipient.status)}`}>
-                              {statusLabel(recipient.status)}
-                            </span>
-                          </td>
-                          <td>{formatDate(recipient.sentAt ?? recipient.scheduledAt ?? recipient.updatedAt)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                <div className="recipient-list compact">
+                  {selectedDetails.recipients.slice(0, 10).map((recipient) => (
+                    <article className="recipient-row" key={recipient.id}>
+                      <div>
+                        <strong>{recipient.displayName || "Contato sem numero resolvido"}</strong>
+                        <span className="muted">
+                          {recipient.displayPhone || recipient.displaySubtitle || "-"}
+                        </span>
+                        <span className="muted">
+                          {formatDate(recipient.sentAt ?? recipient.scheduledAt ?? recipient.updatedAt)}
+                        </span>
+                        {recipient.error ? <span className="send-error">{recipient.error}</span> : null}
+                      </div>
+                      <span className={`status-badge ${statusClass(recipient.status)}`}>
+                        {statusLabel(recipient.status)}
+                      </span>
+                    </article>
+                  ))}
+                  {selectedDetails.recipients.length === 0 ? (
+                    <div className="empty-state compact">
+                      <strong>Nenhum destinatario registrado</strong>
+                      <span>A campanha ainda nao possui destinatarios para exibir.</span>
+                    </div>
+                  ) : null}
                 </div>
               </div>
             </div>
           ) : (
             <div className="empty-state compact">
-              <strong>Selecione uma campanha</strong>
+              <strong>Selecione uma campanha para ver os detalhes.</strong>
               <span>Os detalhes de progresso, falhas e destinatarios recentes aparecerao aqui.</span>
             </div>
           )}
