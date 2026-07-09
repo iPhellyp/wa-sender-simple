@@ -4,7 +4,7 @@ import { normalizeBrazilPhone } from "../phone/normalize";
 import { isGroupJid, normalizeChatJid } from "../baileys/sync";
 import { WHATSAPP_X1_ONLY_MODE } from "../whatsapp/jid";
 import { isEligibleIndividualWhatsappChat } from "../whatsapp/individual-chat-filter";
-import { isLidJid, resolveContactDisplay } from "../whatsapp/contact-display";
+import { resolveContactDisplay } from "../whatsapp/contact-display";
 
 export type SkippedReason =
   | "group_excluded"
@@ -463,12 +463,6 @@ export async function buildLabelAudience(options: {
     ) {
       skippedReasons.unresolved_chat += 1;
       logRecipientSkipped("unresolved_chat");
-      continue;
-    }
-
-    if (isLidJid(jid) && !display.displayPhone && display.displayName === "Contato sem número resolvido") {
-      skippedReasons.unresolved_lid += 1;
-      logRecipientSkipped("unresolved_lid");
       continue;
     }
 

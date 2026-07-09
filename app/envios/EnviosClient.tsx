@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { getStoredActiveInstanceId } from "@/src/lib/client/active-instance";
 
@@ -100,10 +100,13 @@ function getAudienceLabel(campaign: Pick<EnvioSummary, "targetLabel" | "targetMo
 }
 
 export function EnviosClient({ selectedCampaignId }: { selectedCampaignId?: string | null }) {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const activeInstanceId = searchParams.get("instanceId") ?? getStoredActiveInstanceId();
+  const urlCampaignId =
+    searchParams.get("campaign") ?? searchParams.get("campaignId") ?? selectedCampaignId ?? null;
   const [campaigns, setCampaigns] = useState<EnvioSummary[]>([]);
-  const [selectedId, setSelectedId] = useState<string | null>(selectedCampaignId ?? null);
+  const [selectedId, setSelectedId] = useState<string | null>(urlCampaignId);
   const [details, setDetails] = useState<CampaignDetails | null>(null);
   const [statusFilter, setStatusFilter] = useState("all");
   const [periodFilter, setPeriodFilter] = useState("all");
@@ -163,6 +166,7 @@ export function EnviosClient({ selectedCampaignId }: { selectedCampaignId?: stri
     const response = await fetch(`/api/envios?${params.toString()}`, { cache: "no-store" });
     const data = (await response.json()) as { campaigns: EnvioSummary[] };
     setCampaigns(data.campaigns);
+    return data.campaigns;
   }
 
   async function loadDetails(campaignId: string) {
@@ -181,6 +185,22 @@ export function EnviosClient({ selectedCampaignId }: { selectedCampaignId?: stri
     if (selectedId) await loadDetails(selectedId);
   }
 
+  async function selectCampaign(campaignId: string, updateUrl = true) {
+    setSelectedId(campaignId);
+    setDetails(null);
+    setError(null);
+
+    if (updateUrl) {
+      const params = new URLSearchParams(searchParams.toString());
+      params.set("campaign", campaignId);
+      params.delete("campaignId");
+      if (activeInstanceId) params.set("instanceId", activeInstanceId);
+      router.replace(`/envios?${params.toString()}`, { scroll: false });
+    }
+
+    await loadDetails(campaignId);
+  }
+
   async function refreshWithErrorHandling() {
     setBusy(true);
     setError(null);
@@ -197,17 +217,37 @@ export function EnviosClient({ selectedCampaignId }: { selectedCampaignId?: stri
     void (async () => {
       try {
         await loadCampaigns();
-        if (selectedCampaignId) {
-          setSelectedId(selectedCampaignId);
-          await loadDetails(selectedCampaignId);
-        }
       } catch (loadError) {
         setError(loadError instanceof Error ? loadError.message : "Erro inesperado");
       } finally {
         setLoading(false);
       }
     })();
-  }, [selectedCampaignId, activeInstanceId]);
+  }, [activeInstanceId]);
+
+  useEffect(() => {
+    if (loading) {
+      return;
+    }
+
+    const requestedId = urlCampaignId;
+    const targetCampaign =
+      (requestedId ? campaigns.find((campaign) => campaign.id === requestedId) : null) ??
+      campaigns[0] ??
+      null;
+
+    if (!targetCampaign) {
+      setSelectedId(null);
+      setDetails(null);
+      return;
+    }
+
+    if (selectedId === targetCampaign.id && details?.id === targetCampaign.id) {
+      return;
+    }
+
+    void selectCampaign(targetCampaign.id, false);
+  }, [campaigns, loading, urlCampaignId]);
 
   async function runCampaignAction(campaignId: string, action: "start" | "pause" | "resume" | "cancel") {
     setBusy(true);
@@ -350,10 +390,7 @@ export function EnviosClient({ selectedCampaignId }: { selectedCampaignId?: stri
                       <button
                         className="button secondary compact-button"
                         type="button"
-                        onClick={() => {
-                          setSelectedId(campaign.id);
-                          void loadDetails(campaign.id);
-                        }}
+                        onClick={() => void selectCampaign(campaign.id)}
                       >
                         Ver detalhes
                       </button>

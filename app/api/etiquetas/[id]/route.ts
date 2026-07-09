@@ -4,7 +4,7 @@ import { prisma } from "@/src/lib/prisma/client";
 import { getLastSendByJids } from "@/src/lib/labels/send-stats";
 import { getActiveInstanceIdFromSearchOrDefault } from "@/src/lib/server/whatsapp-instances";
 import { getIndividualWhatsappChatWhere } from "@/src/lib/whatsapp/individual-chat-filter";
-import { isLidJid, resolveContactDisplay } from "@/src/lib/whatsapp/contact-display";
+import { resolveContactDisplay } from "@/src/lib/whatsapp/contact-display";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -153,6 +153,8 @@ export async function GET(
   const failedCount = Array.from(allLastSend.values()).filter((item) => item.status === "failed").length;
   const pendingCount = Array.from(allLastSend.values()).filter((item) => item.status === "pending").length;
   const neverSentCount = Math.max(0, allContactAssociations.length - allLastSend.size);
+  const eligibleCount = allContactAssociations.length;
+  const ineligibleCount = 0;
 
   return NextResponse.json({
     label: {
@@ -170,7 +172,9 @@ export async function GET(
       sentCount,
       failedCount,
       pendingCount,
-      neverSentCount
+      neverSentCount,
+      eligibleCount,
+      ineligibleCount
     },
     pagination: {
       page,
@@ -189,11 +193,6 @@ export async function GET(
         pushName: contact?.pushName,
         phone: contact?.phone
       });
-      const isUnresolvedLid =
-        isLidJid(chat.jid) &&
-        !display.displayPhone &&
-        display.displayName === "Contato sem número resolvido";
-
       return {
         chatId: chat.id,
         jid: chat.jid,
@@ -202,8 +201,8 @@ export async function GET(
         displayPhone: display.displayPhone,
         displaySubtitle: display.displaySubtitle,
         rawJid: display.rawJid,
-        isEligible: !isUnresolvedLid,
-        skippedReason: isUnresolvedLid ? "unresolved_lid" : null,
+        isEligible: true,
+        skippedReason: null,
         isGroup: chat.isGroup,
         lastMessageAt: chat.lastMessageAt,
         updatedAt: chat.updatedAt,

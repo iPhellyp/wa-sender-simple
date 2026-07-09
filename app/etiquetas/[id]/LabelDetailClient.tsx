@@ -20,6 +20,8 @@ type LabelDetailResponse = {
     failedCount: number;
     pendingCount: number;
     neverSentCount: number;
+    eligibleCount: number;
+    ineligibleCount: number;
   };
   pagination: {
     page: number;
@@ -189,6 +191,14 @@ export function LabelDetailClient({ labelId }: { labelId: string }) {
           <article className="metric-card">
             <span>Contatos individuais</span>
             <strong>{data?.metrics.contactCount ?? 0}</strong>
+          </article>
+          <article className="metric-card">
+            <span>Elegiveis</span>
+            <strong>{data?.metrics.eligibleCount ?? 0}</strong>
+          </article>
+          <article className="metric-card">
+            <span>Nao elegiveis</span>
+            <strong>{data?.metrics.ineligibleCount ?? 0}</strong>
           </article>
           <article className="metric-card">
             <span>Grupos ignorados</span>
