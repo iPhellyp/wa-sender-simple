@@ -663,6 +663,9 @@ export function CampaignsClient({
                     <div className="row-meta">
                       <span>{selectedLabel?.name ?? "Etiqueta"}: {labelAudience?.eligible ?? 0} elegiveis</span>
                       <span>{labelAudience?.skipped ?? 0} ignorados</span>
+                      {(labelAudience?.skippedReasons.unresolved_lid ?? 0) > 0 ? (
+                        <span>{labelAudience?.skippedReasons.unresolved_lid} sem número</span>
+                      ) : null}
                     </div>
                     <ul className="list-plain">
                       {(labelAudience?.recipientsPreview ?? []).map((recipient) => (

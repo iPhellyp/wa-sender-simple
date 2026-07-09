@@ -4,7 +4,7 @@ import { normalizeBrazilPhone } from "../phone/normalize";
 import { isGroupJid, normalizeChatJid } from "../baileys/sync";
 import { WHATSAPP_X1_ONLY_MODE } from "../whatsapp/jid";
 import { isEligibleIndividualWhatsappChat } from "../whatsapp/individual-chat-filter";
-import { resolveContactDisplay } from "../whatsapp/contact-display";
+import { isLidJid, resolveContactDisplay } from "../whatsapp/contact-display";
 
 export type SkippedReason =
   | "group_excluded"
@@ -15,6 +15,7 @@ export type SkippedReason =
   | "already_sent_recently"
   | "invalid_jid"
   | "duplicate_in_campaign"
+  | "unresolved_lid"
   | "max_recipients_reached";
 
 export type AudienceJidType = "phone_jid" | "lid_jid" | "group_jid";
@@ -303,6 +304,7 @@ function emptySkippedReasons(): Record<SkippedReason, number> {
     already_sent_recently: 0,
     invalid_jid: 0,
     duplicate_in_campaign: 0,
+    unresolved_lid: 0,
     max_recipients_reached: 0
   };
 }
@@ -381,6 +383,24 @@ export async function buildLabelAudience(options: {
       updatedAt: "desc"
     }
   });
+  const associationJids = Array.from(new Set(associations.map((association) => association.chat.jid)));
+  const contacts = associationJids.length
+    ? await prisma.whatsappContact.findMany({
+        where: {
+          instanceId: options.instanceId,
+          jid: {
+            in: associationJids
+          }
+        },
+        select: {
+          jid: true,
+          name: true,
+          pushName: true,
+          phone: true
+        }
+      })
+    : [];
+  const contactByJid = new Map(contacts.map((contact) => [contact.jid, contact]));
 
   const skippedReasons = emptySkippedReasons();
   const seenJids = new Set<string>();
@@ -403,6 +423,15 @@ export async function buildLabelAudience(options: {
 
     const { jid, jidType, phoneNormalized } = resolvedJid;
     const isGroup = association.chat.isGroup || resolvedJid.isGroup;
+    const contact = contactByJid.get(jid);
+    const display = resolveContactDisplay({
+      jid,
+      chatName: association.chat.name,
+      name: contact?.name,
+      pushName: contact?.pushName,
+      phone: contact?.phone,
+      phoneNormalized
+    });
 
     if (seenJids.has(jid)) {
       skippedReasons.duplicate_in_campaign += 1;
@@ -437,16 +466,28 @@ export async function buildLabelAudience(options: {
       continue;
     }
 
-    if (phoneNormalized) {
-      phonesToCheck.push(phoneNormalized);
+    if (isLidJid(jid) && !display.displayPhone && display.displayName === "Contato sem número resolvido") {
+      skippedReasons.unresolved_lid += 1;
+      logRecipientSkipped("unresolved_lid");
+      continue;
+    }
+
+    const resolvedPhone = phoneNormalized ?? contact?.phone ?? null;
+
+    if (resolvedPhone) {
+      phonesToCheck.push(resolvedPhone);
     }
 
     eligibleItems.push({
       chatId: association.chat.id,
       jid,
-      name: association.chat.name,
+      name: display.displayName,
+      displayName: display.displayName,
+      displayPhone: display.displayPhone,
+      displaySubtitle: display.displaySubtitle,
+      rawJid: display.rawJid,
       isGroup,
-      phoneNormalized,
+      phoneNormalized: resolvedPhone,
       jidType
     });
   }
@@ -481,14 +522,7 @@ export async function buildLabelAudience(options: {
       continue;
     }
 
-    finalEligible.push({
-      ...item,
-      ...resolveContactDisplay({
-        jid: item.jid,
-        chatName: item.name,
-        phoneNormalized: item.phoneNormalized
-      })
-    });
+    finalEligible.push(item);
   }
 
   const skipped = associations.length - finalEligible.length;

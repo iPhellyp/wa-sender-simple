@@ -98,9 +98,16 @@ export async function POST(
   }
 
   if (audience.eligible === 0) {
+    const onlyUnresolvedLid =
+      audience.total > 0 &&
+      audience.skippedReasons.unresolved_lid > 0 &&
+      audience.skippedReasons.unresolved_lid === audience.skipped;
+
     return NextResponse.json(
       {
-        error: "Nenhum destinatario elegivel para esta etiqueta com os filtros atuais",
+        error: onlyUnresolvedLid
+          ? "Nenhum contato elegível. A etiqueta contém apenas contatos sem número resolvido."
+          : "Nenhum destinatario elegivel para esta etiqueta com os filtros atuais",
         audience
       },
       { status: 400 }

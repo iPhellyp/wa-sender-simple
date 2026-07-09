@@ -35,6 +35,8 @@ type LabelDetailResponse = {
     displayPhone: string | null;
     displaySubtitle: string | null;
     rawJid: string | null;
+    isEligible: boolean;
+    skippedReason: string | null;
     isGroup: boolean;
     lastMessageAt: string | null;
     updatedAt: string;
@@ -134,7 +136,8 @@ export function LabelDetailClient({ labelId }: { labelId: string }) {
   }, [activeInstanceId, labelId, page, search]);
 
   const conversations = useMemo(() => data?.conversations ?? [], [data]);
-  const selected = conversations.filter((conversation) => selectedIds.has(conversation.chatId));
+  const eligibleConversations = conversations.filter((conversation) => conversation.isEligible);
+  const selected = eligibleConversations.filter((conversation) => selectedIds.has(conversation.chatId));
   const exceedsQueryLimit = selected.length > MAX_QUERY_CHAT_IDS;
   const selectedCampaignHref =
     selected.length > 0 && !exceedsQueryLimit
@@ -220,9 +223,9 @@ export function LabelDetailClient({ labelId }: { labelId: string }) {
         <div className="button-row">
           <button
             className="button secondary"
-            disabled={conversations.length === 0}
+            disabled={eligibleConversations.length === 0}
             type="button"
-            onClick={() => setSelectedIds(new Set(conversations.map((item) => item.chatId)))}
+            onClick={() => setSelectedIds(new Set(eligibleConversations.map((item) => item.chatId)))}
           >
             Selecionar visiveis
           </button>
@@ -264,6 +267,7 @@ export function LabelDetailClient({ labelId }: { labelId: string }) {
               <label className="catalog-checkbox" title="Selecionar contato">
                 <input
                   checked={selectedIds.has(conversation.chatId)}
+                  disabled={!conversation.isEligible}
                   type="checkbox"
                   onChange={() => toggle(conversation.chatId)}
                 />
@@ -286,6 +290,10 @@ export function LabelDetailClient({ labelId }: { labelId: string }) {
                     {conversation.rawJid?.endsWith("@lid") && !conversation.displayPhone ? (
                       <span className="muted">lid</span>
                     ) : null}
+                    {!conversation.isEligible ? <span className="status-badge danger">não elegível</span> : null}
+                    {conversation.skippedReason === "unresolved_lid" ? (
+                      <span className="muted">sem número</span>
+                    ) : null}
                   </span>
                 </span>
               </span>
@@ -301,12 +309,18 @@ export function LabelDetailClient({ labelId }: { labelId: string }) {
                   >
                     Abrir
                   </Link>
-                  <Link
-                    className="button secondary compact-button"
-                    href={appendInstanceIdToHref(`/campanhas?chatIds=${conversation.chatId}`, activeInstanceId)}
-                  >
-                    Campanha
-                  </Link>
+                  {conversation.isEligible ? (
+                    <Link
+                      className="button secondary compact-button"
+                      href={appendInstanceIdToHref(`/campanhas?chatIds=${conversation.chatId}`, activeInstanceId)}
+                    >
+                      Campanha
+                    </Link>
+                  ) : (
+                    <button className="button secondary compact-button" disabled type="button">
+                      Campanha
+                    </button>
+                  )}
                   {conversation.error ? <span className="send-error">{conversation.error}</span> : null}
               </span>
             </article>

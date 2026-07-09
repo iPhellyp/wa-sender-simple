@@ -4,7 +4,7 @@ import { prisma } from "@/src/lib/prisma/client";
 import { getLastSendByJids } from "@/src/lib/labels/send-stats";
 import { getActiveInstanceIdFromSearchOrDefault } from "@/src/lib/server/whatsapp-instances";
 import { getIndividualWhatsappChatWhere } from "@/src/lib/whatsapp/individual-chat-filter";
-import { resolveContactDisplay } from "@/src/lib/whatsapp/contact-display";
+import { isLidJid, resolveContactDisplay } from "@/src/lib/whatsapp/contact-display";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -189,6 +189,10 @@ export async function GET(
         pushName: contact?.pushName,
         phone: contact?.phone
       });
+      const isUnresolvedLid =
+        isLidJid(chat.jid) &&
+        !display.displayPhone &&
+        display.displayName === "Contato sem número resolvido";
 
       return {
         chatId: chat.id,
@@ -198,6 +202,8 @@ export async function GET(
         displayPhone: display.displayPhone,
         displaySubtitle: display.displaySubtitle,
         rawJid: display.rawJid,
+        isEligible: !isUnresolvedLid,
+        skippedReason: isUnresolvedLid ? "unresolved_lid" : null,
         isGroup: chat.isGroup,
         lastMessageAt: chat.lastMessageAt,
         updatedAt: chat.updatedAt,
