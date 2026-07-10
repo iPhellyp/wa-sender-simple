@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { CampaignRecipientStatus } from "@prisma/client";
 import { renderCampaignMessage } from "@/src/lib/campaigns/message-template";
+import {
+  CampaignMediaError,
+  createCampaignWithOptionalMedia,
+  parseCampaignCreateRequest,
+  serializeCampaignForApi
+} from "@/src/lib/campaigns/media";
 import { parseCampaignScheduleInput } from "@/src/lib/campaigns/scheduling-input";
 import { buildCampaignDedupeKey } from "@/src/lib/labels/audience";
 import { prisma } from "@/src/lib/prisma/client";
@@ -30,6 +36,14 @@ function serializeAdvancedSettings(value: unknown) {
   }
 
   return `settings:${JSON.stringify(value)}`;
+}
+
+function campaignMediaErrorResponse(error: unknown) {
+  if (error instanceof CampaignMediaError) {
+    return NextResponse.json({ error: error.message }, { status: error.statusCode });
+  }
+
+  throw error;
 }
 
 export async function GET(request: NextRequest) {
@@ -62,16 +76,26 @@ export async function GET(request: NextRequest) {
 
   return NextResponse.json({
     instanceId,
-    campaigns: campaigns.map((campaign) => ({
-      ...campaign,
-      recipientCount: campaign.recipients.length,
-      recipientStatusCounts: countRecipientsByStatus(campaign.recipients)
-    }))
+    campaigns: campaigns.map((campaign) =>
+      serializeCampaignForApi({
+        ...campaign,
+        recipientCount: campaign.recipients.length,
+        recipientStatusCounts: countRecipientsByStatus(campaign.recipients)
+      })
+    )
   });
 }
 
 export async function POST(request: NextRequest) {
-  const payload = (await request.json()) as {
+  let parsedRequest: Awaited<ReturnType<typeof parseCampaignCreateRequest>>;
+
+  try {
+    parsedRequest = await parseCampaignCreateRequest(request);
+  } catch (error) {
+    return campaignMediaErrorResponse(error);
+  }
+
+  const payload = parsedRequest.payload as {
     name?: string;
     defaultMessage?: string | null;
     intervalMinutes?: number;
@@ -175,38 +199,50 @@ export async function POST(request: NextRequest) {
     }
 
     const dedupeKey = `chatIds:${Date.now()}`;
-    const campaign = await prisma.campaign.create({
-      data: {
-        instanceId,
-        name,
-        defaultMessage,
-        intervalMinutes,
-        status: scheduleInput.status,
-        scheduledAt: scheduleInput.scheduledAt,
-        targetMode: "chatIds",
-        excludeGroups: true,
-        dedupeKey,
-        maxRecipients: requestedMaxRecipients ?? individualChats.length,
-        sendWindowStart: advancedSettings,
-        recipients: {
-          create: individualChats.slice(0, requestedMaxRecipients ?? individualChats.length).map((chat) => ({
+    try {
+      const result = await createCampaignWithOptionalMedia(parsedRequest.mediaFile, () =>
+        prisma.campaign.create({
+          data: {
             instanceId,
-            chatId: chat.id,
-            jid: chat.jid,
-            messageFinal: renderCampaignMessage(defaultMessage, {
-              name: chat.name,
-              source: "contatos-whatsapp"
-            }),
-            dedupeKey: buildCampaignDedupeKey(dedupeKey, chat.jid)
-          }))
-        }
-      },
-      include: {
-        recipients: true
-      }
-    });
+            name,
+            defaultMessage,
+            intervalMinutes,
+            status: scheduleInput.status,
+            scheduledAt: scheduleInput.scheduledAt,
+            targetMode: "chatIds",
+            excludeGroups: true,
+            dedupeKey,
+            maxRecipients: requestedMaxRecipients ?? individualChats.length,
+            sendWindowStart: advancedSettings,
+            recipients: {
+              create: individualChats.slice(0, requestedMaxRecipients ?? individualChats.length).map((chat) => ({
+                instanceId,
+                chatId: chat.id,
+                jid: chat.jid,
+                messageFinal: renderCampaignMessage(defaultMessage, {
+                  name: chat.name,
+                  source: "contatos-whatsapp"
+                }),
+                dedupeKey: buildCampaignDedupeKey(dedupeKey, chat.jid)
+              }))
+            }
+          },
+          include: {
+            recipients: true
+          }
+        })
+      );
 
-    return NextResponse.json(campaign, { status: 201 });
+      return NextResponse.json(
+        serializeCampaignForApi({
+          ...result.campaign,
+          ...(result.media ?? {})
+        }),
+        { status: 201 }
+      );
+    } catch (error) {
+      return campaignMediaErrorResponse(error);
+    }
   }
 
   const contacts = await prisma.contact.findMany({
@@ -242,28 +278,40 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const campaign = await prisma.campaign.create({
-    data: {
-      instanceId,
-      name,
-      defaultMessage: defaultMessage || null,
-      intervalMinutes,
-      status: scheduleInput.status,
-      scheduledAt: scheduleInput.scheduledAt,
-      maxRecipients: requestedMaxRecipients,
-      sendWindowStart: advancedSettings,
-      recipients: {
-        create: uniqueContactsByPhone.map((contact) => ({
+  try {
+    const result = await createCampaignWithOptionalMedia(parsedRequest.mediaFile, () =>
+      prisma.campaign.create({
+        data: {
           instanceId,
-          contactId: contact.id,
-          messageFinal: renderCampaignMessage(defaultMessage || contact.message?.trim() || "", contact)
-        }))
-      }
-    },
-    include: {
-      recipients: true
-    }
-  });
+          name,
+          defaultMessage: defaultMessage || null,
+          intervalMinutes,
+          status: scheduleInput.status,
+          scheduledAt: scheduleInput.scheduledAt,
+          maxRecipients: requestedMaxRecipients,
+          sendWindowStart: advancedSettings,
+          recipients: {
+            create: uniqueContactsByPhone.map((contact) => ({
+              instanceId,
+              contactId: contact.id,
+              messageFinal: renderCampaignMessage(defaultMessage || contact.message?.trim() || "", contact)
+            }))
+          }
+        },
+        include: {
+          recipients: true
+        }
+      })
+    );
 
-  return NextResponse.json(campaign, { status: 201 });
+    return NextResponse.json(
+      serializeCampaignForApi({
+        ...result.campaign,
+        ...(result.media ?? {})
+      }),
+      { status: 201 }
+    );
+  } catch (error) {
+    return campaignMediaErrorResponse(error);
+  }
 }

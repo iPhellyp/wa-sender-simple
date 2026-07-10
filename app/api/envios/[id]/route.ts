@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/src/lib/prisma/client";
 import { getActiveInstanceIdFromSearchOrDefault } from "@/src/lib/server/whatsapp-instances";
 import { resolveContactDisplay } from "@/src/lib/whatsapp/contact-display";
+import { serializeCampaignForApi } from "@/src/lib/campaigns/media";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -135,7 +136,7 @@ export async function GET(
 
   return NextResponse.json({
     campaign: {
-      ...campaign,
+      ...serializeCampaignForApi(campaign),
       recipients
     }
   });

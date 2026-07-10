@@ -76,6 +76,11 @@ export async function GET(request: NextRequest) {
         createdAt: campaign.createdAt,
         startedAt: campaign.startedAt,
         completedAt: campaign.completedAt,
+        hasMedia: Boolean(campaign.mediaPath),
+        mediaKind: campaign.mediaKind,
+        mediaOriginalName: campaign.mediaOriginalName,
+        mediaMimeType: campaign.mediaMimeType,
+        mediaSizeBytes: campaign.mediaSizeBytes,
         recipientCount: campaign.recipients.length,
         recipientStatusCounts: counts.statusCounts,
         skippedReasonCounts: counts.skippedReasons

@@ -18,6 +18,58 @@
   --mobile-bottom-nav-height: 68px;
 }
 
+.campaign-media-field {
+  gap: 8px;
+}
+
+.campaign-media-selection {
+  align-items: center;
+  border: 1px solid var(--line);
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 120px minmax(0, 1fr) auto;
+  padding: 12px;
+}
+
+.campaign-media-selection > div:not(.campaign-document-preview) {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.campaign-media-selection strong,
+.campaign-media-selection span {
+  overflow-wrap: anywhere;
+}
+
+.campaign-media-preview,
+.campaign-document-preview {
+  aspect-ratio: 4 / 3;
+  background: #f4f7f5;
+  border: 1px solid var(--line);
+  display: grid;
+  max-height: 110px;
+  object-fit: contain;
+  place-content: center;
+  width: 120px;
+}
+
+.campaign-document-preview {
+  gap: 4px;
+  text-align: center;
+}
+
+@media (max-width: 760px) {
+  .campaign-media-selection {
+    grid-template-columns: 1fr;
+  }
+
+  .campaign-media-preview,
+  .campaign-document-preview {
+    width: min(100%, 240px);
+  }
+}
+
 * {
   box-sizing: border-box;
 }

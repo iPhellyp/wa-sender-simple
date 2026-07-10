@@ -45,6 +45,11 @@ type CampaignSummary = {
   intervalMinutes: number;
   status: string;
   scheduledAt: string | null;
+  hasMedia: boolean;
+  mediaKind: string | null;
+  mediaOriginalName: string | null;
+  mediaMimeType: string | null;
+  mediaSizeBytes: number | null;
   recipientCount: number;
   recipientStatusCounts: Record<string, number>;
 };
@@ -93,6 +98,13 @@ type CampaignPrefillContext = {
 type AudienceMode = "label" | "catalog" | "contacts";
 type DelayMode = "fixed_seconds" | "fixed_minutes" | "random_range";
 type SendMode = "NOW" | "SCHEDULED";
+type CampaignMediaKind = "IMAGE" | "VIDEO" | "DOCUMENT";
+
+type ClientMediaDefinition = {
+  kind: CampaignMediaKind;
+  extensions: readonly string[];
+  maxSizeBytes: number;
+};
 
 const steps = ["Publico", "Mensagem", "Seguranca", "Revisao"];
 const messageTokens = [
@@ -105,6 +117,30 @@ const messageTokens = [
   "{{lista}}",
   "{Oi|Ola|Bom dia}"
 ];
+const MB = 1024 * 1024;
+const CAMPAIGN_MEDIA_ACCEPT = ".jpg,.jpeg,.png,.webp,.mp4,.pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.zip";
+const CLIENT_MEDIA_TYPES: Record<string, ClientMediaDefinition> = {
+  "image/jpeg": { kind: "IMAGE", extensions: [".jpg", ".jpeg"], maxSizeBytes: 10 * MB },
+  "image/png": { kind: "IMAGE", extensions: [".png"], maxSizeBytes: 10 * MB },
+  "image/webp": { kind: "IMAGE", extensions: [".webp"], maxSizeBytes: 10 * MB },
+  "video/mp4": { kind: "VIDEO", extensions: [".mp4"], maxSizeBytes: 20 * MB },
+  "application/pdf": { kind: "DOCUMENT", extensions: [".pdf"], maxSizeBytes: 25 * MB },
+  "application/msword": { kind: "DOCUMENT", extensions: [".doc"], maxSizeBytes: 25 * MB },
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": {
+    kind: "DOCUMENT",
+    extensions: [".docx"],
+    maxSizeBytes: 25 * MB
+  },
+  "application/vnd.ms-excel": { kind: "DOCUMENT", extensions: [".xls"], maxSizeBytes: 25 * MB },
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {
+    kind: "DOCUMENT",
+    extensions: [".xlsx"],
+    maxSizeBytes: 25 * MB
+  },
+  "text/csv": { kind: "DOCUMENT", extensions: [".csv"], maxSizeBytes: 25 * MB },
+  "text/plain": { kind: "DOCUMENT", extensions: [".txt"], maxSizeBytes: 25 * MB },
+  "application/zip": { kind: "DOCUMENT", extensions: [".zip"], maxSizeBytes: 25 * MB }
+};
 
 function statusClass(status: string) {
   if (["sent", "completed", "connected"].includes(status)) return "success";
@@ -151,6 +187,38 @@ function formatLocalDateTime(value: string | null | undefined) {
   if (!value) return "-";
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? "-" : date.toLocaleString("pt-BR");
+}
+
+function formatFileSize(sizeBytes: number | null | undefined) {
+  if (!sizeBytes) return "0 KB";
+  if (sizeBytes >= MB) return `${(sizeBytes / MB).toFixed(1)} MB`;
+  return `${Math.max(1, Math.round(sizeBytes / 1024))} KB`;
+}
+
+function getFileExtension(filename: string) {
+  const dotIndex = filename.lastIndexOf(".");
+  return dotIndex >= 0 ? filename.slice(dotIndex).toLowerCase() : "";
+}
+
+function validateClientMedia(file: File) {
+  const definition = CLIENT_MEDIA_TYPES[file.type.toLowerCase()];
+
+  if (!definition) {
+    return { ok: false as const, error: "Tipo de arquivo nao permitido." };
+  }
+
+  if (!definition.extensions.includes(getFileExtension(file.name))) {
+    return { ok: false as const, error: "Extensao incompativel com o tipo do arquivo." };
+  }
+
+  if (file.size <= 0 || file.size > definition.maxSizeBytes) {
+    return {
+      ok: false as const,
+      error: `O arquivo deve ter ate ${definition.maxSizeBytes / MB} MB.`
+    };
+  }
+
+  return { ok: true as const, definition };
 }
 
 function audienceLabel(mode: AudienceMode) {
@@ -223,6 +291,10 @@ export function CampaignsClient({
   const [batchLimit, setBatchLimit] = useState(100);
   const [sendMode, setSendMode] = useState<SendMode>("NOW");
   const [scheduledLocalDateTime, setScheduledLocalDateTime] = useState("");
+  const [mediaFile, setMediaFile] = useState<File | null>(null);
+  const [mediaKind, setMediaKind] = useState<CampaignMediaKind | null>(null);
+  const [mediaPreviewUrl, setMediaPreviewUrl] = useState<string | null>(null);
+  const [mediaError, setMediaError] = useState<string | null>(null);
   const [testPhone, setTestPhone] = useState("");
   const [testBusy, setTestBusy] = useState(false);
   const [testFeedback, setTestFeedback] = useState<{ tone: "success" | "error"; text: string } | null>(null);
@@ -240,6 +312,7 @@ export function CampaignsClient({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const messageTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const mediaInputRef = useRef<HTMLInputElement | null>(null);
   const previousInstanceIdRef = useRef(activeInstanceId);
 
   const selectableContacts = useMemo(
@@ -266,6 +339,7 @@ export function CampaignsClient({
     intervalMinutes >= 1 &&
     audienceCount > 0 &&
     scheduleValidation.ok &&
+    !mediaError &&
     securityConfirmed;
   const sampleContact = prefilledContacts[0] ?? contacts[0] ?? null;
   const renderedPreviewMessage = previewMessage || (
@@ -284,6 +358,41 @@ export function CampaignsClient({
 
   function generatePreview() {
     setPreviewMessage(renderCampaignMessage(message, sampleContact));
+  }
+
+  function clearMediaSelection() {
+    setMediaFile(null);
+    setMediaKind(null);
+    setMediaPreviewUrl(null);
+    setMediaError(null);
+    if (mediaInputRef.current) mediaInputRef.current.value = "";
+  }
+
+  function handleMediaSelection(file: File | null) {
+    if (!file) {
+      clearMediaSelection();
+      return;
+    }
+
+    const validation = validateClientMedia(file);
+
+    if (!validation.ok) {
+      setMediaFile(null);
+      setMediaKind(null);
+      setMediaPreviewUrl(null);
+      setMediaError(validation.error);
+      if (mediaInputRef.current) mediaInputRef.current.value = "";
+      return;
+    }
+
+    setMediaFile(file);
+    setMediaKind(validation.definition.kind);
+    setMediaError(null);
+    setMediaPreviewUrl(
+      validation.definition.kind === "IMAGE" || validation.definition.kind === "VIDEO"
+        ? URL.createObjectURL(file)
+        : null
+    );
   }
 
   function insertMessageToken(token: string) {
@@ -408,12 +517,23 @@ export function CampaignsClient({
       setPreviewMessage("");
       setSendMode("NOW");
       setScheduledLocalDateTime("");
+      setMediaFile(null);
+      setMediaKind(null);
+      setMediaPreviewUrl(null);
+      setMediaError(null);
+      if (mediaInputRef.current) mediaInputRef.current.value = "";
     }
 
     void refresh().catch((loadError) => {
       setError(loadError instanceof Error ? loadError.message : "Erro inesperado");
     });
   }, [activeInstanceId]);
+
+  useEffect(() => {
+    return () => {
+      if (mediaPreviewUrl) URL.revokeObjectURL(mediaPreviewUrl);
+    };
+  }, [mediaPreviewUrl]);
 
   useEffect(() => {
     if (audienceMode !== "label" || !selectedLabelId) {
@@ -492,39 +612,52 @@ export function CampaignsClient({
           batchLimit
         }
       };
-      const response =
+      const endpoint =
         audienceMode === "label"
-          ? await fetch(`/api/etiquetas/${selectedLabelId}/campaigns`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                instanceId: activeInstanceId,
-                name: body.name,
-                message: body.message,
-                intervalMinutes,
-                advancedSettings: body.advancedSettings,
-                maxRecipients: batchLimit,
-                sendMode: body.sendMode,
-                scheduledAt: body.scheduledAt,
-                startNow: false
-              })
-            })
-          : await fetch("/api/campaigns", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                name: body.name,
-                defaultMessage: body.defaultMessage,
-                intervalMinutes,
-                advancedSettings: body.advancedSettings,
-                maxRecipients: batchLimit,
-                instanceId: activeInstanceId,
-                sendMode: body.sendMode,
-                scheduledAt: body.scheduledAt,
-                contactIds: audienceMode === "contacts" ? Array.from(selectedContacts) : [],
-                chatIds: audienceMode === "catalog" ? Array.from(selectedCatalogChatIds) : []
-              })
-            });
+          ? `/api/etiquetas/${selectedLabelId}/campaigns`
+          : "/api/campaigns";
+      const requestPayload =
+        audienceMode === "label"
+          ? {
+              instanceId: activeInstanceId,
+              name: body.name,
+              message: body.message,
+              intervalMinutes,
+              advancedSettings: body.advancedSettings,
+              maxRecipients: batchLimit,
+              sendMode: body.sendMode,
+              scheduledAt: body.scheduledAt,
+              startNow: false
+            }
+          : {
+              name: body.name,
+              defaultMessage: body.defaultMessage,
+              intervalMinutes,
+              advancedSettings: body.advancedSettings,
+              maxRecipients: batchLimit,
+              instanceId: activeInstanceId,
+              sendMode: body.sendMode,
+              scheduledAt: body.scheduledAt,
+              contactIds: audienceMode === "contacts" ? Array.from(selectedContacts) : [],
+              chatIds: audienceMode === "catalog" ? Array.from(selectedCatalogChatIds) : []
+            };
+      let response: Response;
+
+      if (mediaFile) {
+        const formData = new FormData();
+        formData.append("payload", JSON.stringify(requestPayload));
+        formData.append("media", mediaFile);
+        response = await fetch(endpoint, {
+          method: "POST",
+          body: formData
+        });
+      } else {
+        response = await fetch(endpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(requestPayload)
+        });
+      }
       const data = await response.json();
 
       if (!response.ok) throw new Error(String(data.error ?? "Erro ao criar campanha"));
@@ -533,6 +666,7 @@ export function CampaignsClient({
       setCreatedCampaignId(campaignId || null);
       setCreatedMessage(String(data.message ?? "Campanha criada em rascunho."));
       setSelectedCampaignId(campaignId || null);
+      clearMediaSelection();
       await refresh();
     } catch (createError) {
       setError(createError instanceof Error ? createError.message : "Erro inesperado");
@@ -873,6 +1007,59 @@ export function CampaignsClient({
                     <span className="muted">O preview usa variaveis e spintax com dados de exemplo.</span>
                   </div>
                 </div>
+                <div className="field campaign-media-field">
+                  <label htmlFor="campaign-media">Anexo opcional</label>
+                  <span className="muted">
+                    Adicione uma imagem, video ou documento. E permitido um arquivo por campanha.
+                  </span>
+                  <input
+                    accept={CAMPAIGN_MEDIA_ACCEPT}
+                    className="input"
+                    id="campaign-media"
+                    ref={mediaInputRef}
+                    type="file"
+                    onChange={(event) => handleMediaSelection(event.target.files?.[0] ?? null)}
+                  />
+                  <span className="muted">
+                    Imagens ate 10 MB, MP4 ate 20 MB e documentos ate 25 MB.
+                  </span>
+                  {mediaError ? <span className="send-error">{mediaError}</span> : null}
+                  {mediaFile && mediaKind ? (
+                    <div className="campaign-media-selection">
+                      {mediaKind === "IMAGE" && mediaPreviewUrl ? (
+                        <img
+                          alt={`Preview de ${mediaFile.name}`}
+                          className="campaign-media-preview"
+                          src={mediaPreviewUrl}
+                        />
+                      ) : null}
+                      {mediaKind === "VIDEO" && mediaPreviewUrl ? (
+                        <video className="campaign-media-preview" controls preload="metadata">
+                          <source src={mediaPreviewUrl} type={mediaFile.type} />
+                        </video>
+                      ) : null}
+                      {mediaKind === "DOCUMENT" ? (
+                        <div className="campaign-document-preview">
+                          <strong>{getFileExtension(mediaFile.name).replace(".", "").toUpperCase()}</strong>
+                          <span>Documento</span>
+                        </div>
+                      ) : null}
+                      <div>
+                        <strong>{mediaFile.name}</strong>
+                        <span className="muted">
+                          {mediaKind} | {formatFileSize(mediaFile.size)}
+                        </span>
+                      </div>
+                      <button
+                        className="button secondary compact-button"
+                        type="button"
+                        onClick={clearMediaSelection}
+                      >
+                        Remover
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
                 <div className="field">
                   <span>Quando enviar</span>
                   <div className="filter-bar">
@@ -1066,6 +1253,12 @@ export function CampaignsClient({
                     <li>Limite do lote: {batchLimit}</li>
                     <li>Mensagem: {message.trim() ? "preenchida" : "pendente"}</li>
                     <li>
+                      Anexo: {mediaFile && mediaKind
+                        ? `${mediaFile.name} | ${mediaKind} | ${formatFileSize(mediaFile.size)}`
+                        : "sem anexo"}
+                    </li>
+                    <li>Legenda futura: {mediaFile ? "mensagem da campanha" : "nao aplicavel"}</li>
+                    <li>
                       Envio: {sendMode === "NOW"
                         ? "imediato apos inicio manual"
                         : `agendada para ${formatLocalDateTime(scheduledLocalDateTime)}`}
@@ -1101,7 +1294,7 @@ export function CampaignsClient({
                 className="button"
                 disabled={
                   step === steps.length - 1 ||
-                  (step === 1 && !scheduleValidation.ok)
+                  (step === 1 && (!scheduleValidation.ok || Boolean(mediaError)))
                 }
                 type="button"
                 onClick={() => setStep((current) => Math.min(steps.length - 1, current + 1))}
@@ -1139,6 +1332,10 @@ export function CampaignsClient({
                   ? "Imediato"
                   : formatLocalDateTime(scheduledLocalDateTime)}
               </span>
+            </div>
+            <div className="meta-row">
+              <span>Anexo</span>
+              <span>{mediaFile ? `${mediaKind} | ${formatFileSize(mediaFile.size)}` : "Nenhum"}</span>
             </div>
           </div>
           <div className="wa-preview">
@@ -1204,6 +1401,11 @@ export function CampaignsClient({
                       {campaign.status === "scheduled" ? (
                         <span className="muted">
                           {formatLocalDateTime(campaign.scheduledAt)}
+                        </span>
+                      ) : null}
+                      {campaign.hasMedia ? (
+                        <span className="muted">
+                          Anexo: {campaign.mediaKind} | {campaign.mediaOriginalName} | {formatFileSize(campaign.mediaSizeBytes)}
                         </span>
                       ) : null}
                     </td>
@@ -1282,6 +1484,11 @@ export function CampaignsClient({
                   <span className="muted">{campaign.targetLabel?.name ?? campaignAudienceLabel(campaign.targetMode)}</span>
                   {campaign.status === "scheduled" ? (
                     <span className="muted">{formatLocalDateTime(campaign.scheduledAt)}</span>
+                  ) : null}
+                  {campaign.hasMedia ? (
+                    <span className="muted">
+                      Anexo: {campaign.mediaKind} | {campaign.mediaOriginalName} | {formatFileSize(campaign.mediaSizeBytes)}
+                    </span>
                   ) : null}
                 </div>
                 <span className={`status-badge ${statusClass(campaign.status)}`}>

@@ -18,6 +18,11 @@ type EnvioSummary = {
   createdAt: string;
   startedAt: string | null;
   completedAt: string | null;
+  hasMedia: boolean;
+  mediaKind: string | null;
+  mediaOriginalName: string | null;
+  mediaMimeType: string | null;
+  mediaSizeBytes: number | null;
 };
 
 type RecipientDetail = {
@@ -43,6 +48,11 @@ type CampaignDetails = {
   status: string;
   targetMode: string;
   targetLabel: { id: string; name: string; color: string | null } | null;
+  hasMedia: boolean;
+  mediaKind: string | null;
+  mediaOriginalName: string | null;
+  mediaMimeType: string | null;
+  mediaSizeBytes: number | null;
   recipients: RecipientDetail[];
 };
 
@@ -76,6 +86,13 @@ function formatDate(value: string | null) {
     dateStyle: "short",
     timeStyle: "short"
   }).format(new Date(value));
+}
+
+function formatFileSize(sizeBytes: number | null) {
+  if (!sizeBytes) return "-";
+  const megabyte = 1024 * 1024;
+  if (sizeBytes >= megabyte) return `${(sizeBytes / megabyte).toFixed(1)} MB`;
+  return `${Math.max(1, Math.round(sizeBytes / 1024))} KB`;
 }
 
 function inPeriod(createdAt: string, period: string) {
@@ -411,6 +428,11 @@ export function EnviosClient({ selectedCampaignId }: { selectedCampaignId?: stri
                       <div>
                         <strong>{campaign.name}</strong>
                         <span className="muted">{getAudienceLabel(campaign)}</span>
+                        {campaign.hasMedia ? (
+                          <span className="muted">
+                            Anexo: {campaign.mediaKind} | {campaign.mediaOriginalName} | {formatFileSize(campaign.mediaSizeBytes)}
+                          </span>
+                        ) : null}
                       </div>
                       <span className={`status-badge ${statusClass(campaign.status)}`}>
                         {statusLabel(campaign.status)}
@@ -495,6 +517,11 @@ export function EnviosClient({ selectedCampaignId }: { selectedCampaignId?: stri
                   <span className="muted">
                     Publico: {selectedDetails.targetLabel?.name ?? selectedDetails.targetMode}
                   </span>
+                  {selectedDetails.hasMedia ? (
+                    <span className="muted">
+                      Anexo: {selectedDetails.mediaKind} | {selectedDetails.mediaOriginalName} | {formatFileSize(selectedDetails.mediaSizeBytes)}
+                    </span>
+                  ) : null}
                 </div>
                 <span className={`status-badge ${statusClass(selectedDetails.status)}`}>
                   {statusLabel(selectedDetails.status)}

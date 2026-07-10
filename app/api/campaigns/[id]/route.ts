@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { serializeCampaignForApi } from "@/src/lib/campaigns/media";
 import { prisma } from "@/src/lib/prisma/client";
 import { getActiveInstanceIdFromSearchOrDefault } from "@/src/lib/server/whatsapp-instances";
 
@@ -37,5 +38,5 @@ export async function GET(
     return NextResponse.json({ error: "Campanha nao encontrada" }, { status: 404 });
   }
 
-  return NextResponse.json(campaign);
+  return NextResponse.json(serializeCampaignForApi(campaign));
 }

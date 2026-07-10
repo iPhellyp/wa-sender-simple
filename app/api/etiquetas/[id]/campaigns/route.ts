@@ -1,5 +1,11 @@
 ﻿import { NextRequest, NextResponse } from "next/server";
 import { renderCampaignMessage } from "@/src/lib/campaigns/message-template";
+import {
+  CampaignMediaError,
+  createCampaignWithOptionalMedia,
+  parseCampaignCreateRequest,
+  serializeCampaignForApi
+} from "@/src/lib/campaigns/media";
 import { parseCampaignScheduleInput } from "@/src/lib/campaigns/scheduling-input";
 import { startCampaign } from "@/src/lib/campaigns/start-campaign";
 import { prisma } from "@/src/lib/prisma/client";
@@ -23,6 +29,14 @@ function serializeAdvancedSettings(value: unknown) {
   return `settings:${JSON.stringify(value)}`;
 }
 
+function campaignMediaErrorResponse(error: unknown) {
+  if (error instanceof CampaignMediaError) {
+    return NextResponse.json({ error: error.message }, { status: error.statusCode });
+  }
+
+  throw error;
+}
+
 export async function POST(
   request: NextRequest,
   context: {
@@ -30,7 +44,15 @@ export async function POST(
   }
 ) {
   const { id: labelId } = await context.params;
-  const payload = (await request.json()) as {
+  let parsedRequest: Awaited<ReturnType<typeof parseCampaignCreateRequest>>;
+
+  try {
+    parsedRequest = await parseCampaignCreateRequest(request);
+  } catch (error) {
+    return campaignMediaErrorResponse(error);
+  }
+
+  const payload = parsedRequest.payload as {
     name?: string;
     message?: string;
     intervalMinutes?: number;
@@ -124,41 +146,53 @@ export async function POST(
   }
 
   const dedupeKey = `label:${labelId}:${Date.now()}`;
-  const campaign = await prisma.campaign.create({
-    data: {
-      name,
-      instanceId,
-      defaultMessage: message,
-      intervalMinutes,
-      status: scheduleInput.status,
-      scheduledAt: scheduleInput.scheduledAt,
-      targetMode: "label",
-      targetLabelId: audience.label.id,
-      excludeGroups,
-      excludeAlreadySentDays,
-      dedupeKey,
-      maxRecipients,
-      sendWindowStart: serializeAdvancedSettings(payload.advancedSettings) ?? payload.sendWindowStart?.trim() ?? null,
-      sendWindowEnd: payload.sendWindowEnd?.trim() || null,
-      recipients: {
-        create: audience.eligibleRecipients.map((recipient) => ({
+  const createLabelCampaignWithMedia = () =>
+    createCampaignWithOptionalMedia(parsedRequest.mediaFile, () =>
+      prisma.campaign.create({
+        data: {
+          name,
           instanceId,
-          chatId: recipient.chatId,
-          jid: recipient.jid,
-          messageFinal: renderCampaignMessage(message, {
-            name: recipient.name,
-            phoneNormalized: recipient.phoneNormalized,
-            source: audience.label.name
-          }),
-          dedupeKey: buildCampaignDedupeKey(dedupeKey, recipient.jid)
-        }))
-      }
-    },
-    include: {
-      recipients: true,
-      targetLabel: true
-    }
-  });
+          defaultMessage: message,
+          intervalMinutes,
+          status: scheduleInput.status,
+          scheduledAt: scheduleInput.scheduledAt,
+          targetMode: "label",
+          targetLabelId: audience.label.id,
+          excludeGroups,
+          excludeAlreadySentDays,
+          dedupeKey,
+          maxRecipients,
+          sendWindowStart: serializeAdvancedSettings(payload.advancedSettings) ?? payload.sendWindowStart?.trim() ?? null,
+          sendWindowEnd: payload.sendWindowEnd?.trim() || null,
+          recipients: {
+            create: audience.eligibleRecipients.map((recipient) => ({
+              instanceId,
+              chatId: recipient.chatId,
+              jid: recipient.jid,
+              messageFinal: renderCampaignMessage(message, {
+                name: recipient.name,
+                phoneNormalized: recipient.phoneNormalized,
+                source: audience.label.name
+              }),
+              dedupeKey: buildCampaignDedupeKey(dedupeKey, recipient.jid)
+            }))
+          }
+        },
+        include: {
+          recipients: true,
+          targetLabel: true
+        }
+      })
+    );
+  let campaignResult: Awaited<ReturnType<typeof createLabelCampaignWithMedia>>;
+
+  try {
+    campaignResult = await createLabelCampaignWithMedia();
+  } catch (error) {
+    return campaignMediaErrorResponse(error);
+  }
+
+  const campaign = campaignResult.campaign;
 
   if (payload.startNow === true) {
     const startResult = await startCampaign({
@@ -174,7 +208,10 @@ export async function POST(
             startResult.reason === "another_campaign_running"
               ? "Ja existe uma campanha ativa nesta instancia. Pause, cancele ou aguarde finalizar."
               : "Campanha criada, mas nao pode ser iniciada no status atual",
-          campaign
+          campaign: serializeCampaignForApi({
+            ...campaign,
+            ...(campaignResult.media ?? {})
+          })
         },
         { status: startResult.reason === "another_campaign_running" ? 409 : 400 }
       );
@@ -183,7 +220,10 @@ export async function POST(
 
   return NextResponse.json(
     {
-      campaign,
+      campaign: serializeCampaignForApi({
+        ...campaign,
+        ...(campaignResult.media ?? {})
+      }),
       audience: {
         total: audience.total,
         eligible: audience.eligible,
