@@ -18,6 +18,9 @@ services:
 
   redis:
     image: redis:7-alpine
+    command: redis-server --appendonly yes --appendfsync everysec
+    volumes:
+      - redis_data:/data
     networks:
       - wa_sender_internal
     deploy:
@@ -94,3 +97,6 @@ volumes:
   uploads:
     external: true
     name: wa-sender-simple_uploads
+
+  redis_data:
+    name: wa-sender-simple_redis_data

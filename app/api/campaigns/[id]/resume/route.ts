@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { CampaignMediaError } from "@/src/lib/campaigns/media";
 import { startCampaign } from "@/src/lib/campaigns/start-campaign";
 import { getActiveInstanceIdFromSearchOrDefault } from "@/src/lib/server/whatsapp-instances";
 
@@ -12,12 +13,21 @@ export async function POST(
 ) {
   const { id } = await context.params;
   const instanceId = await getActiveInstanceIdFromSearchOrDefault(request.nextUrl.searchParams);
-  const result = await startCampaign({
-    campaignId: id,
-    instanceId,
-    origin: "MANUAL",
-    allowPaused: true
-  });
+  let result: Awaited<ReturnType<typeof startCampaign>>;
+
+  try {
+    result = await startCampaign({
+      campaignId: id,
+      instanceId,
+      origin: "MANUAL",
+      allowPaused: true
+    });
+  } catch (error) {
+    if (error instanceof CampaignMediaError) {
+      return NextResponse.json({ error: error.message }, { status: error.statusCode });
+    }
+    throw error;
+  }
 
   if (result.reason === "another_campaign_running") {
     return NextResponse.json(

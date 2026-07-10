@@ -74,6 +74,7 @@ export async function GET(request: NextRequest) {
         excludeGroups: campaign.excludeGroups,
         excludeAlreadySentDays: campaign.excludeAlreadySentDays,
         createdAt: campaign.createdAt,
+        scheduledAt: campaign.scheduledAt,
         startedAt: campaign.startedAt,
         completedAt: campaign.completedAt,
         hasMedia: Boolean(campaign.mediaPath),
@@ -81,6 +82,7 @@ export async function GET(request: NextRequest) {
         mediaOriginalName: campaign.mediaOriginalName,
         mediaMimeType: campaign.mediaMimeType,
         mediaSizeBytes: campaign.mediaSizeBytes,
+        lastError: campaign.lastError,
         recipientCount: campaign.recipients.length,
         recipientStatusCounts: counts.statusCounts,
         skippedReasonCounts: counts.skippedReasons

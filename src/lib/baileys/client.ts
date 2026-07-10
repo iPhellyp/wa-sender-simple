@@ -6,6 +6,7 @@ import makeWASocket, {
   proto,
   useMultiFileAuthState,
   type BaileysEventMap,
+  type AnyMessageContent,
   type WASocket
 } from "@whiskeysockets/baileys";
 import { mkdir, readdir, rm, unlink, writeFile } from "fs/promises";
@@ -1737,22 +1738,19 @@ async function getConnectedSocket() {
   return socket;
 }
 
-export async function sendWhatsappMessageToJid(jid: string, text: string) {
+export async function sendWhatsappContentToJid(jid: string, content: AnyMessageContent) {
   const normalizedJid = normalizeChatJid(jid);
-  const messageText = text.trim();
 
   if (!normalizedJid) {
     throw new Error("JID de destino invalido");
   }
 
-  if (!messageText) {
-    throw new Error("Mensagem vazia");
+  if (shouldIgnoreJidForX1Only(normalizedJid)) {
+    throw new Error("JID ignorado pelo modo de envio individual");
   }
 
   const activeSocket = await getConnectedSocket();
-  const sentMessage = await activeSocket.sendMessage(normalizedJid, {
-    text: messageText
-  });
+  const sentMessage = await activeSocket.sendMessage(normalizedJid, content);
 
   return {
     waMessageId: sentMessage?.key?.id ?? null,
@@ -1826,4 +1824,14 @@ export async function applyWhatsappLabelToJids(params: { waLabelId: string; jids
     failed,
     message: "Aplicacao de etiqueta finalizada."
   };
+}
+
+export async function sendWhatsappMessageToJid(jid: string, text: string) {
+  const messageText = text.trim();
+
+  if (!messageText) {
+    throw new Error("Mensagem vazia");
+  }
+
+  return sendWhatsappContentToJid(jid, { text: messageText });
 }

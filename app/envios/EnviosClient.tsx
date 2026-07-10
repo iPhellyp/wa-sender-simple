@@ -16,6 +16,7 @@ type EnvioSummary = {
   skippedReasonCounts: Record<string, number>;
   intervalMinutes: number;
   createdAt: string;
+  scheduledAt: string | null;
   startedAt: string | null;
   completedAt: string | null;
   hasMedia: boolean;
@@ -23,6 +24,7 @@ type EnvioSummary = {
   mediaOriginalName: string | null;
   mediaMimeType: string | null;
   mediaSizeBytes: number | null;
+  lastError: string | null;
 };
 
 type RecipientDetail = {
@@ -48,11 +50,13 @@ type CampaignDetails = {
   status: string;
   targetMode: string;
   targetLabel: { id: string; name: string; color: string | null } | null;
+  scheduledAt: string | null;
   hasMedia: boolean;
   mediaKind: string | null;
   mediaOriginalName: string | null;
   mediaMimeType: string | null;
   mediaSizeBytes: number | null;
+  lastError: string | null;
   recipients: RecipientDetail[];
 };
 
@@ -433,6 +437,9 @@ export function EnviosClient({ selectedCampaignId }: { selectedCampaignId?: stri
                             Anexo: {campaign.mediaKind} | {campaign.mediaOriginalName} | {formatFileSize(campaign.mediaSizeBytes)}
                           </span>
                         ) : null}
+                        {campaign.lastError ? (
+                          <span className="send-error">{campaign.lastError}</span>
+                        ) : null}
                       </div>
                       <span className={`status-badge ${statusClass(campaign.status)}`}>
                         {statusLabel(campaign.status)}
@@ -444,6 +451,9 @@ export function EnviosClient({ selectedCampaignId }: { selectedCampaignId?: stri
                       <span>{campaign.recipientStatusCounts.failed ?? 0} falhas</span>
                       <span>{pending} pendentes</span>
                       <span>criada {formatDate(campaign.createdAt)}</span>
+                      {campaign.status === "scheduled" ? (
+                        <span>agendada {formatDate(campaign.scheduledAt)}</span>
+                      ) : null}
                     </div>
                     <div className="button-row">
                       <button
@@ -520,6 +530,14 @@ export function EnviosClient({ selectedCampaignId }: { selectedCampaignId?: stri
                   {selectedDetails.hasMedia ? (
                     <span className="muted">
                       Anexo: {selectedDetails.mediaKind} | {selectedDetails.mediaOriginalName} | {formatFileSize(selectedDetails.mediaSizeBytes)}
+                    </span>
+                  ) : null}
+                  {selectedDetails.lastError ? (
+                    <span className="send-error">{selectedDetails.lastError}</span>
+                  ) : null}
+                  {selectedDetails.status === "scheduled" ? (
+                    <span className="muted">
+                      Agendada para {formatDate(selectedDetails.scheduledAt)}
                     </span>
                   ) : null}
                 </div>

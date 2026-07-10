@@ -4,6 +4,7 @@ import makeWASocket, {
   DisconnectReason,
   fetchLatestBaileysVersion,
   useMultiFileAuthState,
+  type AnyMessageContent,
   type WASocket
 } from "@whiskeysockets/baileys";
 import { mkdir, rm } from "fs/promises";
@@ -28,7 +29,7 @@ import {
   requestWhatsappHistorySync,
   requestWhatsappCatalogSync,
   resetBaileysSession,
-  sendWhatsappMessageToJid,
+  sendWhatsappContentToJid,
   startBaileysConnection
 } from "./client";
 import {
@@ -864,16 +865,25 @@ async function getConnectedInstanceSocket(instanceId: string) {
 }
 
 export async function sendWhatsappMessageForInstance(instanceId: string, jid: string, text: string) {
-  const instance = await resolveWhatsappInstance(instanceId);
-  const normalizedJid = normalizeChatJid(jid);
   const messageText = text.trim();
-
-  if (!normalizedJid) {
-    throw new Error("JID de destino invalido");
-  }
 
   if (!messageText) {
     throw new Error("Mensagem vazia");
+  }
+
+  return sendWhatsappContentForInstance(instanceId, jid, { text: messageText });
+}
+
+export async function sendWhatsappContentForInstance(
+  instanceId: string,
+  jid: string,
+  content: AnyMessageContent
+) {
+  const instance = await resolveWhatsappInstance(instanceId);
+  const normalizedJid = normalizeChatJid(jid);
+
+  if (!normalizedJid) {
+    throw new Error("JID de destino invalido");
   }
 
   if (shouldIgnoreJidForX1Only(normalizedJid)) {
@@ -881,16 +891,14 @@ export async function sendWhatsappMessageForInstance(instanceId: string, jid: st
   }
 
   if (instance.id === DEFAULT_WHATSAPP_INSTANCE_ID) {
-    return sendWhatsappMessageToJid(normalizedJid, messageText);
+    return sendWhatsappContentToJid(normalizedJid, content);
   }
 
   console.log("[manual-send] sending with instance", {
     instanceId: instance.id
   });
   const socket = await getConnectedInstanceSocket(instance.id);
-  const sentMessage = await socket.sendMessage(normalizedJid, {
-    text: messageText
-  });
+  const sentMessage = await socket.sendMessage(normalizedJid, content);
 
   return {
     waMessageId: sentMessage?.key?.id ?? null,

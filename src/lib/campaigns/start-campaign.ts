@@ -1,5 +1,6 @@
 import { CampaignStatus, Prisma } from "@prisma/client";
 import { prisma } from "../prisma/client";
+import { loadValidatedCampaignMedia } from "./media";
 import { schedulePendingRecipients } from "./schedule";
 
 type StartCampaignOrigin = "MANUAL" | "SCHEDULER";
@@ -40,6 +41,45 @@ export async function startCampaign({
       campaignId: normalizedCampaignId,
       reason: "invalid_scope"
     };
+  }
+
+  const mediaPreflight = await prisma.campaign.findFirst({
+    where: {
+      id: normalizedCampaignId,
+      instanceId: normalizedInstanceId,
+      status: {
+        in: [CampaignStatus.draft, CampaignStatus.scheduled, CampaignStatus.paused]
+      }
+    },
+    select: {
+      mediaKind: true,
+      mediaPath: true,
+      mediaOriginalName: true,
+      mediaMimeType: true,
+      mediaSizeBytes: true
+    }
+  });
+
+  if (mediaPreflight) {
+    try {
+      await loadValidatedCampaignMedia(mediaPreflight);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "Anexo da campanha invalido";
+      await prisma.campaign.updateMany({
+        where: {
+          id: normalizedCampaignId,
+          instanceId: normalizedInstanceId,
+          status: {
+            in: [CampaignStatus.draft, CampaignStatus.scheduled, CampaignStatus.paused]
+          }
+        },
+        data: {
+          status: CampaignStatus.paused,
+          lastError: errorMessage
+        }
+      });
+      throw error;
+    }
   }
 
   let claimResult: StartCampaignResult | null = null;
@@ -140,7 +180,8 @@ export async function startCampaign({
             data: {
               status: CampaignStatus.running,
               scheduledAt: null,
-              startedAt: campaign.startedAt ?? new Date()
+              startedAt: campaign.startedAt ?? new Date(),
+              lastError: null
             }
           });
 
@@ -179,6 +220,17 @@ export async function startCampaign({
     try {
       await schedulePendingRecipients(claimResult.campaignId);
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "Falha ao agendar destinatario";
+      await prisma.campaign.updateMany({
+        where: {
+          id: claimResult.campaignId,
+          instanceId: normalizedInstanceId,
+          status: CampaignStatus.running
+        },
+        data: {
+          lastError: errorMessage
+        }
+      });
       console.error("[campaign] initial recipient scheduling failed", {
         campaignId: claimResult.campaignId,
         instanceId: normalizedInstanceId,

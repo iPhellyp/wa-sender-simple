@@ -3,11 +3,6 @@ import { prisma } from "../prisma/client";
 import { enqueueRecipient } from "../queue/campaign-queue";
 import { completeCampaignIfDone } from "./progress";
 
-const blockingRecipientStatuses: CampaignRecipientStatus[] = [
-  CampaignRecipientStatus.scheduled,
-  CampaignRecipientStatus.sending
-];
-
 type AdvancedCampaignSettings = {
   delayMode?: "fixed_seconds" | "fixed_minutes" | "random_range";
   fixedSeconds?: number;
@@ -131,17 +126,43 @@ export async function schedulePendingRecipients(campaignId: string, delayMs = 0)
     return;
   }
 
-  const alreadyScheduledOrSending = await prisma.campaignRecipient.count({
+  const sendingRecipientCount = await prisma.campaignRecipient.count({
     where: {
       instanceId: campaign.instanceId,
       campaignId,
-      status: {
-        in: blockingRecipientStatuses
-      }
+      status: CampaignRecipientStatus.sending
     }
   });
 
-  if (alreadyScheduledOrSending > 0) {
+  if (sendingRecipientCount > 0) {
+    return;
+  }
+
+  const scheduledRecipient = await prisma.campaignRecipient.findFirst({
+    where: {
+      instanceId: campaign.instanceId,
+      campaignId,
+      status: CampaignRecipientStatus.scheduled
+    },
+    orderBy: [
+      {
+        scheduledAt: "asc"
+      },
+      {
+        createdAt: "asc"
+      }
+    ],
+    select: {
+      id: true,
+      scheduledAt: true
+    }
+  });
+
+  if (scheduledRecipient) {
+    await enqueueRecipient(
+      scheduledRecipient.id,
+      Math.max(0, (scheduledRecipient.scheduledAt?.getTime() ?? Date.now()) - Date.now())
+    );
     return;
   }
 
@@ -185,11 +206,7 @@ export async function schedulePendingRecipients(campaignId: string, delayMs = 0)
     });
 
     if (updatedRecipient.count > 0) {
-      await enqueueRecipient(
-        recipient.id,
-        scheduledAt.getTime() - Date.now(),
-        String(scheduledAt.getTime())
-      );
+      await enqueueRecipient(recipient.id, scheduledAt.getTime() - Date.now());
     }
 
     return;

@@ -11,7 +11,7 @@ import {
   SEND_RECIPIENT_JOB,
   SYNC_WHATSAPP_CATALOG_JOB,
   SYNC_WHATSAPP_HISTORY_JOB,
-  enqueueRecipient,
+  closeCampaignQueue,
   type ApplyWhatsappLabelsJobData,
   type SendManualMessageJobData,
   type SyncWhatsappCatalogJobData
@@ -29,19 +29,20 @@ import {
   requestWhatsappCatalogSyncForInstance,
   requestWhatsappHistorySyncForInstance,
   resetWhatsappInstance,
-  sendWhatsappMessageForInstance,
-  sendWhatsappPhoneMessageForInstance
+  sendWhatsappContentForInstance,
+  sendWhatsappMessageForInstance
 } from "../lib/baileys/instance-manager";
 import { ensureChatForJid, isGroupJid, normalizeChatJid } from "../lib/baileys/sync";
 import { completeCampaignIfDone } from "../lib/campaigns/progress";
+import { CampaignMediaError, loadValidatedCampaignMedia } from "../lib/campaigns/media";
 import { schedulePendingRecipients } from "../lib/campaigns/schedule";
+import { startCampaignScheduler } from "../lib/campaigns/scheduler";
 import { hashMessage, resolveCampaignJid, type SkippedReason } from "../lib/labels/audience";
 import { normalizeBrazilPhone, toWhatsappJid } from "../lib/phone/normalize";
 import { clearWhatsappOperationalData } from "../lib/server/whatsapp-session-data";
 import { DEFAULT_WHATSAPP_INSTANCE_ID } from "../lib/server/whatsapp-instances";
 import { shouldIgnoreJidForX1Only } from "../lib/whatsapp/jid";
 
-const PAUSED_RECHECK_DELAY_MS = 60 * 1000;
 const finalRecipientStatuses: CampaignRecipientStatus[] = [
   CampaignRecipientStatus.sent,
   CampaignRecipientStatus.failed,
@@ -134,11 +135,7 @@ async function ensureWhatsappReadyForSync(instanceId: string, syncType: string, 
   }
 }
 
-async function requeueRecipient(recipientId: string, delayMs = PAUSED_RECHECK_DELAY_MS) {
-  await enqueueRecipient(recipientId, delayMs);
-}
-
-type SentWhatsappMessage = Awaited<ReturnType<typeof sendWhatsappMessageForInstance>>;
+type SentWhatsappMessage = Awaited<ReturnType<typeof sendWhatsappContentForInstance>>;
 
 function buildFallbackMessageId(prefix: string, id: string | undefined) {
   return `${prefix}-${id ?? Date.now()}`
@@ -153,6 +150,7 @@ async function persistOutboundMessage(options: {
   sentAt: Date;
   sentMessage: SentWhatsappMessage;
   fallbackMessageId: string;
+  messageType?: string;
 }) {
   const normalizedJid = normalizeChatJid(options.jid);
 
@@ -180,7 +178,7 @@ async function persistOutboundMessage(options: {
       fromMe: true,
       senderJid: options.sentMessage.senderJid,
       timestamp: options.sentAt,
-      messageType: "text",
+      messageType: options.messageType ?? "text",
       text: options.text,
       rawJson: options.sentMessage.rawJson
     },
@@ -192,7 +190,7 @@ async function persistOutboundMessage(options: {
       fromMe: true,
       senderJid: options.sentMessage.senderJid,
       timestamp: options.sentAt,
-      messageType: "text",
+      messageType: options.messageType ?? "text",
       text: options.text,
       rawJson: options.sentMessage.rawJson
     }
@@ -373,6 +371,115 @@ async function processManualMessage(
   }
 }
 
+async function buildCampaignMessageContent(campaign: {
+  mediaKind: string | null;
+  mediaPath: string | null;
+  mediaOriginalName: string | null;
+  mediaMimeType: string | null;
+  mediaSizeBytes: number | null;
+}, messageFinal: string) {
+  const media = await loadValidatedCampaignMedia(campaign);
+
+  if (!media) {
+    return {
+      content: { text: messageFinal },
+      messageType: "text"
+    } as const;
+  }
+
+  if (media.kind === "IMAGE") {
+    return {
+      content: {
+        image: media.buffer,
+        caption: messageFinal,
+        mimetype: media.mimetype
+      },
+      messageType: "image"
+    } as const;
+  }
+
+  if (media.kind === "VIDEO") {
+    return {
+      content: {
+        video: media.buffer,
+        caption: messageFinal,
+        mimetype: media.mimetype
+      },
+      messageType: "video"
+    } as const;
+  }
+
+  return {
+    content: {
+      document: media.buffer,
+      caption: messageFinal,
+      mimetype: media.mimetype,
+      fileName: media.fileName
+    },
+    messageType: "document"
+  } as const;
+}
+
+async function confirmRecipientStillAuthorized(recipient: {
+  id: string;
+  instanceId: string;
+  campaignId: string;
+}) {
+  const campaign = await prisma.campaign.findFirst({
+    where: {
+      id: recipient.campaignId,
+      instanceId: recipient.instanceId
+    },
+    select: {
+      status: true
+    }
+  });
+
+  if (campaign?.status === CampaignStatus.running) {
+    const claimedRecipient = await prisma.campaignRecipient.findFirst({
+      where: {
+        id: recipient.id,
+        instanceId: recipient.instanceId,
+        campaignId: recipient.campaignId,
+        status: CampaignRecipientStatus.sending
+      },
+      select: {
+        id: true
+      }
+    });
+
+    return Boolean(claimedRecipient);
+  }
+
+  if (campaign?.status === CampaignStatus.paused) {
+    await prisma.campaignRecipient.updateMany({
+      where: {
+        id: recipient.id,
+        instanceId: recipient.instanceId,
+        status: CampaignRecipientStatus.sending
+      },
+      data: {
+        status: CampaignRecipientStatus.scheduled,
+        scheduledAt: new Date()
+      }
+    });
+  } else if (campaign?.status === CampaignStatus.canceled) {
+    await prisma.campaignRecipient.updateMany({
+      where: {
+        id: recipient.id,
+        instanceId: recipient.instanceId,
+        status: CampaignRecipientStatus.sending
+      },
+      data: {
+        status: CampaignRecipientStatus.canceled,
+        error: "Campanha cancelada"
+      }
+    });
+  }
+
+  return false;
+}
+
 async function processRecipient(recipientId: string) {
   const recipient = await prisma.campaignRecipient.findUnique({
     where: {
@@ -393,9 +500,13 @@ async function processRecipient(recipientId: string) {
   }
 
   if (recipient.campaign.status === CampaignStatus.canceled) {
-    await prisma.campaignRecipient.update({
+    await prisma.campaignRecipient.updateMany({
       where: {
-        id: recipient.id
+        id: recipient.id,
+        instanceId: recipient.instanceId,
+        status: {
+          in: [CampaignRecipientStatus.pending, CampaignRecipientStatus.scheduled]
+        }
       },
       data: {
         status: CampaignRecipientStatus.canceled,
@@ -406,12 +517,10 @@ async function processRecipient(recipientId: string) {
   }
 
   if (recipient.campaign.status !== CampaignStatus.running) {
-    await requeueRecipient(recipient.id);
     return;
   }
 
   if (recipient.scheduledAt && recipient.scheduledAt.getTime() > Date.now()) {
-    await requeueRecipient(recipient.id, recipient.scheduledAt.getTime() - Date.now());
     return;
   }
 
@@ -427,9 +536,11 @@ async function processRecipient(recipientId: string) {
           : null;
 
     if (skipReason) {
-      await prisma.campaignRecipient.update({
+      await prisma.campaignRecipient.updateMany({
         where: {
-          id: recipient.id
+          id: recipient.id,
+          instanceId: recipient.instanceId,
+          status: CampaignRecipientStatus.scheduled
         },
         data: {
           status: CampaignRecipientStatus.canceled,
@@ -449,9 +560,11 @@ async function processRecipient(recipientId: string) {
   }
 
   if (await isRecipientOptedOut(recipient, resolvedRecipientJid)) {
-    await prisma.campaignRecipient.update({
+    await prisma.campaignRecipient.updateMany({
       where: {
-        id: recipient.id
+        id: recipient.id,
+        instanceId: recipient.instanceId,
+        status: CampaignRecipientStatus.scheduled
       },
       data: {
         status: CampaignRecipientStatus.canceled,
@@ -463,9 +576,22 @@ async function processRecipient(recipientId: string) {
     return;
   }
 
-  await prisma.campaignRecipient.update({
+  const claimed = await prisma.campaignRecipient.updateMany({
     where: {
-      id: recipient.id
+      id: recipient.id,
+      instanceId: recipient.instanceId,
+      campaignId: recipient.campaignId,
+      status: CampaignRecipientStatus.scheduled,
+      OR: [
+        {
+          scheduledAt: null
+        },
+        {
+          scheduledAt: {
+            lte: new Date()
+          }
+        }
+      ]
     },
     data: {
       status: CampaignRecipientStatus.sending,
@@ -477,9 +603,87 @@ async function processRecipient(recipientId: string) {
     }
   });
 
+  if (claimed.count !== 1) {
+    return;
+  }
+
+  let outbound: Awaited<ReturnType<typeof buildCampaignMessageContent>>;
+
   try {
-    let sentMessage: SentWhatsappMessage;
-    let sentJid: string;
+    outbound = await buildCampaignMessageContent(
+      recipient.campaign,
+      recipient.messageFinal
+    );
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : "Erro ao preparar envio";
+
+    if (error instanceof CampaignMediaError) {
+      await prisma.$transaction([
+        prisma.campaign.updateMany({
+          where: {
+            id: recipient.campaignId,
+            instanceId: recipient.instanceId,
+            status: CampaignStatus.running
+          },
+          data: {
+            status: CampaignStatus.paused,
+            lastError: errorMessage
+          }
+        }),
+        prisma.campaignRecipient.updateMany({
+          where: {
+            id: recipient.id,
+            instanceId: recipient.instanceId,
+            status: CampaignRecipientStatus.sending
+          },
+          data: {
+            status: CampaignRecipientStatus.scheduled,
+            scheduledAt: new Date(),
+            error: null
+          }
+        })
+      ]);
+      console.error("[campaign] media preparation paused campaign", {
+        campaignId: recipient.campaignId,
+        recipientId: recipient.id,
+        error: errorMessage
+      });
+      return;
+    }
+
+    await prisma.campaignRecipient.updateMany({
+      where: {
+        id: recipient.id,
+        instanceId: recipient.instanceId,
+        status: CampaignRecipientStatus.sending
+      },
+      data: {
+        status: CampaignRecipientStatus.failed,
+        jid: resolvedRecipientJid ? resolvedRecipientJid : recipient.jid,
+        error: errorMessage
+      }
+    });
+    console.error("[worker] campaign preparation failed", {
+      recipientId: recipient.id,
+      campaignId: recipient.campaignId,
+      error: errorMessage
+    });
+    await completeCampaignIfDone(recipient.campaignId);
+    await schedulePendingRecipients(
+      recipient.campaignId,
+      recipient.campaign.intervalMinutes * 60 * 1000
+    );
+    return;
+  }
+
+  if (!(await confirmRecipientStillAuthorized(recipient))) {
+    return;
+  }
+
+  let sentMessage: SentWhatsappMessage;
+  let sentJid: string;
+
+  try {
 
     if (resolvedRecipientJid) {
       sentJid = resolvedRecipientJid;
@@ -487,10 +691,10 @@ async function processRecipient(recipientId: string) {
         campaignId: recipient.campaignId,
         instanceId: recipient.campaign.instanceId
       });
-      sentMessage = await sendWhatsappMessageForInstance(
+      sentMessage = await sendWhatsappContentForInstance(
         recipient.campaign.instanceId,
         resolvedRecipientJid,
-        recipient.messageFinal
+        outbound.content
       );
     } else if (recipient.contact) {
       sentJid = toWhatsappJid(recipient.contact.phoneNormalized);
@@ -498,76 +702,22 @@ async function processRecipient(recipientId: string) {
         campaignId: recipient.campaignId,
         instanceId: recipient.campaign.instanceId
       });
-      sentMessage = await sendWhatsappPhoneMessageForInstance(
+      sentMessage = await sendWhatsappContentForInstance(
         recipient.campaign.instanceId,
-        recipient.contact.phoneNormalized,
-        recipient.messageFinal
+        sentJid,
+        outbound.content
       );
     } else {
       throw new Error("Destinatario sem jid ou contato");
     }
 
-    const sentAt = new Date();
-    const persistedChatId = await persistOutboundMessage({
-      instanceId: recipient.instanceId,
-      jid: sentJid,
-      text: recipient.messageFinal,
-      sentAt,
-      sentMessage,
-      fallbackMessageId: buildFallbackMessageId("campaign", recipient.id)
-    });
-
-    await prisma.campaignRecipient.update({
-      where: {
-        id: recipient.id
-      },
-      data: {
-        status: CampaignRecipientStatus.sent,
-        sentAt,
-        jid: resolvedRecipientJid ? sentJid : recipient.jid,
-        chatId: recipient.chatId ?? persistedChatId,
-        error: null
-      }
-    });
-    await prisma.campaign.update({
-      where: {
-        id: recipient.campaignId
-      },
-      data: {
-        updatedAt: new Date()
-      }
-    }).catch(() => undefined);
-
-    if (resolvedRecipientJid) {
-      await prisma.sendLog.create({
-        data: {
-          instanceId: recipient.instanceId,
-          jid: sentJid,
-          chatId: recipient.chatId ?? persistedChatId,
-          campaignId: recipient.campaignId,
-          recipientId: recipient.id,
-          messageHash: hashMessage(recipient.messageFinal),
-          status: "sent",
-          sentAt
-        }
-      });
-    }
-
-    console.log("[worker] campaign message sent", {
-      recipientId: recipient.id,
-      campaignId: recipient.campaignId,
-      jidType: resolvedRecipientJid
-        ? isGroupJid(resolvedRecipientJid)
-          ? "group"
-          : "contact"
-        : "contact-sheet"
-    });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "Erro ao enviar mensagem";
-
-    await prisma.campaignRecipient.update({
+    await prisma.campaignRecipient.updateMany({
       where: {
-        id: recipient.id
+        id: recipient.id,
+        instanceId: recipient.instanceId,
+        status: CampaignRecipientStatus.sending
       },
       data: {
         status: CampaignRecipientStatus.failed,
@@ -604,7 +754,144 @@ async function processRecipient(recipientId: string) {
       campaignId: recipient.campaignId,
       error: errorMessage
     });
+    await completeCampaignIfDone(recipient.campaignId);
+    await schedulePendingRecipients(
+      recipient.campaignId,
+      recipient.campaign.intervalMinutes * 60 * 1000
+    );
+    return;
   }
+
+  const sentAt = new Date();
+  let confirmedAsSent = false;
+
+  try {
+    const confirmed = await prisma.campaignRecipient.updateMany({
+      where: {
+        id: recipient.id,
+        instanceId: recipient.instanceId,
+        status: {
+          in: [CampaignRecipientStatus.sending, CampaignRecipientStatus.canceled]
+        }
+      },
+      data: {
+        status: CampaignRecipientStatus.sent,
+        sentAt,
+        jid: resolvedRecipientJid ? sentJid : recipient.jid,
+        error: null
+      }
+    });
+    confirmedAsSent = confirmed.count === 1;
+
+    if (!confirmedAsSent) {
+      const current = await prisma.campaignRecipient.findUnique({
+        where: { id: recipient.id },
+        select: { status: true }
+      });
+      confirmedAsSent = current?.status === CampaignRecipientStatus.sent;
+    }
+  } catch (error) {
+    console.error("[campaign] failed to persist confirmed WhatsApp send", {
+      campaignId: recipient.campaignId,
+      recipientId: recipient.id,
+      error: error instanceof Error ? error.message : "Erro desconhecido"
+    });
+  }
+
+  if (!confirmedAsSent) {
+    const uncertaintyMessage =
+      "CRITICO: o WhatsApp pode ter entregue a mensagem, mas o registro do envio nao foi confirmado. Destinatario bloqueado para analise manual.";
+    await prisma.campaign.updateMany({
+      where: {
+        id: recipient.campaignId,
+        instanceId: recipient.instanceId,
+        status: CampaignStatus.running
+      },
+      data: {
+        status: CampaignStatus.paused,
+        lastError: uncertaintyMessage
+      }
+    }).catch((error) => {
+      console.error("[campaign] failed to pause uncertain campaign", {
+        campaignId: recipient.campaignId,
+        recipientId: recipient.id,
+        error: error instanceof Error ? error.message : "Erro desconhecido"
+      });
+    });
+    console.error("[campaign] confirmed send has uncertain persistence", {
+      campaignId: recipient.campaignId,
+      recipientId: recipient.id
+    });
+    return;
+  }
+
+  let persistedChatId: string | null = null;
+  try {
+    persistedChatId = await persistOutboundMessage({
+      instanceId: recipient.instanceId,
+      jid: sentJid,
+      text: recipient.messageFinal,
+      sentAt,
+      sentMessage,
+      fallbackMessageId: buildFallbackMessageId("campaign", recipient.id),
+      messageType: outbound.messageType
+    });
+  } catch (error) {
+    console.error("[campaign] sent message history persistence failed", {
+      campaignId: recipient.campaignId,
+      recipientId: recipient.id,
+      error: error instanceof Error ? error.message : "Erro desconhecido"
+    });
+  }
+
+  if (persistedChatId) {
+    await prisma.campaignRecipient.updateMany({
+      where: {
+        id: recipient.id,
+        instanceId: recipient.instanceId,
+        status: CampaignRecipientStatus.sent
+      },
+      data: {
+        chatId: recipient.chatId ?? persistedChatId
+      }
+    }).catch(() => undefined);
+  }
+
+  await prisma.campaign.update({
+    where: { id: recipient.campaignId },
+    data: { updatedAt: new Date() }
+  }).catch(() => undefined);
+
+  if (resolvedRecipientJid) {
+    await prisma.sendLog.create({
+      data: {
+        instanceId: recipient.instanceId,
+        jid: sentJid,
+        chatId: recipient.chatId ?? persistedChatId,
+        campaignId: recipient.campaignId,
+        recipientId: recipient.id,
+        messageHash: hashMessage(recipient.messageFinal),
+        status: "sent",
+        sentAt
+      }
+    }).catch((error) => {
+      console.error("[campaign] sent message audit log failed", {
+        campaignId: recipient.campaignId,
+        recipientId: recipient.id,
+        error: error instanceof Error ? error.message : "Erro desconhecido"
+      });
+    });
+  }
+
+  console.log("[worker] campaign message sent", {
+    recipientId: recipient.id,
+    campaignId: recipient.campaignId,
+    jidType: resolvedRecipientJid
+      ? isGroupJid(resolvedRecipientJid)
+        ? "group"
+        : "contact"
+      : "contact-sheet"
+  });
 
   await completeCampaignIfDone(recipient.campaignId);
   await schedulePendingRecipients(
@@ -815,10 +1102,34 @@ worker.on("failed", (job, error) => {
   });
 });
 
-process.on("SIGTERM", () => {
-  void worker.close().then(() => process.exit(0));
+const campaignScheduler = startCampaignScheduler();
+let shuttingDown = false;
+
+async function shutdown(signal: "SIGTERM" | "SIGINT") {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log("[worker] shutdown started", { signal });
+
+  try {
+    await campaignScheduler.stop();
+    await worker.close();
+    await closeCampaignQueue();
+    await prisma.$disconnect();
+    console.log("[worker] shutdown finished", { signal });
+    process.exit(0);
+  } catch (error) {
+    console.error("[worker] shutdown failed", {
+      signal,
+      error: getErrorMessage(error)
+    });
+    process.exit(1);
+  }
+}
+
+process.once("SIGTERM", () => {
+  void shutdown("SIGTERM");
 });
 
-process.on("SIGINT", () => {
-  void worker.close().then(() => process.exit(0));
+process.once("SIGINT", () => {
+  void shutdown("SIGINT");
 });

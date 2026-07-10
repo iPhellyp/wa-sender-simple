@@ -67,6 +67,13 @@ export function getCampaignQueue() {
   return queue;
 }
 
+export async function closeCampaignQueue() {
+  if (!queue) return;
+  const activeQueue = queue;
+  queue = null;
+  await activeQueue.close();
+}
+
 async function removeStaleJob(jobId: string) {
   const job = await getCampaignQueue().getJob(jobId);
 
@@ -116,20 +123,40 @@ async function enqueueDedupedSyncJob(
   };
 }
 
-export async function enqueueRecipient(recipientId: string, delayMs: number, jobKey?: string) {
+export async function enqueueRecipient(recipientId: string, delayMs: number): Promise<SyncJobEnqueueResult> {
   const safeDelay = Math.max(0, delayMs);
+  const jobId = buildJobId("recipient", recipientId);
+  const existingJob = await getCampaignQueue().getJob(jobId);
 
-  await getCampaignQueue().add(
+  if (existingJob) {
+    const state = await existingJob.getState();
+
+    if (["active", "waiting", "delayed", "prioritized", "waiting-children"].includes(state)) {
+      return {
+        jobId: existingJob.id ?? jobId,
+        deduped: true
+      };
+    }
+
+    await existingJob.remove().catch(() => undefined);
+  }
+
+  const job = await getCampaignQueue().add(
     SEND_RECIPIENT_JOB,
     { recipientId },
     {
       delay: safeDelay,
       attempts: 1,
-      jobId: buildJobId("recipient", recipientId, jobKey ?? `${Date.now()}-${safeDelay}`),
+      jobId,
       removeOnComplete: true,
       removeOnFail: 5000
     }
   );
+
+  return {
+    jobId: job.id ?? jobId,
+    deduped: false
+  };
 }
 
 export async function enqueueWhatsappConnect(instanceId: string) {

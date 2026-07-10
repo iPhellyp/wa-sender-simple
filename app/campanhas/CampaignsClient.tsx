@@ -50,6 +50,7 @@ type CampaignSummary = {
   mediaOriginalName: string | null;
   mediaMimeType: string | null;
   mediaSizeBytes: number | null;
+  lastError: string | null;
   recipientCount: number;
   recipientStatusCounts: Record<string, number>;
 };
@@ -1408,6 +1409,9 @@ export function CampaignsClient({
                           Anexo: {campaign.mediaKind} | {campaign.mediaOriginalName} | {formatFileSize(campaign.mediaSizeBytes)}
                         </span>
                       ) : null}
+                      {campaign.lastError ? (
+                        <span className="send-error">{campaign.lastError}</span>
+                      ) : null}
                     </td>
                     <td>{campaign.targetLabel?.name ?? campaignAudienceLabel(campaign.targetMode)}</td>
                     <td>
@@ -1489,6 +1493,9 @@ export function CampaignsClient({
                     <span className="muted">
                       Anexo: {campaign.mediaKind} | {campaign.mediaOriginalName} | {formatFileSize(campaign.mediaSizeBytes)}
                     </span>
+                  ) : null}
+                  {campaign.lastError ? (
+                    <span className="send-error">{campaign.lastError}</span>
                   ) : null}
                 </div>
                 <span className={`status-badge ${statusClass(campaign.status)}`}>

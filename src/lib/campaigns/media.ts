@@ -1,5 +1,5 @@
 import { randomUUID } from "crypto";
-import { mkdir, rename, unlink, writeFile } from "fs/promises";
+import { mkdir, readFile, rename, stat, unlink, writeFile } from "fs/promises";
 import path from "path";
 import { prisma } from "../prisma/client";
 
@@ -32,6 +32,22 @@ export type PublicCampaignMedia = {
   mediaOriginalName: string | null;
   mediaMimeType: string | null;
   mediaSizeBytes: number | null;
+};
+
+type StoredCampaignMedia = {
+  mediaKind: string | null;
+  mediaPath: string | null;
+  mediaOriginalName: string | null;
+  mediaMimeType: string | null;
+  mediaSizeBytes: number | null;
+};
+
+export type ValidatedCampaignMedia = {
+  kind: CampaignMediaKind;
+  buffer: Buffer;
+  mimetype: string;
+  fileName: string;
+  sizeBytes: number;
 };
 
 const MB = 1024 * 1024;
@@ -206,6 +222,82 @@ function hasExpectedSignature(buffer: Buffer, signature: AllowedMediaDefinition[
     return startsWithBytes(buffer, [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]);
   }
   return !buffer.includes(0x00);
+}
+
+export async function loadValidatedCampaignMedia(
+  campaign: StoredCampaignMedia
+): Promise<ValidatedCampaignMedia | null> {
+  const hasAnyMediaMetadata = Boolean(
+    campaign.mediaKind ||
+    campaign.mediaPath ||
+    campaign.mediaOriginalName ||
+    campaign.mediaMimeType ||
+    campaign.mediaSizeBytes
+  );
+
+  if (!hasAnyMediaMetadata) return null;
+
+  if (
+    !campaign.mediaKind ||
+    !campaign.mediaPath ||
+    !campaign.mediaOriginalName ||
+    !campaign.mediaMimeType ||
+    !campaign.mediaSizeBytes
+  ) {
+    throw new CampaignMediaError("Metadados do anexo estao incompletos", 422);
+  }
+
+  const definition = ALLOWED_MEDIA[campaign.mediaMimeType.toLowerCase()];
+  const mediaKind = campaign.mediaKind.toUpperCase();
+
+  if (!definition || definition.kind !== mediaKind) {
+    throw new CampaignMediaError("Tipo do anexo armazenado e invalido", 422);
+  }
+
+  const physicalExtension = path.extname(campaign.mediaPath).toLowerCase();
+  const originalExtension = path.extname(campaign.mediaOriginalName).toLowerCase();
+
+  if (
+    !definition.extensions.includes(physicalExtension) ||
+    !definition.extensions.includes(originalExtension)
+  ) {
+    throw new CampaignMediaError("Extensao do anexo armazenado e invalida", 422);
+  }
+
+  const absolutePath = resolveCampaignMediaAbsolutePath(campaign.mediaPath);
+  let fileStat: Awaited<ReturnType<typeof stat>>;
+
+  try {
+    fileStat = await stat(absolutePath);
+  } catch {
+    throw new CampaignMediaError("Arquivo da campanha nao foi encontrado", 422);
+  }
+
+  if (!fileStat.isFile()) {
+    throw new CampaignMediaError("Anexo da campanha nao e um arquivo valido", 422);
+  }
+
+  if (
+    fileStat.size !== campaign.mediaSizeBytes ||
+    fileStat.size <= 0 ||
+    fileStat.size > definition.maxSizeBytes
+  ) {
+    throw new CampaignMediaError("Tamanho do anexo armazenado e invalido", 422);
+  }
+
+  const buffer = await readFile(absolutePath);
+
+  if (buffer.length !== fileStat.size || !hasExpectedSignature(buffer, definition.signature)) {
+    throw new CampaignMediaError("Assinatura do anexo armazenado e invalida", 422);
+  }
+
+  return {
+    kind: definition.kind,
+    buffer,
+    mimetype: campaign.mediaMimeType,
+    fileName: campaign.mediaOriginalName,
+    sizeBytes: buffer.length
+  };
 }
 
 async function prepareCampaignMedia(file: File): Promise<PreparedCampaignMedia> {
