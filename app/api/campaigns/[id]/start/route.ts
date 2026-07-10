@@ -1,15 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { CampaignStatus } from "@prisma/client";
-import { prisma } from "@/src/lib/prisma/client";
-import { schedulePendingRecipients } from "@/src/lib/campaigns/schedule";
+import { startCampaign } from "@/src/lib/campaigns/start-campaign";
 import { getActiveInstanceIdFromSearchOrDefault } from "@/src/lib/server/whatsapp-instances";
 
 export const runtime = "nodejs";
-
-const finalCampaignStatuses: CampaignStatus[] = [
-  CampaignStatus.canceled,
-  CampaignStatus.completed
-];
 
 export async function POST(
   request: NextRequest,
@@ -19,38 +12,17 @@ export async function POST(
 ) {
   const { id } = await context.params;
   const instanceId = await getActiveInstanceIdFromSearchOrDefault(request.nextUrl.searchParams);
-  const campaign = await prisma.campaign.findFirst({
-    where: {
-      id,
-      instanceId
-    }
+  const result = await startCampaign({
+    campaignId: id,
+    instanceId,
+    origin: "MANUAL"
   });
 
-  if (!campaign) {
+  if (result.reason === "not_found") {
     return NextResponse.json({ error: "Campanha nao encontrada" }, { status: 404 });
   }
 
-  if (finalCampaignStatuses.includes(campaign.status)) {
-    return NextResponse.json(
-      { error: "Campanha finalizada nao pode ser iniciada" },
-      { status: 400 }
-    );
-  }
-
-  const activeCampaign = await prisma.campaign.findFirst({
-    where: {
-      instanceId,
-      id: {
-        not: campaign.id
-      },
-      status: CampaignStatus.running
-    },
-    select: {
-      id: true
-    }
-  });
-
-  if (activeCampaign) {
+  if (result.reason === "another_campaign_running") {
     return NextResponse.json(
       {
         error:
@@ -60,17 +32,12 @@ export async function POST(
     );
   }
 
-  await prisma.campaign.update({
-    where: {
-      id
-    },
-    data: {
-      status: CampaignStatus.running,
-      startedAt: campaign.startedAt ?? new Date()
-    }
-  });
+  if (!result.started && !result.alreadyStarted) {
+    return NextResponse.json(
+      { error: "Campanha nao pode ser iniciada no status atual" },
+      { status: 400 }
+    );
+  }
 
-  await schedulePendingRecipients(id);
-
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true, ...result });
 }

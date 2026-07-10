@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { CampaignRecipientStatus, CampaignStatus } from "@prisma/client";
+import { CampaignRecipientStatus } from "@prisma/client";
 import { renderCampaignMessage } from "@/src/lib/campaigns/message-template";
+import { parseCampaignScheduleInput } from "@/src/lib/campaigns/scheduling-input";
 import { buildCampaignDedupeKey } from "@/src/lib/labels/audience";
 import { prisma } from "@/src/lib/prisma/client";
 import { getActiveInstanceIdFromSearchOrDefault } from "@/src/lib/server/whatsapp-instances";
@@ -79,6 +80,8 @@ export async function POST(request: NextRequest) {
     contactIds?: string[];
     chatIds?: string[];
     instanceId?: string;
+    sendMode?: "NOW" | "SCHEDULED";
+    scheduledAt?: string | null;
   };
   const instanceId = await getActiveInstanceIdFromSearchOrDefault({
     instanceId: payload.instanceId
@@ -90,6 +93,7 @@ export async function POST(request: NextRequest) {
   const requestedMaxRecipients =
     Number.isInteger(maxRecipients) && maxRecipients > 0 ? Math.min(maxRecipients, 500) : null;
   const advancedSettings = serializeAdvancedSettings(payload.advancedSettings);
+  const scheduleInput = parseCampaignScheduleInput(payload.sendMode, payload.scheduledAt);
   const contactIds = Array.isArray(payload.contactIds)
     ? Array.from(new Set(payload.contactIds.map((id) => String(id).trim()).filter(Boolean)))
     : [];
@@ -98,6 +102,10 @@ export async function POST(request: NextRequest) {
 
   if (!name) {
     return NextResponse.json({ error: "Nome da campanha obrigatorio" }, { status: 400 });
+  }
+
+  if (!scheduleInput.ok) {
+    return NextResponse.json({ error: scheduleInput.error }, { status: 400 });
   }
 
   if (!Number.isInteger(intervalMinutes) || intervalMinutes < 1) {
@@ -173,7 +181,8 @@ export async function POST(request: NextRequest) {
         name,
         defaultMessage,
         intervalMinutes,
-        status: CampaignStatus.draft,
+        status: scheduleInput.status,
+        scheduledAt: scheduleInput.scheduledAt,
         targetMode: "chatIds",
         excludeGroups: true,
         dedupeKey,
@@ -239,6 +248,8 @@ export async function POST(request: NextRequest) {
       name,
       defaultMessage: defaultMessage || null,
       intervalMinutes,
+      status: scheduleInput.status,
+      scheduledAt: scheduleInput.scheduledAt,
       maxRecipients: requestedMaxRecipients,
       sendWindowStart: advancedSettings,
       recipients: {

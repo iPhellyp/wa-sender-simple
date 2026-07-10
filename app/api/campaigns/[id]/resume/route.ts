@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { CampaignStatus } from "@prisma/client";
-import { prisma } from "@/src/lib/prisma/client";
-import { schedulePendingRecipients } from "@/src/lib/campaigns/schedule";
+import { startCampaign } from "@/src/lib/campaigns/start-campaign";
 import { getActiveInstanceIdFromSearchOrDefault } from "@/src/lib/server/whatsapp-instances";
 
 export const runtime = "nodejs";
@@ -14,20 +12,14 @@ export async function POST(
 ) {
   const { id } = await context.params;
   const instanceId = await getActiveInstanceIdFromSearchOrDefault(request.nextUrl.searchParams);
-  const activeCampaign = await prisma.campaign.findFirst({
-    where: {
-      instanceId,
-      id: {
-        not: id
-      },
-      status: CampaignStatus.running
-    },
-    select: {
-      id: true
-    }
+  const result = await startCampaign({
+    campaignId: id,
+    instanceId,
+    origin: "MANUAL",
+    allowPaused: true
   });
 
-  if (activeCampaign) {
+  if (result.reason === "another_campaign_running") {
     return NextResponse.json(
       {
         error:
@@ -37,22 +29,16 @@ export async function POST(
     );
   }
 
-  const campaign = await prisma.campaign.updateMany({
-    where: {
-      id,
-      instanceId,
-      status: CampaignStatus.paused
-    },
-    data: {
-      status: CampaignStatus.running
-    }
-  });
-
-  if (campaign.count === 0) {
+  if (result.reason === "not_found") {
     return NextResponse.json({ error: "Campanha pausada nao encontrada" }, { status: 404 });
   }
 
-  await schedulePendingRecipients(id);
+  if (!result.started && !result.alreadyStarted) {
+    return NextResponse.json(
+      { error: "Campanha nao esta pausada" },
+      { status: 400 }
+    );
+  }
 
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true, ...result });
 }

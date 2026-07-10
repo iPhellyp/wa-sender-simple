@@ -1,6 +1,7 @@
 ﻿import { NextRequest, NextResponse } from "next/server";
-import { CampaignStatus } from "@prisma/client";
 import { renderCampaignMessage } from "@/src/lib/campaigns/message-template";
+import { parseCampaignScheduleInput } from "@/src/lib/campaigns/scheduling-input";
+import { startCampaign } from "@/src/lib/campaigns/start-campaign";
 import { prisma } from "@/src/lib/prisma/client";
 import {
   ABSOLUTE_MAX_RECIPIENTS,
@@ -42,6 +43,8 @@ export async function POST(
     advancedSettings?: unknown;
     startNow?: boolean;
     instanceId?: string;
+    sendMode?: "NOW" | "SCHEDULED";
+    scheduledAt?: string | null;
   };
   const instanceId = await getActiveInstanceIdFromSearchOrDefault({
     instanceId: payload.instanceId
@@ -56,9 +59,21 @@ export async function POST(
     payload.excludeAlreadySentDays ?? DEFAULT_EXCLUDE_ALREADY_SENT_DAYS
   );
   const maxRecipients = Number(payload.maxRecipients ?? DEFAULT_MAX_RECIPIENTS);
+  const scheduleInput = parseCampaignScheduleInput(payload.sendMode, payload.scheduledAt);
 
   if (!name) {
     return NextResponse.json({ error: "Nome da campanha obrigatorio" }, { status: 400 });
+  }
+
+  if (!scheduleInput.ok) {
+    return NextResponse.json({ error: scheduleInput.error }, { status: 400 });
+  }
+
+  if (payload.startNow === true && scheduleInput.sendMode === "SCHEDULED") {
+    return NextResponse.json(
+      { error: "Campanha agendada nao pode usar inicio automatico" },
+      { status: 400 }
+    );
   }
 
   if (!message) {
@@ -108,28 +123,6 @@ export async function POST(
     );
   }
 
-  if (payload.startNow === true) {
-    const activeCampaign = await prisma.campaign.findFirst({
-      where: {
-        instanceId,
-        status: CampaignStatus.running
-      },
-      select: {
-        id: true
-      }
-    });
-
-    if (activeCampaign) {
-      return NextResponse.json(
-        {
-          error:
-            "Ja existe uma campanha ativa nesta instancia. Pause, cancele ou aguarde finalizar."
-        },
-        { status: 409 }
-      );
-    }
-  }
-
   const dedupeKey = `label:${labelId}:${Date.now()}`;
   const campaign = await prisma.campaign.create({
     data: {
@@ -137,7 +130,8 @@ export async function POST(
       instanceId,
       defaultMessage: message,
       intervalMinutes,
-      status: CampaignStatus.draft,
+      status: scheduleInput.status,
+      scheduledAt: scheduleInput.scheduledAt,
       targetMode: "label",
       targetLabelId: audience.label.id,
       excludeGroups,
@@ -167,17 +161,24 @@ export async function POST(
   });
 
   if (payload.startNow === true) {
-    const { schedulePendingRecipients } = await import("@/src/lib/campaigns/schedule");
-    await prisma.campaign.update({
-      where: {
-        id: campaign.id
-      },
-      data: {
-        status: CampaignStatus.running,
-        startedAt: new Date()
-      }
+    const startResult = await startCampaign({
+      campaignId: campaign.id,
+      instanceId,
+      origin: "MANUAL"
     });
-    await schedulePendingRecipients(campaign.id);
+
+    if (!startResult.started && !startResult.alreadyStarted) {
+      return NextResponse.json(
+        {
+          error:
+            startResult.reason === "another_campaign_running"
+              ? "Ja existe uma campanha ativa nesta instancia. Pause, cancele ou aguarde finalizar."
+              : "Campanha criada, mas nao pode ser iniciada no status atual",
+          campaign
+        },
+        { status: startResult.reason === "another_campaign_running" ? 409 : 400 }
+      );
+    }
   }
 
   return NextResponse.json(
@@ -192,7 +193,9 @@ export async function POST(
       },
       message: payload.startNow
         ? "Envio por etiqueta criado e iniciado."
-        : "Envio por etiqueta criado em rascunho. Inicie em /envios."
+        : scheduleInput.sendMode === "SCHEDULED"
+          ? "Envio por etiqueta agendado."
+          : "Envio por etiqueta criado em rascunho. Inicie em /envios."
     },
     { status: 201 }
   );

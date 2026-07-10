@@ -20,7 +20,12 @@ export async function POST(
         id,
         instanceId,
         status: {
-          in: [CampaignStatus.draft, CampaignStatus.running, CampaignStatus.paused]
+          in: [
+            CampaignStatus.draft,
+            CampaignStatus.scheduled,
+            CampaignStatus.running,
+            CampaignStatus.paused
+          ]
         }
       },
       data: {

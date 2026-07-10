@@ -44,6 +44,7 @@ type CampaignSummary = {
   defaultMessage: string | null;
   intervalMinutes: number;
   status: string;
+  scheduledAt: string | null;
   recipientCount: number;
   recipientStatusCounts: Record<string, number>;
 };
@@ -91,6 +92,7 @@ type CampaignPrefillContext = {
 
 type AudienceMode = "label" | "catalog" | "contacts";
 type DelayMode = "fixed_seconds" | "fixed_minutes" | "random_range";
+type SendMode = "NOW" | "SCHEDULED";
 
 const steps = ["Publico", "Mensagem", "Seguranca", "Revisao"];
 const messageTokens = [
@@ -114,6 +116,7 @@ function statusClass(status: string) {
 function statusLabel(status: string) {
   const labels: Record<string, string> = {
     draft: "rascunho",
+    scheduled: "AGENDADA",
     running: "rodando",
     paused: "pausada",
     completed: "completa",
@@ -124,6 +127,30 @@ function statusLabel(status: string) {
   };
 
   return labels[status] ?? status;
+}
+
+function getScheduleValidation(sendMode: SendMode, scheduledLocalDateTime: string) {
+  if (sendMode === "NOW") {
+    return { ok: true, error: null };
+  }
+
+  const scheduledAt = new Date(scheduledLocalDateTime);
+
+  if (!scheduledLocalDateTime || Number.isNaN(scheduledAt.getTime())) {
+    return { ok: false, error: "Informe uma data e hora validas para o agendamento." };
+  }
+
+  if (scheduledAt.getTime() < Date.now() + 2 * 60 * 1000) {
+    return { ok: false, error: "Escolha um horario com pelo menos 2 minutos de antecedencia." };
+  }
+
+  return { ok: true, error: null };
+}
+
+function formatLocalDateTime(value: string | null | undefined) {
+  if (!value) return "-";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "-" : date.toLocaleString("pt-BR");
 }
 
 function audienceLabel(mode: AudienceMode) {
@@ -194,6 +221,8 @@ export function CampaignsClient({
   const [pauseEvery, setPauseEvery] = useState(25);
   const [pauseMinutes, setPauseMinutes] = useState(10);
   const [batchLimit, setBatchLimit] = useState(100);
+  const [sendMode, setSendMode] = useState<SendMode>("NOW");
+  const [scheduledLocalDateTime, setScheduledLocalDateTime] = useState("");
   const [testPhone, setTestPhone] = useState("");
   const [testBusy, setTestBusy] = useState(false);
   const [testFeedback, setTestFeedback] = useState<{ tone: "success" | "error"; text: string } | null>(null);
@@ -230,11 +259,13 @@ export function CampaignsClient({
         ? selectedCatalogChatIds.size
         : selectedContacts.size;
   const securityConfirmed = confirmedAudience && confirmedMessage && confirmedGroups;
+  const scheduleValidation = getScheduleValidation(sendMode, scheduledLocalDateTime);
   const canCreate =
     Boolean(name.trim()) &&
     Boolean(message.trim()) &&
     intervalMinutes >= 1 &&
     audienceCount > 0 &&
+    scheduleValidation.ok &&
     securityConfirmed;
   const sampleContact = prefilledContacts[0] ?? contacts[0] ?? null;
   const renderedPreviewMessage = previewMessage || (
@@ -375,6 +406,8 @@ export function CampaignsClient({
       setCreatedCampaignId(null);
       setCreatedMessage(null);
       setPreviewMessage("");
+      setSendMode("NOW");
+      setScheduledLocalDateTime("");
     }
 
     void refresh().catch((loadError) => {
@@ -433,11 +466,21 @@ export function CampaignsClient({
     setCreatedMessage(null);
 
     try {
+      const scheduleValidationResult = getScheduleValidation(sendMode, scheduledLocalDateTime);
+
+      if (!scheduleValidationResult.ok) {
+        throw new Error(scheduleValidationResult.error ?? "Agendamento invalido");
+      }
+
+      const scheduledAt =
+        sendMode === "SCHEDULED" ? new Date(scheduledLocalDateTime).toISOString() : null;
       const body = {
         name: name.trim(),
         defaultMessage: message.trim(),
         message: message.trim(),
         intervalMinutes,
+        sendMode,
+        scheduledAt,
         advancedSettings: {
           delayMode,
           fixedSeconds,
@@ -461,6 +504,8 @@ export function CampaignsClient({
                 intervalMinutes,
                 advancedSettings: body.advancedSettings,
                 maxRecipients: batchLimit,
+                sendMode: body.sendMode,
+                scheduledAt: body.scheduledAt,
                 startNow: false
               })
             })
@@ -474,6 +519,8 @@ export function CampaignsClient({
                 advancedSettings: body.advancedSettings,
                 maxRecipients: batchLimit,
                 instanceId: activeInstanceId,
+                sendMode: body.sendMode,
+                scheduledAt: body.scheduledAt,
                 contactIds: audienceMode === "contacts" ? Array.from(selectedContacts) : [],
                 chatIds: audienceMode === "catalog" ? Array.from(selectedCatalogChatIds) : []
               })
@@ -826,6 +873,47 @@ export function CampaignsClient({
                     <span className="muted">O preview usa variaveis e spintax com dados de exemplo.</span>
                   </div>
                 </div>
+                <div className="field">
+                  <span>Quando enviar</span>
+                  <div className="filter-bar">
+                    <label className="check-card">
+                      <input
+                        checked={sendMode === "NOW"}
+                        name="send-mode"
+                        type="radio"
+                        onChange={() => {
+                          setSendMode("NOW");
+                          setScheduledLocalDateTime("");
+                        }}
+                      />
+                      <span>Enviar agora</span>
+                    </label>
+                    <label className="check-card">
+                      <input
+                        checked={sendMode === "SCHEDULED"}
+                        name="send-mode"
+                        type="radio"
+                        onChange={() => setSendMode("SCHEDULED")}
+                      />
+                      <span>Agendar envio</span>
+                    </label>
+                  </div>
+                </div>
+                {sendMode === "SCHEDULED" ? (
+                  <div className="field">
+                    <label htmlFor="campaign-scheduled-at">Data e hora do envio</label>
+                    <input
+                      className="input"
+                      id="campaign-scheduled-at"
+                      type="datetime-local"
+                      value={scheduledLocalDateTime}
+                      onChange={(event) => setScheduledLocalDateTime(event.target.value)}
+                    />
+                    <span className={scheduleValidation.ok ? "muted" : "send-error"}>
+                      {scheduleValidation.error ?? "O horario sera salvo em UTC."}
+                    </span>
+                  </div>
+                ) : null}
                 <div className="filter-bar">
                   <div className="field">
                     <label htmlFor="test-phone">Telefone de teste</label>
@@ -977,6 +1065,11 @@ export function CampaignsClient({
                     <li>Pausa: {pauseMinutes}min a cada {pauseEvery} mensagens</li>
                     <li>Limite do lote: {batchLimit}</li>
                     <li>Mensagem: {message.trim() ? "preenchida" : "pendente"}</li>
+                    <li>
+                      Envio: {sendMode === "NOW"
+                        ? "imediato apos inicio manual"
+                        : `agendada para ${formatLocalDateTime(scheduledLocalDateTime)}`}
+                    </li>
                     <li>Seguranca: {securityConfirmed ? "confirmada" : "pendente"}</li>
                   </ul>
                 </div>
@@ -1006,7 +1099,10 @@ export function CampaignsClient({
               </button>
               <button
                 className="button"
-                disabled={step === steps.length - 1}
+                disabled={
+                  step === steps.length - 1 ||
+                  (step === 1 && !scheduleValidation.ok)
+                }
                 type="button"
                 onClick={() => setStep((current) => Math.min(steps.length - 1, current + 1))}
               >
@@ -1035,6 +1131,14 @@ export function CampaignsClient({
             <div className="meta-row">
               <span>Intervalo</span>
               <span>{intervalMinutes || 0} min</span>
+            </div>
+            <div className="meta-row">
+              <span>Envio</span>
+              <span>
+                {sendMode === "NOW"
+                  ? "Imediato"
+                  : formatLocalDateTime(scheduledLocalDateTime)}
+              </span>
             </div>
           </div>
           <div className="wa-preview">
@@ -1095,7 +1199,14 @@ export function CampaignsClient({
               <tbody>
                 {campaigns.map((campaign) => (
                   <tr key={campaign.id}>
-                    <td>{campaign.name}</td>
+                    <td>
+                      <strong>{campaign.name}</strong>
+                      {campaign.status === "scheduled" ? (
+                        <span className="muted">
+                          {formatLocalDateTime(campaign.scheduledAt)}
+                        </span>
+                      ) : null}
+                    </td>
                     <td>{campaign.targetLabel?.name ?? campaignAudienceLabel(campaign.targetMode)}</td>
                     <td>
                       <span className={`status-badge ${statusClass(campaign.status)}`}>
@@ -1119,7 +1230,7 @@ export function CampaignsClient({
                         >
                           Ver
                         </button>
-                        {campaign.status === "running" || campaign.status === "scheduled" ? (
+                        {campaign.status === "running" ? (
                           <button
                             className="button secondary compact-button"
                             disabled={busy}
@@ -1131,11 +1242,15 @@ export function CampaignsClient({
                         ) : (
                           <button
                             className="button secondary compact-button"
-                            disabled={busy || !["draft", "paused"].includes(campaign.status)}
+                            disabled={busy || !["draft", "scheduled", "paused"].includes(campaign.status)}
                             type="button"
                             onClick={() => void runAction(campaign.id, campaign.status === "paused" ? "resume" : "start")}
                           >
-                            {campaign.status === "paused" ? "Retomar" : "Iniciar"}
+                            {campaign.status === "paused"
+                              ? "Retomar"
+                              : campaign.status === "scheduled"
+                                ? "Iniciar agora"
+                                : "Iniciar"}
                           </button>
                         )}
                         <Link
@@ -1165,6 +1280,9 @@ export function CampaignsClient({
                 <div>
                   <strong>{campaign.name}</strong>
                   <span className="muted">{campaign.targetLabel?.name ?? campaignAudienceLabel(campaign.targetMode)}</span>
+                  {campaign.status === "scheduled" ? (
+                    <span className="muted">{formatLocalDateTime(campaign.scheduledAt)}</span>
+                  ) : null}
                 </div>
                 <span className={`status-badge ${statusClass(campaign.status)}`}>
                   {statusLabel(campaign.status)}
@@ -1185,7 +1303,7 @@ export function CampaignsClient({
                   >
                     Ver
                   </button>
-                  {campaign.status === "running" || campaign.status === "scheduled" ? (
+                  {campaign.status === "running" ? (
                     <button
                       className="button secondary compact-button"
                       disabled={busy}
@@ -1197,11 +1315,15 @@ export function CampaignsClient({
                   ) : (
                     <button
                       className="button secondary compact-button"
-                      disabled={busy || !["draft", "paused"].includes(campaign.status)}
+                      disabled={busy || !["draft", "scheduled", "paused"].includes(campaign.status)}
                       type="button"
                       onClick={() => void runAction(campaign.id, campaign.status === "paused" ? "resume" : "start")}
                     >
-                      {campaign.status === "paused" ? "Retomar" : "Iniciar"}
+                      {campaign.status === "paused"
+                        ? "Retomar"
+                        : campaign.status === "scheduled"
+                          ? "Iniciar agora"
+                          : "Iniciar"}
                     </button>
                   )}
                   <Link

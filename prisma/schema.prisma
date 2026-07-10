@@ -17,6 +17,7 @@ enum WhatsappStatus {
 
 enum CampaignStatus {
   draft
+  scheduled
   running
   paused
   completed
@@ -230,14 +231,21 @@ model Campaign {
   sendWindowEnd          String?
   createdAt              DateTime            @default(now())
   updatedAt              DateTime            @updatedAt
+  scheduledAt            DateTime?
   startedAt              DateTime?
   completedAt            DateTime?
+  mediaKind              String?
+  mediaPath              String?
+  mediaOriginalName      String?
+  mediaMimeType          String?
+  mediaSizeBytes         Int?
   instance               WhatsappInstance    @relation(fields: [instanceId], references: [id], onDelete: Restrict)
   recipients             CampaignRecipient[]
   sendLogs               SendLog[]
   targetLabel            WhatsappLabel?      @relation(fields: [targetLabelId], references: [id], onDelete: SetNull)
 
   @@index([instanceId, createdAt])
+  @@index([instanceId, status, scheduledAt])
   @@index([status])
   @@index([targetMode])
   @@index([targetLabelId])
