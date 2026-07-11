@@ -1,33 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { CampaignRecipientStatus } from "@prisma/client";
 import { prisma } from "@/src/lib/prisma/client";
+import {
+  emptyRecipientStatusSummary,
+  getCampaignRecipientCountMap,
+  totalRecipientCount
+} from "@/src/lib/campaigns/recipient-counts";
 import { getActiveInstanceIdFromSearchOrDefault } from "@/src/lib/server/whatsapp-instances";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-function countRecipientsByStatus(
-  recipients: Array<{
-    status: CampaignRecipientStatus;
-    skippedReason: string | null;
-  }>
-) {
-  const statusCounts = recipients.reduce<Record<string, number>>((accumulator, recipient) => {
-    accumulator[recipient.status] = (accumulator[recipient.status] ?? 0) + 1;
-    return accumulator;
-  }, {});
-
-  const skippedReasons = recipients.reduce<Record<string, number>>((accumulator, recipient) => {
-    if (!recipient.skippedReason) {
-      return accumulator;
-    }
-
-    accumulator[recipient.skippedReason] = (accumulator[recipient.skippedReason] ?? 0) + 1;
-    return accumulator;
-  }, {});
-
-  return { statusCounts, skippedReasons };
-}
 
 export async function GET(request: NextRequest) {
   const instanceId = await getActiveInstanceIdFromSearchOrDefault(request.nextUrl.searchParams);
@@ -42,15 +23,6 @@ export async function GET(request: NextRequest) {
           name: true,
           color: true
         }
-      },
-      recipients: {
-        where: {
-          instanceId
-        },
-        select: {
-          status: true,
-          skippedReason: true
-        }
       }
     },
     orderBy: {
@@ -58,10 +30,33 @@ export async function GET(request: NextRequest) {
     }
   });
 
+  const campaignIds = campaigns.map((campaign) => campaign.id);
+  const [countMap, skippedRows] = await Promise.all([
+    getCampaignRecipientCountMap(instanceId, campaignIds),
+    campaignIds.length
+      ? prisma.campaignRecipient.groupBy({
+          by: ["campaignId", "skippedReason"],
+          where: {
+            instanceId,
+            campaignId: { in: campaignIds },
+            skippedReason: { not: null }
+          },
+          _count: { _all: true }
+        })
+      : Promise.resolve([])
+  ]);
+  const skippedMap = new Map<string, Record<string, number>>();
+  for (const row of skippedRows) {
+    if (!row.skippedReason) continue;
+    const counts = skippedMap.get(row.campaignId) ?? {};
+    counts[row.skippedReason] = row._count._all;
+    skippedMap.set(row.campaignId, counts);
+  }
+
   return NextResponse.json({
     instanceId,
     campaigns: campaigns.map((campaign) => {
-      const counts = countRecipientsByStatus(campaign.recipients);
+      const statusCounts = countMap.get(campaign.id) ?? emptyRecipientStatusSummary();
 
       return {
         id: campaign.id,
@@ -83,9 +78,9 @@ export async function GET(request: NextRequest) {
         mediaMimeType: campaign.mediaMimeType,
         mediaSizeBytes: campaign.mediaSizeBytes,
         lastError: campaign.lastError,
-        recipientCount: campaign.recipients.length,
-        recipientStatusCounts: counts.statusCounts,
-        skippedReasonCounts: counts.skippedReasons
+        recipientCount: totalRecipientCount(statusCounts),
+        recipientStatusCounts: statusCounts,
+        skippedReasonCounts: skippedMap.get(campaign.id) ?? {}
       };
     })
   });

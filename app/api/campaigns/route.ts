@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { CampaignRecipientStatus } from "@prisma/client";
 import { renderCampaignMessage } from "@/src/lib/campaigns/message-template";
 import {
   CampaignMediaError,
@@ -8,6 +7,11 @@ import {
   serializeCampaignForApi
 } from "@/src/lib/campaigns/media";
 import { parseCampaignScheduleInput } from "@/src/lib/campaigns/scheduling-input";
+import {
+  emptyRecipientStatusSummary,
+  getCampaignRecipientCountMap,
+  totalRecipientCount
+} from "@/src/lib/campaigns/recipient-counts";
 import { buildCampaignDedupeKey } from "@/src/lib/labels/audience";
 import { prisma } from "@/src/lib/prisma/client";
 import { getActiveInstanceIdFromSearchOrDefault } from "@/src/lib/server/whatsapp-instances";
@@ -18,17 +22,6 @@ import {
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-function countRecipientsByStatus(
-  recipients: Array<{
-    status: CampaignRecipientStatus;
-  }>
-) {
-  return recipients.reduce<Record<string, number>>((accumulator, recipient) => {
-    accumulator[recipient.status] = (accumulator[recipient.status] ?? 0) + 1;
-    return accumulator;
-  }, {});
-}
 
 function serializeAdvancedSettings(value: unknown) {
   if (!value || typeof value !== "object") {
@@ -59,14 +52,6 @@ export async function GET(request: NextRequest) {
           name: true,
           color: true
         }
-      },
-      recipients: {
-        where: {
-          instanceId
-        },
-        select: {
-          status: true
-        }
       }
     },
     orderBy: {
@@ -74,15 +59,18 @@ export async function GET(request: NextRequest) {
     }
   });
 
+  const countMap = await getCampaignRecipientCountMap(instanceId, campaigns.map((campaign) => campaign.id));
+
   return NextResponse.json({
     instanceId,
-    campaigns: campaigns.map((campaign) =>
-      serializeCampaignForApi({
+    campaigns: campaigns.map((campaign) => {
+      const recipientStatusCounts = countMap.get(campaign.id) ?? emptyRecipientStatusSummary();
+      return serializeCampaignForApi({
         ...campaign,
-        recipientCount: campaign.recipients.length,
-        recipientStatusCounts: countRecipientsByStatus(campaign.recipients)
-      })
-    )
+        recipientCount: totalRecipientCount(recipientStatusCounts),
+        recipientStatusCounts
+      });
+    })
   });
 }
 

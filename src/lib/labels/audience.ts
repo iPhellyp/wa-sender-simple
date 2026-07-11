@@ -52,6 +52,7 @@ export type AudienceResult = {
   };
   total: number;
   eligible: number;
+  selected: number;
   skipped: number;
   skippedReasons: Record<SkippedReason, number>;
   jidTypeCounts: Record<AudienceJidType, number>;
@@ -59,9 +60,7 @@ export type AudienceResult = {
   recipientsPreview: AudiencePreviewItem[];
 };
 
-const DEFAULT_MAX_RECIPIENTS = 100;
-const DEFAULT_EXCLUDE_ALREADY_SENT_DAYS = 7;
-const ABSOLUTE_MAX_RECIPIENTS = 500;
+const DEFAULT_EXCLUDE_ALREADY_SENT_DAYS = 0;
 
 function hashMessage(message: string) {
   return createHash("sha256").update(message.trim()).digest("hex").slice(0, 32);
@@ -240,7 +239,7 @@ async function loadOptedOutPhones(phones: string[], instanceId: string) {
   return new Set(contacts.map((contact) => contact.phoneNormalized));
 }
 
-async function loadRecentlySentJids(jids: string[], days: number, instanceId: string) {
+export async function loadRecentlySentJids(jids: string[], days: number, instanceId: string) {
   if (days <= 0 || jids.length === 0) {
     return new Set<string>();
   }
@@ -325,7 +324,7 @@ export async function buildLabelAudience(options: {
   excludeAlreadySentDays?: number;
   limit?: number;
   search?: string;
-  maxRecipients?: number;
+  maxRecipients?: number | null;
 }) {
   const label = await prisma.whatsappLabel.findFirst({
     where: {
@@ -343,11 +342,11 @@ export async function buildLabelAudience(options: {
   const excludeOptOut = options.excludeOptOut ?? true;
   const excludeAlreadySentDays =
     options.excludeAlreadySentDays ?? DEFAULT_EXCLUDE_ALREADY_SENT_DAYS;
-  const previewLimit = Math.min(Math.max(options.limit ?? 100, 1), 500);
-  const maxRecipients = Math.min(
-    Math.max(options.maxRecipients ?? DEFAULT_MAX_RECIPIENTS, 1),
-    ABSOLUTE_MAX_RECIPIENTS
-  );
+  const previewLimit = Math.min(Math.max(options.limit ?? 100, 1), 100);
+  const maxRecipients =
+    typeof options.maxRecipients === "number" && Number.isFinite(options.maxRecipients)
+      ? Math.max(1, Math.floor(options.maxRecipients))
+      : null;
   const search = options.search?.trim().toLowerCase() ?? "";
 
   const associations = await prisma.whatsappChatLabel.findMany({
@@ -496,14 +495,9 @@ export async function buildLabelAudience(options: {
   );
 
   const finalEligible: AudiencePreviewItem[] = [];
+  let eligibleCount = 0;
 
   for (const item of eligibleItems) {
-    if (finalEligible.length >= maxRecipients) {
-      skippedReasons.max_recipients_reached += 1;
-      logRecipientSkipped("max_recipients_reached");
-      continue;
-    }
-
     if (item.phoneNormalized && optedOutPhones.has(item.phoneNormalized)) {
       skippedReasons.opt_out += 1;
       logRecipientSkipped("opt_out");
@@ -513,6 +507,14 @@ export async function buildLabelAudience(options: {
     if (recentlySentJids.has(item.jid)) {
       skippedReasons.already_sent_recently += 1;
       logRecipientSkipped("already_sent_recently");
+      continue;
+    }
+
+    eligibleCount += 1;
+
+    if (maxRecipients !== null && finalEligible.length >= maxRecipients) {
+      skippedReasons.max_recipients_reached += 1;
+      logRecipientSkipped("max_recipients_reached");
       continue;
     }
 
@@ -539,7 +541,8 @@ export async function buildLabelAudience(options: {
       deleted: label.deleted
     },
     total: associations.length,
-    eligible: finalEligible.length,
+    eligible: eligibleCount,
+    selected: finalEligible.length,
     skipped,
     skippedReasons,
     jidTypeCounts,
@@ -555,5 +558,5 @@ export function buildCampaignDedupeKey(campaignId: string, jid: string) {
   return `${campaignId}:${jid}`;
 }
 
-export { hashMessage, DEFAULT_MAX_RECIPIENTS, DEFAULT_EXCLUDE_ALREADY_SENT_DAYS, ABSOLUTE_MAX_RECIPIENTS };
+export { hashMessage, DEFAULT_EXCLUDE_ALREADY_SENT_DAYS };
 

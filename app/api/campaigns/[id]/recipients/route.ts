@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/src/lib/prisma/client";
 import { getActiveInstanceIdFromSearchOrDefault } from "@/src/lib/server/whatsapp-instances";
 import { resolveContactDisplay } from "@/src/lib/whatsapp/contact-display";
+import {
+  emptyRecipientStatusSummary,
+  getCampaignRecipientCountMap,
+  totalRecipientCount
+} from "@/src/lib/campaigns/recipient-counts";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,6 +19,12 @@ export async function GET(
 ) {
   const { id } = await context.params;
   const instanceId = await getActiveInstanceIdFromSearchOrDefault(request.nextUrl.searchParams);
+  const requestedPage = Number(request.nextUrl.searchParams.get("page") ?? 1);
+  const requestedPageSize = Number(request.nextUrl.searchParams.get("pageSize") ?? 25);
+  const page = Number.isInteger(requestedPage) && requestedPage > 0 ? requestedPage : 1;
+  const pageSize = Number.isInteger(requestedPageSize)
+    ? Math.min(100, Math.max(10, requestedPageSize))
+    : 25;
   const recipients = await prisma.campaignRecipient.findMany({
     where: {
       instanceId,
@@ -24,8 +35,13 @@ export async function GET(
     },
     orderBy: {
       createdAt: "asc"
-    }
+    },
+    skip: (page - 1) * pageSize,
+    take: pageSize
   });
+  const countMap = await getCampaignRecipientCountMap(instanceId, [id]);
+  const summary = countMap.get(id) ?? emptyRecipientStatusSummary();
+  const total = totalRecipientCount(summary);
 
   const jids = Array.from(
     new Set(recipients.map((recipient) => recipient.jid?.trim()).filter(Boolean))
@@ -107,6 +123,13 @@ export async function GET(
         ...recipient,
         ...display
       };
-    })
+    }),
+    summary,
+    pagination: {
+      page,
+      pageSize,
+      total,
+      totalPages: Math.max(1, Math.ceil(total / pageSize))
+    }
   });
 }

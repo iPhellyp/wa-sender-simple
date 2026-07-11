@@ -58,6 +58,13 @@ type CampaignDetails = {
   mediaSizeBytes: number | null;
   lastError: string | null;
   recipients: RecipientDetail[];
+  recipientSummary: Record<string, number>;
+  recipientPagination: {
+    page: number;
+    pageSize: number;
+    total: number;
+    totalPages: number;
+  };
 };
 
 function statusClass(status: string) {
@@ -171,19 +178,9 @@ export function EnviosClient({ selectedCampaignId }: { selectedCampaignId?: stri
   const selectedCampaign = campaigns.find((campaign) => campaign.id === selectedId) ?? null;
   const selectedDetails = details?.id === selectedId ? details : null;
 
-  const detailGroups = useMemo(() => {
-    const recipients = selectedDetails?.recipients ?? [];
-    return {
-      sent: recipients.filter((recipient) => recipient.status === "sent"),
-      failed: recipients.filter((recipient) => recipient.status === "failed"),
-      pending: recipients.filter((recipient) =>
-        ["pending", "scheduled", "sending"].includes(recipient.status)
-      )
-    };
-  }, [selectedDetails]);
-
-  const detailTotal = selectedDetails?.recipients.length ?? 0;
-  const progressPercent = detailTotal > 0 ? Math.round((detailGroups.sent.length / detailTotal) * 100) : 0;
+  const detailTotal = selectedDetails?.recipientPagination.total ?? 0;
+  const detailSent = selectedDetails?.recipientSummary.sent ?? 0;
+  const progressPercent = detailTotal > 0 ? Math.round((detailSent / detailTotal) * 100) : 0;
 
   async function loadCampaigns() {
     const params = new URLSearchParams();
@@ -194,8 +191,8 @@ export function EnviosClient({ selectedCampaignId }: { selectedCampaignId?: stri
     return data.campaigns;
   }
 
-  async function fetchDetails(campaignId: string) {
-    const params = new URLSearchParams();
+  async function fetchDetails(campaignId: string, page = 1) {
+    const params = new URLSearchParams({ page: String(page), pageSize: "25" });
     if (activeInstanceId) params.set("instanceId", activeInstanceId);
     const response = await fetch(`/api/envios/${campaignId}?${params.toString()}`, { cache: "no-store" });
     const data = (await response.json()) as { campaign?: CampaignDetails; error?: string };
@@ -558,9 +555,12 @@ export function EnviosClient({ selectedCampaignId }: { selectedCampaignId?: stri
 
               <div className="detail-metrics">
                 <span><strong>{detailTotal}</strong> total</span>
-                <span><strong>{detailGroups.sent.length}</strong> enviados</span>
-                <span><strong>{detailGroups.failed.length}</strong> falhas</span>
-                <span><strong>{detailGroups.pending.length}</strong> pendentes</span>
+                <span><strong>{selectedDetails.recipientSummary.pending ?? 0}</strong> aguardando</span>
+                <span><strong>{selectedDetails.recipientSummary.scheduled ?? 0}</strong> programados</span>
+                <span><strong>{selectedDetails.recipientSummary.sending ?? 0}</strong> enviando</span>
+                <span><strong>{selectedDetails.recipientSummary.sent ?? 0}</strong> enviados</span>
+                <span><strong>{selectedDetails.recipientSummary.failed ?? 0}</strong> falhas</span>
+                <span><strong>{selectedDetails.recipientSummary.canceled ?? 0}</strong> cancelados</span>
               </div>
 
               {selectedCampaign ? (
@@ -611,7 +611,7 @@ export function EnviosClient({ selectedCampaignId }: { selectedCampaignId?: stri
               <div>
                 <strong>Destinatarios recentes</strong>
                 <div className="recipient-list compact">
-                  {selectedDetails.recipients.slice(0, 10).map((recipient) => (
+                  {selectedDetails.recipients.map((recipient) => (
                     <article className="recipient-row" key={recipient.id}>
                       <div>
                         <strong>{recipient.displayName || "Contato sem numero resolvido"}</strong>
@@ -635,6 +635,15 @@ export function EnviosClient({ selectedCampaignId }: { selectedCampaignId?: stri
                     </div>
                   ) : null}
                 </div>
+                {selectedDetails.recipientPagination.totalPages > 1 ? (
+                  <div className="pagination-bar">
+                    <span>Pagina {selectedDetails.recipientPagination.page} de {selectedDetails.recipientPagination.totalPages}</span>
+                    <div className="page-actions">
+                      <button className="button secondary compact-button" type="button" disabled={selectedDetails.recipientPagination.page <= 1} onClick={() => void fetchDetails(selectedDetails.id, selectedDetails.recipientPagination.page - 1).then(setDetails)}>Anterior</button>
+                      <button className="button secondary compact-button" type="button" disabled={selectedDetails.recipientPagination.page >= selectedDetails.recipientPagination.totalPages} onClick={() => void fetchDetails(selectedDetails.id, selectedDetails.recipientPagination.page + 1).then(setDetails)}>Proxima</button>
+                    </div>
+                  </div>
+                ) : null}
               </div>
             </div>
           ) : (

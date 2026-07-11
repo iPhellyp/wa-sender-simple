@@ -105,27 +105,6 @@ export async function schedulePendingRecipients(campaignId: string, delayMs = 0)
       status: CampaignRecipientStatus.sent
     }
   });
-  const batchLimit = campaign.maxRecipients ?? undefined;
-
-  if (batchLimit && sentCount >= batchLimit) {
-    await prisma.campaignRecipient.updateMany({
-      where: {
-        instanceId: campaign.instanceId,
-        campaignId,
-        status: {
-          in: [CampaignRecipientStatus.pending, CampaignRecipientStatus.scheduled]
-        }
-      },
-      data: {
-        status: CampaignRecipientStatus.canceled,
-        error: "Limite do lote atingido",
-        skippedReason: "max_recipients_reached"
-      }
-    });
-    await completeCampaignIfDone(campaignId);
-    return;
-  }
-
   const sendingRecipientCount = await prisma.campaignRecipient.count({
     where: {
       instanceId: campaign.instanceId,

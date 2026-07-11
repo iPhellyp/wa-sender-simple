@@ -1,13 +1,14 @@
 ﻿"use client";
 
 import Link from "next/link";
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { appendInstanceIdToHref, getStoredActiveInstanceId } from "@/src/lib/client/active-instance";
 
 type AudienceResponse = {
   label: { id: string; name: string };
   total: number;
   eligible: number;
+  selected: number;
   skipped: number;
   skippedReasons: Record<string, number>;
   jidTypeCounts: Record<string, number>;
@@ -31,7 +32,9 @@ export function LabelSendClient({ labelId }: { labelId: string }) {
   const [name, setName] = useState("");
   const [message, setMessage] = useState("");
   const excludeGroups = true;
+  const [dedupeMode, setDedupeMode] = useState<"same_campaign" | "recent_days" | "allow_resend">("same_campaign");
   const [excludeAlreadySentDays, setExcludeAlreadySentDays] = useState(7);
+  const [recipientLimitMode, setRecipientLimitMode] = useState<"all" | "limited">("all");
   const [maxRecipients, setMaxRecipients] = useState(100);
   const [intervalMinutes, setIntervalMinutes] = useState(1);
   const [audience, setAudience] = useState<AudienceResponse | null>(null);
@@ -39,6 +42,7 @@ export function LabelSendClient({ labelId }: { labelId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [campaignId, setCampaignId] = useState<string | null>(null);
+  const creationKeyRef = useRef(globalThis.crypto.randomUUID());
 
   useEffect(() => {
     setActiveInstanceId(getStoredActiveInstanceId());
@@ -52,10 +56,10 @@ export function LabelSendClient({ labelId }: { labelId: string }) {
     try {
       const params = new URLSearchParams({
         excludeGroups: String(excludeGroups),
-        excludeAlreadySentDays: String(excludeAlreadySentDays),
-        maxRecipients: String(maxRecipients),
+        excludeAlreadySentDays: dedupeMode === "recent_days" ? String(excludeAlreadySentDays) : "0",
         limit: "50"
       });
+      if (recipientLimitMode === "limited") params.set("maxRecipients", String(maxRecipients));
       if (activeInstanceId) params.set("instanceId", activeInstanceId);
       const response = await fetch(`/api/etiquetas/${labelId}/audience?${params.toString()}`);
       const data = (await response.json()) as AudienceResponse;
@@ -73,13 +77,13 @@ export function LabelSendClient({ labelId }: { labelId: string }) {
   }
 
   async function createCampaign(startNow: boolean) {
-    if (!audience || audience.eligible === 0) {
+    if (!audience || audience.selected === 0) {
       setError("Pre-visualize o publico antes de criar o envio");
       return;
     }
 
     const confirmed = window.confirm(
-      `Voce esta prestes a enviar para ${audience.eligible} conversas. Ignorados: ${audience.skipped}. Confirma?`
+      `Voce esta prestes a enviar para ${audience.selected} conversas. Ignorados: ${audience.skipped}. Confirma?`
     );
 
     if (!confirmed) {
@@ -100,8 +104,10 @@ export function LabelSendClient({ labelId }: { labelId: string }) {
           name,
           message,
           excludeGroups,
-          excludeAlreadySentDays,
-          maxRecipients,
+          dedupeMode,
+          excludeAlreadySentDays: dedupeMode === "recent_days" ? excludeAlreadySentDays : null,
+          maxRecipients: recipientLimitMode === "limited" ? maxRecipients : null,
+          creationKey: creationKeyRef.current,
           intervalMinutes,
           startNow,
           instanceId: activeInstanceId || undefined
@@ -119,6 +125,7 @@ export function LabelSendClient({ labelId }: { labelId: string }) {
 
       setCampaignId(data.campaign?.id ?? null);
       setSuccess(data.message ?? "Envio criado");
+      creationKeyRef.current = globalThis.crypto.randomUUID();
     } catch (createError) {
       setError(createError instanceof Error ? createError.message : "Erro inesperado");
     } finally {
@@ -190,26 +197,32 @@ export function LabelSendClient({ labelId }: { labelId: string }) {
           </span>
         </label>
         <label>
-          Nao enviar para quem recebeu nos ultimos (dias)
-          <input
-            className="input"
-            min={0}
-            type="number"
-            value={excludeAlreadySentDays}
-            onChange={(event) => setExcludeAlreadySentDays(Number(event.target.value))}
-          />
+          Protecao contra repeticao
+          <select className="select" value={dedupeMode} onChange={(event) => setDedupeMode(event.target.value as typeof dedupeMode)}>
+            <option value="same_campaign">Somente nesta campanha</option>
+            <option value="recent_days">Excluir enviados nos ultimos X dias</option>
+            <option value="allow_resend">Permitir reenvio intencional</option>
+          </select>
         </label>
+        {dedupeMode === "recent_days" ? (
+          <label>
+            Nao enviar para quem recebeu nos ultimos (dias)
+            <input className="input" min={1} type="number" value={excludeAlreadySentDays} onChange={(event) => setExcludeAlreadySentDays(Math.max(1, Number(event.target.value)))} />
+          </label>
+        ) : null}
         <label>
-          Limite maximo de destinatarios
-          <input
-            className="input"
-            max={500}
-            min={1}
-            type="number"
-            value={maxRecipients}
-            onChange={(event) => setMaxRecipients(Number(event.target.value))}
-          />
+          Quantidade de destinatarios
+          <select className="select" value={recipientLimitMode} onChange={(event) => setRecipientLimitMode(event.target.value as typeof recipientLimitMode)}>
+            <option value="all">Todos os elegiveis</option>
+            <option value="limited">Limite total</option>
+          </select>
         </label>
+        {recipientLimitMode === "limited" ? (
+          <label>
+            Limite total de destinatarios
+            <input className="input" min={1} type="number" value={maxRecipients} onChange={(event) => setMaxRecipients(Math.max(1, Number(event.target.value)))} />
+          </label>
+        ) : null}
         <button className="button secondary" disabled={busy} type="submit">
           {busy ? "Processando..." : "Pre-visualizar publico"}
         </button>
@@ -229,6 +242,10 @@ export function LabelSendClient({ labelId }: { labelId: string }) {
             <article className="metric-card">
               <span>Elegiveis individuais</span>
               <strong>{audience.eligible}</strong>
+            </article>
+            <article className="metric-card">
+              <span>Total a adicionar</span>
+              <strong>{audience.selected}</strong>
             </article>
             <article className="metric-card">
               <span>Ignorados</span>
@@ -262,6 +279,14 @@ export function LabelSendClient({ labelId }: { labelId: string }) {
               <span>Duplicados</span>
               <strong>{audience.skippedReasons.duplicate_in_campaign ?? 0}</strong>
             </article>
+            <article className="metric-card">
+              <span>Opt-out</span>
+              <strong>{audience.skippedReasons.opt_out ?? 0}</strong>
+            </article>
+            <article className="metric-card">
+              <span>Excluidos pelo historico</span>
+              <strong>{audience.skippedReasons.already_sent_recently ?? 0}</strong>
+            </article>
           </div>
           <div className="muted">
             Motivos:{" "}
@@ -285,7 +310,7 @@ export function LabelSendClient({ labelId }: { labelId: string }) {
           <div className="button-row">
             <button
               className="button"
-              disabled={busy || audience.eligible === 0}
+              disabled={busy || audience.selected === 0}
               type="button"
               onClick={() => void createCampaign(false)}
             >
@@ -293,7 +318,7 @@ export function LabelSendClient({ labelId }: { labelId: string }) {
             </button>
             <button
               className="button danger"
-              disabled={busy || audience.eligible === 0}
+              disabled={busy || audience.selected === 0}
               type="button"
               onClick={() => void createCampaign(true)}
             >

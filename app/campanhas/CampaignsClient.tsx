@@ -69,9 +69,17 @@ type RecipientDetail = {
   contact: ContactOption | null;
 };
 
+type RecipientPagination = {
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+};
+
 type LabelAudience = {
   total: number;
   eligible: number;
+  selected: number;
   skipped: number;
   skippedReasons: Record<string, number>;
   jidTypeCounts: Record<string, number>;
@@ -99,6 +107,7 @@ type CampaignPrefillContext = {
 type AudienceMode = "label" | "catalog" | "contacts";
 type DelayMode = "fixed_seconds" | "fixed_minutes" | "random_range";
 type SendMode = "NOW" | "SCHEDULED";
+type DedupeMode = "same_campaign" | "recent_days" | "allow_resend";
 type CampaignMediaKind = "IMAGE" | "VIDEO" | "DOCUMENT";
 
 type ClientMediaDefinition = {
@@ -279,6 +288,7 @@ export function CampaignsClient({
   );
   const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(null);
   const [recipients, setRecipients] = useState<RecipientDetail[]>([]);
+  const [recipientPagination, setRecipientPagination] = useState<RecipientPagination>({ page: 1, pageSize: 25, total: 0, totalPages: 1 });
   const [name, setName] = useState("");
   const [message, setMessage] = useState("");
   const [intervalMinutes, setIntervalMinutes] = useState(1);
@@ -290,6 +300,9 @@ export function CampaignsClient({
   const [pauseEvery, setPauseEvery] = useState(25);
   const [pauseMinutes, setPauseMinutes] = useState(10);
   const [batchLimit, setBatchLimit] = useState(100);
+  const [recipientLimitMode, setRecipientLimitMode] = useState<"all" | "limited">("all");
+  const [dedupeMode, setDedupeMode] = useState<DedupeMode>("same_campaign");
+  const [excludeAlreadySentDays, setExcludeAlreadySentDays] = useState(7);
   const [sendMode, setSendMode] = useState<SendMode>("NOW");
   const [scheduledLocalDateTime, setScheduledLocalDateTime] = useState("");
   const [mediaFile, setMediaFile] = useState<File | null>(null);
@@ -315,6 +328,7 @@ export function CampaignsClient({
   const messageTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const mediaInputRef = useRef<HTMLInputElement | null>(null);
   const previousInstanceIdRef = useRef(activeInstanceId);
+  const creationKeyRef = useRef(globalThis.crypto.randomUUID());
 
   const selectableContacts = useMemo(
     () => contacts.filter((contact) => !contact.optedOut),
@@ -328,7 +342,7 @@ export function CampaignsClient({
   const selectedLabel = labels.find((label) => label.id === selectedLabelId) ?? null;
   const audienceCount =
     audienceMode === "label"
-      ? (labelAudience?.eligible ?? 0)
+      ? (labelAudience?.selected ?? 0)
       : audienceMode === "catalog"
         ? selectedCatalogChatIds.size
         : selectedContacts.size;
@@ -487,12 +501,13 @@ export function CampaignsClient({
     setCampaigns(data.campaigns);
   }
 
-  async function loadRecipients(campaignId: string) {
-    const params = new URLSearchParams();
+  async function loadRecipients(campaignId: string, page = 1) {
+    const params = new URLSearchParams({ page: String(page), pageSize: "25" });
     if (activeInstanceId) params.set("instanceId", activeInstanceId);
     const response = await fetch(`/api/campaigns/${campaignId}/recipients?${params.toString()}`, { cache: "no-store" });
-    const data = (await response.json()) as { recipients: RecipientDetail[] };
+    const data = (await response.json()) as { recipients: RecipientDetail[]; pagination: RecipientPagination };
     setRecipients(data.recipients);
+    setRecipientPagination(data.pagination);
   }
 
   async function refresh() {
@@ -512,6 +527,7 @@ export function CampaignsClient({
       setSelectedCatalogChatIds(new Set());
       setSelectedCampaignId(null);
       setRecipients([]);
+      setRecipientPagination({ page: 1, pageSize: 25, total: 0, totalPages: 1 });
       setLabelAudience(null);
       setCreatedCampaignId(null);
       setCreatedMessage(null);
@@ -545,7 +561,14 @@ export function CampaignsClient({
     let cancelled = false;
     void (async () => {
       try {
-        const params = new URLSearchParams({ limit: "6" });
+        const params = new URLSearchParams({
+          limit: "6",
+          excludeAlreadySentDays:
+            dedupeMode === "recent_days" ? String(excludeAlreadySentDays) : "0"
+        });
+        if (recipientLimitMode === "limited") {
+          params.set("maxRecipients", String(batchLimit));
+        }
         if (activeInstanceId) params.set("instanceId", activeInstanceId);
         const response = await fetch(`/api/etiquetas/${selectedLabelId}/audience?${params.toString()}`, {
           cache: "no-store"
@@ -560,7 +583,7 @@ export function CampaignsClient({
     return () => {
       cancelled = true;
     };
-  }, [audienceMode, selectedLabelId, activeInstanceId]);
+  }, [audienceMode, selectedLabelId, activeInstanceId, dedupeMode, excludeAlreadySentDays, recipientLimitMode, batchLimit]);
 
   function toggleContact(contactId: string) {
     setSelectedContacts((current) => {
@@ -625,7 +648,10 @@ export function CampaignsClient({
               message: body.message,
               intervalMinutes,
               advancedSettings: body.advancedSettings,
-              maxRecipients: batchLimit,
+              maxRecipients: recipientLimitMode === "limited" ? batchLimit : null,
+              dedupeMode,
+              excludeAlreadySentDays: dedupeMode === "recent_days" ? excludeAlreadySentDays : null,
+              creationKey: creationKeyRef.current,
               sendMode: body.sendMode,
               scheduledAt: body.scheduledAt,
               startNow: false
@@ -668,6 +694,7 @@ export function CampaignsClient({
       setCreatedMessage(String(data.message ?? "Campanha criada em rascunho."));
       setSelectedCampaignId(campaignId || null);
       clearMediaSelection();
+      creationKeyRef.current = globalThis.crypto.randomUUID();
       await refresh();
     } catch (createError) {
       setError(createError instanceof Error ? createError.message : "Erro inesperado");
@@ -842,12 +869,44 @@ export function CampaignsClient({
                         ))}
                       </select>
                     </div>
-                    <div className="row-meta">
-                      <span>{selectedLabel?.name ?? "Etiqueta"}: {labelAudience?.eligible ?? 0} elegiveis</span>
-                      <span>{labelAudience?.skipped ?? 0} ignorados</span>
-                      {(labelAudience?.skippedReasons.unresolved_lid ?? 0) > 0 ? (
-                        <span>{labelAudience?.skippedReasons.unresolved_lid} sem número</span>
+                    <div className="filter-bar">
+                      <div className="field">
+                        <label htmlFor="recipient-limit-mode">Quantidade</label>
+                        <select className="select" id="recipient-limit-mode" value={recipientLimitMode} onChange={(event) => setRecipientLimitMode(event.target.value as "all" | "limited")}>
+                          <option value="all">Todos os elegiveis</option>
+                          <option value="limited">Limite total</option>
+                        </select>
+                      </div>
+                      {recipientLimitMode === "limited" ? (
+                        <div className="field">
+                          <label htmlFor="campaign-total-limit">Limite total</label>
+                          <input className="input" id="campaign-total-limit" min="1" type="number" value={batchLimit} onChange={(event) => setBatchLimit(Math.max(1, Number(event.target.value)))} />
+                        </div>
                       ) : null}
+                      <div className="field">
+                        <label htmlFor="dedupe-mode">Protecao contra repeticao</label>
+                        <select className="select" id="dedupe-mode" value={dedupeMode} onChange={(event) => setDedupeMode(event.target.value as DedupeMode)}>
+                          <option value="same_campaign">Somente nesta campanha</option>
+                          <option value="recent_days">Excluir enviados nos ultimos X dias</option>
+                          <option value="allow_resend">Permitir reenvio intencional</option>
+                        </select>
+                      </div>
+                      {dedupeMode === "recent_days" ? (
+                        <div className="field">
+                          <label htmlFor="exclude-sent-days">Ultimos dias</label>
+                          <input className="input" id="exclude-sent-days" min="1" type="number" value={excludeAlreadySentDays} onChange={(event) => setExcludeAlreadySentDays(Math.max(1, Number(event.target.value)))} />
+                        </div>
+                      ) : null}
+                    </div>
+                    <div className="row-meta">
+                      <span>Encontrados: {labelAudience?.total ?? 0}</span>
+                      <span>Grupos: {labelAudience?.skippedReasons.group_excluded ?? 0}</span>
+                      <span>Invalidos: {(labelAudience?.skippedReasons.no_jid ?? 0) + (labelAudience?.skippedReasons.unresolved_chat ?? 0) + (labelAudience?.skippedReasons.broadcast_or_status ?? 0) + (labelAudience?.skippedReasons.invalid_jid ?? 0) + (labelAudience?.skippedReasons.unresolved_lid ?? 0)}</span>
+                      <span>Opt-out: {labelAudience?.skippedReasons.opt_out ?? 0}</span>
+                      <span>Duplicados: {labelAudience?.skippedReasons.duplicate_in_campaign ?? 0}</span>
+                      <span>Historico: {labelAudience?.skippedReasons.already_sent_recently ?? 0}</span>
+                      <span>Elegiveis: {labelAudience?.eligible ?? 0}</span>
+                      <strong>Total a adicionar: {labelAudience?.selected ?? 0}</strong>
                     </div>
                     <ul className="list-plain">
                       {(labelAudience?.recipientsPreview ?? []).map((recipient) => (
@@ -1200,10 +1259,12 @@ export function CampaignsClient({
                     <label htmlFor="pause-minutes">Tempo da pausa em minutos</label>
                     <input className="input" id="pause-minutes" min="1" type="number" value={pauseMinutes} onChange={(event) => setPauseMinutes(Number(event.target.value))} />
                   </div>
-                  <div className="field">
-                    <label htmlFor="batch-limit">Limite do lote</label>
-                    <input className="input" id="batch-limit" min="1" max="500" type="number" value={batchLimit} onChange={(event) => setBatchLimit(Number(event.target.value))} />
-                  </div>
+                  {audienceMode !== "label" ? (
+                    <div className="field">
+                      <label htmlFor="batch-limit">Limite total</label>
+                      <input className="input" id="batch-limit" min="1" max="500" type="number" value={batchLimit} onChange={(event) => setBatchLimit(Number(event.target.value))} />
+                    </div>
+                  ) : null}
                 </div>
                 <div className="message warning compact">
                   Comece com 2 a 5 contatos, aumente gradualmente, evite listas frias e mensagens identicas.
@@ -1251,7 +1312,8 @@ export function CampaignsClient({
                     <li>Intervalo: {intervalMinutes || 0} minuto(s)</li>
                     <li>Delay: {delayMode === "random_range" ? `${minDelaySeconds}-${maxDelaySeconds}s` : `${intervalMinutes}min equivalente`}</li>
                     <li>Pausa: {pauseMinutes}min a cada {pauseEvery} mensagens</li>
-                    <li>Limite do lote: {batchLimit}</li>
+                    <li>Quantidade: {recipientLimitMode === "all" ? "todos os elegiveis" : `limite total de ${batchLimit}`}</li>
+                    <li>Repeticao: {dedupeMode === "recent_days" ? `excluir ultimos ${excludeAlreadySentDays} dias` : dedupeMode === "allow_resend" ? "reenvio intencional" : "somente nesta campanha"}</li>
                     <li>Mensagem: {message.trim() ? "preenchida" : "pendente"}</li>
                     <li>
                       Anexo: {mediaFile && mediaKind
@@ -1565,13 +1627,13 @@ export function CampaignsClient({
           <div className="detail-panel compact">
             <div className="table-toolbar">
               <strong>Destinatarios da campanha</strong>
-              <span className="muted">{recipients.length} exibido(s)</span>
+              <span className="muted">{recipientPagination.total} destinatario(s)</span>
             </div>
             {recipients.length === 0 ? (
               <div className="empty-state compact">Nenhum destinatario.</div>
             ) : (
               <div className="campaign-list compact">
-                {recipients.slice(0, 12).map((recipient) => (
+                {recipients.map((recipient) => (
                   <div className="recipient-row" key={recipient.id}>
                     <div>
                       <strong>{recipient.displayName || "Contato sem número resolvido"}</strong>
@@ -1587,6 +1649,15 @@ export function CampaignsClient({
                 ))}
               </div>
             )}
+            {recipientPagination.totalPages > 1 ? (
+              <div className="pagination-bar">
+                <span>Pagina {recipientPagination.page} de {recipientPagination.totalPages}</span>
+                <div className="page-actions">
+                  <button className="button secondary compact-button" type="button" disabled={recipientPagination.page <= 1} onClick={() => selectedCampaignId && void loadRecipients(selectedCampaignId, recipientPagination.page - 1)}>Anterior</button>
+                  <button className="button secondary compact-button" type="button" disabled={recipientPagination.page >= recipientPagination.totalPages} onClick={() => selectedCampaignId && void loadRecipients(selectedCampaignId, recipientPagination.page + 1)}>Proxima</button>
+                </div>
+              </div>
+            ) : null}
           </div>
         ) : null}
       </section>

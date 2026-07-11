@@ -225,7 +225,9 @@ model Campaign {
   targetLabelId          String?
   excludeGroups          Boolean             @default(true)
   excludeAlreadySentDays Int?
+  dedupeMode            String              @default("same_campaign")
   dedupeKey              String?
+  creationKey            String?
   maxRecipients          Int?
   sendWindowStart        String?
   sendWindowEnd          String?
@@ -250,6 +252,7 @@ model Campaign {
   @@index([status])
   @@index([targetMode])
   @@index([targetLabelId])
+  @@unique([instanceId, creationKey])
 }
 
 model CampaignRecipient {

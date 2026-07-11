@@ -3,6 +3,11 @@ import { prisma } from "@/src/lib/prisma/client";
 import { getActiveInstanceIdFromSearchOrDefault } from "@/src/lib/server/whatsapp-instances";
 import { resolveContactDisplay } from "@/src/lib/whatsapp/contact-display";
 import { serializeCampaignForApi } from "@/src/lib/campaigns/media";
+import {
+  emptyRecipientStatusSummary,
+  getCampaignRecipientCountMap,
+  totalRecipientCount
+} from "@/src/lib/campaigns/recipient-counts";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -15,6 +20,12 @@ export async function GET(
 ) {
   const { id } = await context.params;
   const instanceId = await getActiveInstanceIdFromSearchOrDefault(request.nextUrl.searchParams);
+  const requestedPage = Number(request.nextUrl.searchParams.get("page") ?? 1);
+  const requestedPageSize = Number(request.nextUrl.searchParams.get("pageSize") ?? 25);
+  const page = Number.isInteger(requestedPage) && requestedPage > 0 ? requestedPage : 1;
+  const pageSize = Number.isInteger(requestedPageSize)
+    ? Math.min(100, Math.max(10, requestedPageSize))
+    : 25;
 
   const campaign = await prisma.campaign.findFirst({
     where: {
@@ -36,6 +47,8 @@ export async function GET(
         orderBy: {
           createdAt: "asc"
         },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
         include: {
           contact: {
             select: {
@@ -53,6 +66,9 @@ export async function GET(
   if (!campaign) {
     return NextResponse.json({ error: "Campanha nao encontrada" }, { status: 404 });
   }
+  const countMap = await getCampaignRecipientCountMap(instanceId, [campaign.id]);
+  const recipientSummary = countMap.get(campaign.id) ?? emptyRecipientStatusSummary();
+  const recipientTotal = totalRecipientCount(recipientSummary);
 
   const jids = Array.from(
     new Set(campaign.recipients.map((recipient) => recipient.jid?.trim()).filter((jid): jid is string => Boolean(jid)))
@@ -137,7 +153,14 @@ export async function GET(
   return NextResponse.json({
     campaign: {
       ...serializeCampaignForApi(campaign),
-      recipients
+      recipients,
+      recipientSummary,
+      recipientPagination: {
+        page,
+        pageSize,
+        total: recipientTotal,
+        totalPages: Math.max(1, Math.ceil(recipientTotal / pageSize))
+      }
     }
   });
 }
