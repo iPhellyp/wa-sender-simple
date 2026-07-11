@@ -59,6 +59,15 @@ const RECOVERABLE_RECONNECT_BACKOFF_MS = [5_000, 15_000, 30_000] as const;
 const STREAM_RESTART_BACKOFF_MS = [3_000, 8_000, 15_000] as const;
 const runtimeByInstanceId = new Map<string, WhatsappRuntime>();
 const startPromiseByInstanceId = new Map<string, Promise<WASocket>>();
+const INSTANCE_CONNECTION_TIMEOUT_MS = 30_000;
+const INSTANCE_CONNECTION_POLL_MS = 250;
+
+export class WhatsappInstanceUnavailableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "WhatsappInstanceUnavailableError";
+  }
+}
 
 export type WhatsappRuntime = {
   instanceId: string;
@@ -853,15 +862,37 @@ async function getConnectedInstanceSocket(instanceId: string) {
 
   const runtime = getRuntime(instance);
 
-  if (!runtime.socket || runtime.status !== WhatsappStatus.connected) {
+  if (
+    !runtime.socket ||
+    (
+      runtime.status !== WhatsappStatus.connected &&
+      runtime.status !== WhatsappStatus.connecting
+    )
+  ) {
     await startSecondaryWhatsappInstance(instance);
   }
 
-  if (!runtime.socket || runtime.status !== WhatsappStatus.connected) {
-    throw new Error("Instancia WhatsApp nao conectada para envio.");
+  const deadline = Date.now() + INSTANCE_CONNECTION_TIMEOUT_MS;
+
+  while (Date.now() < deadline) {
+    if (runtime.socket && runtime.status === WhatsappStatus.connected) {
+      return runtime.socket;
+    }
+
+    if (!runtime.socket && !startPromiseByInstanceId.has(instance.id)) {
+      await startSecondaryWhatsappInstance(instance);
+    }
+
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, INSTANCE_CONNECTION_POLL_MS);
+    });
   }
 
-  return runtime.socket;
+  throw new WhatsappInstanceUnavailableError(
+    `Instancia WhatsApp nao conectou em ${
+      INSTANCE_CONNECTION_TIMEOUT_MS / 1000
+    } segundos para envio.`
+  );
 }
 
 export async function sendWhatsappMessageForInstance(instanceId: string, jid: string, text: string) {

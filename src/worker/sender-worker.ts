@@ -30,7 +30,8 @@ import {
   requestWhatsappHistorySyncForInstance,
   resetWhatsappInstance,
   sendWhatsappContentForInstance,
-  sendWhatsappMessageForInstance
+  sendWhatsappMessageForInstance,
+  WhatsappInstanceUnavailableError
 } from "../lib/baileys/instance-manager";
 import { ensureChatForJid, isGroupJid, normalizeChatJid } from "../lib/baileys/sync";
 import { completeCampaignIfDone } from "../lib/campaigns/progress";
@@ -713,6 +714,48 @@ async function processRecipient(recipientId: string) {
 
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "Erro ao enviar mensagem";
+
+    if (error instanceof WhatsappInstanceUnavailableError) {
+      const pauseMessage =
+        `Campanha pausada: ${errorMessage} Reconecte a instancia e retome a campanha.`;
+
+      await prisma.$transaction([
+        prisma.campaign.updateMany({
+          where: {
+            id: recipient.campaignId,
+            instanceId: recipient.instanceId,
+            status: CampaignStatus.running
+          },
+          data: {
+            status: CampaignStatus.paused,
+            lastError: pauseMessage
+          }
+        }),
+        prisma.campaignRecipient.updateMany({
+          where: {
+            id: recipient.id,
+            instanceId: recipient.instanceId,
+            campaignId: recipient.campaignId,
+            status: CampaignRecipientStatus.sending
+          },
+          data: {
+            status: CampaignRecipientStatus.scheduled,
+            scheduledAt: new Date(),
+            error: null
+          }
+        })
+      ]);
+
+      console.error("[campaign] WhatsApp unavailable; campaign paused", {
+        campaignId: recipient.campaignId,
+        recipientId: recipient.id,
+        instanceId: recipient.instanceId,
+        error: errorMessage
+      });
+
+      return;
+    }
+
     await prisma.campaignRecipient.updateMany({
       where: {
         id: recipient.id,
@@ -771,7 +814,11 @@ async function processRecipient(recipientId: string) {
         id: recipient.id,
         instanceId: recipient.instanceId,
         status: {
-          in: [CampaignRecipientStatus.sending, CampaignRecipientStatus.canceled]
+          in: [
+            CampaignRecipientStatus.sending,
+            CampaignRecipientStatus.scheduled,
+            CampaignRecipientStatus.canceled
+          ]
         }
       },
       data: {
