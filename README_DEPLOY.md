@@ -28,9 +28,12 @@ a imagem imutável, pausa o worker antes do backup de sessão, pausa o app, roda
 uma única migration controlada,
 atualiza o app e depois o worker.
 
-A migration é `npm run prisma:deploy` em container efêmero ligado à rede
-interna. Falha interrompe o deploy. Nunca use `prisma migrate dev`,
-`prisma db push`, reset, drop ou truncate em produção.
+A migration é `npm run prisma:deploy` em serviço Swarm temporário, com uma
+única tarefa no manager e sem exigir rede overlay attachable. O deploy exige
+estado `complete`, exit code `0`, timeout de 300 segundos e remove o serviço em
+sucesso ou falha. `MIGRATION_NETWORK` substitui a rede interna e
+`MIGRATION_TIMEOUT_SECONDS` ajusta o timeout. Falha interrompe o deploy. Nunca
+use `prisma migrate dev`, `prisma db push`, reset, drop ou truncate em produção.
 
 ## Healthchecks
 
