@@ -58,6 +58,7 @@ import { normalizeBrazilPhone, toWhatsappJid } from "../lib/phone/normalize";
 import { clearWhatsappOperationalData } from "../lib/server/whatsapp-session-data";
 import { DEFAULT_WHATSAPP_INSTANCE_ID } from "../lib/server/whatsapp-instances";
 import { shouldIgnoreJidForX1Only } from "../lib/whatsapp/jid";
+import { createHeartbeatRedis, recordWorkerHeartbeat } from "./heartbeat";
 
 const finalRecipientStatuses: CampaignRecipientStatus[] = [
   CampaignRecipientStatus.sent,
@@ -65,6 +66,7 @@ const finalRecipientStatuses: CampaignRecipientStatus[] = [
   CampaignRecipientStatus.canceled
 ];
 const redisConnectionOptions = getRedisConnectionOptions();
+const heartbeatRedis = createHeartbeatRedis();
 
 console.log("[worker] sender-worker started");
 console.log("[worker] redis connection", {
@@ -1297,6 +1299,14 @@ const worker = new Worker(
   }
 );
 
+await recordWorkerHeartbeat(heartbeatRedis);
+const heartbeatTimer = setInterval(() => {
+  void recordWorkerHeartbeat(heartbeatRedis).catch((error) => {
+    console.error("[worker] heartbeat failed", { error: getErrorMessage(error) });
+  });
+}, 15_000);
+heartbeatTimer.unref();
+
 worker.on("failed", (job, error) => {
   console.error("[worker] sender-worker job failed", {
     jobId: job?.id,
@@ -1314,10 +1324,11 @@ async function shutdown(signal: "SIGTERM" | "SIGINT") {
   console.log("[worker] shutdown started", { signal });
 
   try {
+    clearInterval(heartbeatTimer);
     await campaignScheduler.stop();
     await worker.close();
     await closeCampaignQueue();
-    await prisma.$disconnect();
+    await Promise.all([heartbeatRedis.quit(), prisma.$disconnect()]);
     console.log("[worker] shutdown finished", { signal });
     process.exit(0);
   } catch (error) {
