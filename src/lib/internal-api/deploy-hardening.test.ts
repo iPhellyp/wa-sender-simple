@@ -27,20 +27,31 @@ test("stack usa IMAGE_TAG, segredos somente no app e healthchecks", async () => 
 test("deploy interrompe em migration e atualiza app antes do worker", async () => {
   const deploy = await read("deploy-safe.sh");
   const stack = await read("docker-stack.yml");
+  const packageJson = JSON.parse(await read("package.json")) as {
+    scripts?: Record<string, string>;
+  };
   const migration = deploy.indexOf("npm run prisma:deploy");
   const migrationCall = deploy.lastIndexOf("run_swarm_migration");
+  const imageBuilt = deploy.indexOf('docker build -t "wa-sender-simple:${IMAGE_TAG}"');
+  const preflightCall = deploy.lastIndexOf("run_swarm_preflight");
+  const firstStackDeploy = deploy.indexOf("docker stack deploy");
   const appPaused = deploy.indexOf("APP_REPLICAS=0");
   const workerPaused = deploy.indexOf("WORKER_REPLICAS=0");
   const app = deploy.indexOf("APP_REPLICAS=1");
   const worker = deploy.indexOf("WORKER_REPLICAS=1");
   assert.ok(
     migration > 0 &&
+      imageBuilt < preflightCall &&
+      preflightCall < firstStackDeploy &&
+      preflightCall < appPaused &&
       appPaused < migrationCall &&
+      firstStackDeploy < migrationCall &&
       workerPaused < migrationCall &&
       migrationCall < app &&
       app < worker
   );
   assert.doesNotMatch(deploy, /docker run\b/);
+  assert.equal(packageJson.scripts?.["worker:preflight"], "tsx src/worker/preflight.ts");
   assert.match(deploy, /docker service create/);
   assert.match(deploy, /--replicas 1/);
   assert.match(deploy, /--restart-condition none/);
@@ -78,6 +89,104 @@ test("deploy interrompe em migration e atualiza app antes do worker", async () =
   assert.match(deploy, /IMAGE_TAG nao pode ser vazia/);
   assert.doesNotMatch(deploy, /migrate dev|import[-_: ]*lead/i);
   assert.doesNotMatch(deploy, /set -x|echo .*\b(SECRET|PASSWORD|TOKEN)\b/);
+});
+
+test("deploy executa preflight temporário seguro e diagnostica timeout de healthcheck", async () => {
+  const deploy = await read("deploy-safe.sh");
+  const preflightBlock = deploy.slice(
+    deploy.indexOf("run_swarm_preflight()"),
+    deploy.indexOf("trap cleanup_migration_on_exit EXIT")
+  );
+  const preflightFailureStart = deploy.indexOf("if ! run_swarm_preflight; then");
+  const preflightFailureBlock = deploy.slice(
+    preflightFailureStart,
+    deploy.indexOf("\ncleanup_preflight_service", preflightFailureStart)
+  );
+  const restoreBlock = deploy.slice(
+    deploy.indexOf("restore_previous_services_after_preflight_failure()"),
+    deploy.indexOf("\nwait_for_healthy_service()")
+  );
+  const preflightCall = deploy.lastIndexOf("run_swarm_preflight");
+  const firstStackDeploy = deploy.indexOf("docker stack deploy");
+
+  assert.match(preflightBlock, /local image="wa-sender-simple:\$\{IMAGE_TAG\}"/);
+  assert.match(preflightBlock, /preflight_service="w2p_\$\{safe_tag\}_\$\{epoch\}_\$\$"/);
+  assert.match(preflightBlock, /cut -c1-12/);
+  assert.match(preflightBlock, /PREFLIGHT_SERVICE_NAME_MAX_LENGTH/);
+  assert.match(
+    preflightBlock,
+    /\(\( \$\{#preflight_service\} <= PREFLIGHT_SERVICE_NAME_MAX_LENGTH \)\)/
+  );
+  assert.ok(`w2p_${"a".repeat(12)}_${"9".repeat(10)}_${"9".repeat(7)}`.length <= 63);
+  assert.match(
+    deploy,
+    /PREFLIGHT_TIMEOUT_SECONDS="\$\{PREFLIGHT_TIMEOUT_SECONDS:-120\}"/
+  );
+  assert.match(preflightBlock, /--restart-condition none/);
+  assert.match(preflightBlock, /--constraint 'node\.role==manager'/);
+  assert.match(preflightBlock, /--network "\$MIGRATION_NETWORK"/);
+  assert.match(preflightBlock, /"\$image" npm run worker:preflight/);
+  assert.match(
+    preflightBlock,
+    /printf 'DATABASE_URL=%s\\nREDIS_URL=%s\\n'[\s\S]*"\$DATABASE_URL" "\$REDIS_URL" > "\$preflight_env"/
+  );
+  assert.doesNotMatch(
+    preflightBlock.slice(
+      preflightBlock.indexOf("printf 'DATABASE_URL"),
+      preflightBlock.indexOf("if ! create_output")
+    ),
+    /ADMIN_PASSWORD|WA2_INTERNAL_API_SECRET|POSTGRES_PASSWORD/
+  );
+  assert.match(deploy, /docker service rm "\$preflight_service"/);
+  assert.match(deploy, /rm -f -- "\$preflight_env"/);
+  assert.match(deploy, /cleanup_preflight_service \|\| true/);
+  assert.ok(preflightCall > 0 && preflightCall < firstStackDeploy);
+  assert.equal(deploy.slice(0, preflightCall).includes("docker stack deploy"), false);
+  assert.match(
+    preflightFailureBlock,
+    /restore_previous_services_after_preflight_failure/
+  );
+  assert.doesNotMatch(
+    preflightFailureBlock,
+    /run_swarm_migration|docker stack deploy|APP_REPLICAS=|--image/
+  );
+  assert.match(restoreBlock, /if cleanup_preflight_service; then/);
+  assert.match(restoreBlock, /cleanup_failed=1/);
+  assert.match(
+    restoreBlock,
+    /docker service scale "\$\{stack_name\}_worker=1"/
+  );
+  assert.match(
+    restoreBlock,
+    /wait_for_one_running_instance "\$\{stack_name\}_worker"/
+  );
+  assert.match(
+    restoreBlock,
+    /"\$current_app_image" == "\$previous_app_image"/
+  );
+  assert.match(
+    restoreBlock,
+    /"\$current_worker_image" == "\$previous_worker_image"/
+  );
+  assert.match(
+    restoreBlock,
+    /"\$current_app_container_image_id" == "\$previous_app_container_image_id"/
+  );
+  assert.match(
+    restoreBlock,
+    /"\$current_worker_container_image_id" == "\$previous_worker_container_image_id"/
+  );
+  assert.doesNotMatch(restoreBlock, /docker service scale "\$\{stack_name\}_app=/);
+  assert.match(
+    deploy,
+    /previous_app_image="\$\([\s\S]*docker service inspect[\s\S]*"\$\{stack_name\}_app"[\s\S]*\)"/
+  );
+  assert.match(deploy, /IMAGE_TAG deve ser diferente das imagens anteriores/);
+  assert.match(deploy, /docker service ps "\$service" --no-trunc/);
+  assert.match(deploy, /docker service logs "\$service" --tail 150/);
+  assert.match(deploy, /HEALTH_HISTORY=/);
+  assert.match(deploy, /show_service_health_diagnostics "\$service"/);
+  assert.doesNotMatch(deploy, /docker run\b/);
 });
 
 test("rollback exige tag e backup cobre banco, sessão e Redis", async () => {
