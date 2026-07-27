@@ -3,7 +3,7 @@ set -Eeuo pipefail
 umask 077
 
 STACK_NAME="${STACK_NAME:-wa_sender_simple}"
-BACKUP_ROOT="${BACKUP_ROOT:-./backups}"
+BACKUP_ROOT="${BACKUP_ROOT:-/root/wa-sender-simple-backups}"
 
 [[ "$STACK_NAME" =~ ^[a-zA-Z0-9][a-zA-Z0-9_-]*$ ]] || {
   echo "STACK_NAME invalido" >&2

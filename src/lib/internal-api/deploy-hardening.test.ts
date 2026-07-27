@@ -28,7 +28,7 @@ test("deploy interrompe em migration e atualiza app antes do worker", async () =
   const deploy = await read("deploy-safe.sh");
   const stack = await read("docker-stack.yml");
   const migration = deploy.indexOf("npm run prisma:deploy");
-  const migrationCall = deploy.lastIndexOf("\nrun_swarm_migration\n");
+  const migrationCall = deploy.lastIndexOf("run_swarm_migration");
   const appPaused = deploy.indexOf("APP_REPLICAS=0");
   const workerPaused = deploy.indexOf("WORKER_REPLICAS=0");
   const app = deploy.indexOf("APP_REPLICAS=1");
@@ -55,7 +55,16 @@ test("deploy interrompe em migration e atualiza app antes do worker", async () =
   assert.match(deploy, /"\$image" npm run prisma:deploy/);
   assert.equal((deploy.match(/npm run prisma:deploy/g) ?? []).length, 1);
   assert.match(deploy, /tr -c 'A-Za-z0-9_\.-' '-'/);
-  assert.match(deploy, /migration_service="\$\{stack_name\}_migrate_\$\{safe_tag\}_\$\(date \+%s%N\)_\$\$"/);
+  assert.match(deploy, /cut -c1-12/);
+  assert.match(deploy, /migration_service="w2m_\$\{safe_tag\}_\$\{epoch\}_\$\$"/);
+  assert.doesNotMatch(deploy, /migration_service="crmm_/);
+  assert.match(deploy, /MIGRATION_SERVICE_NAME_MAX_LENGTH=63/);
+  assert.match(
+    deploy,
+    /\(\( \$\{#migration_service\} <= MIGRATION_SERVICE_NAME_MAX_LENGTH \)\)/
+  );
+  assert.match(deploy, /Nome do servico temporario de migration excede 63 caracteres/);
+  assert.ok(`w2m_${"a".repeat(12)}_${"9".repeat(10)}_${"9".repeat(7)}`.length <= 63);
   assert.match(deploy, /MIGRATION_TIMEOUT_SECONDS="\$\{MIGRATION_TIMEOUT_SECONDS:-300\}"/);
   assert.match(deploy, /state" == "complete" && "\$exit_code" == "0"/);
   assert.match(deploy, /trap cleanup_migration_on_exit EXIT/);
@@ -67,15 +76,40 @@ test("deploy interrompe em migration e atualiza app antes do worker", async () =
   assert.match(deploy, /\^\(complete\|failed\|rejected\|shutdown\|orphaned\|remove\)\$/);
   assert.match(deploy, /\$\{IMAGE_TAG\+x\}/);
   assert.match(deploy, /IMAGE_TAG nao pode ser vazia/);
-  assert.doesNotMatch(deploy, /prisma migrate dev|import[-_: ]*lead/i);
+  assert.doesNotMatch(deploy, /migrate dev|import[-_: ]*lead/i);
   assert.doesNotMatch(deploy, /set -x|echo .*\b(SECRET|PASSWORD|TOKEN)\b/);
 });
 
 test("rollback exige tag e backup cobre banco, sessão e Redis", async () => {
+  const deploy = await read("deploy-safe.sh");
   const rollback = await read("scripts/rollback.sh");
   const backup = await read("scripts/backup.sh");
+  assert.doesNotMatch(`${deploy}\n${rollback}`, /docker run\b|migrate dev/);
   assert.match(rollback, /target_tag="\$\{1:-\}"/);
   assert.match(rollback, /tag imutavel valida/);
+  assert.equal((rollback.match(/--no-healthcheck/g) ?? []).length, 2);
+  assert.match(
+    rollback,
+    /docker service update --detach=true --no-healthcheck --image "\$image" "\$\{stack_name\}_app"/
+  );
+  assert.match(rollback, /docker service scale "\$\{stack_name\}_app=1"/);
+  assert.match(rollback, /wait_for_one_running_instance "\$\{stack_name\}_app"/);
+  assert.match(rollback, /desired-state=running/);
+  assert.match(rollback, /"\$\{#task_states\[@\]\}" -eq 1/);
+  assert.match(rollback, /"\$\{task_states\[0\]\}" == Running\*/);
+  assert.match(rollback, /"\$\{#container_ids\[@\]\}" -eq 1/);
+  assert.match(rollback, /trap ensure_app_not_paused_on_exit EXIT/);
+  assert.match(
+    rollback,
+    /"\$app_replicas" == "0" && "\$worker_replicas" == "0"/
+  );
+  assert.doesNotMatch(rollback, /\.State\.Health|app=0/);
+  const keepPaused = rollback.indexOf('KEEP_WORKER_PAUSED:-false}" == "true"');
+  const appRunning = rollback.indexOf('wait_for_one_running_instance "${stack_name}_app"');
+  const workerRunning = rollback.indexOf('docker service scale "${stack_name}_worker=1"');
+  assert.ok(appRunning > 0 && appRunning < keepPaused && keepPaused < workerRunning);
+  assert.equal((rollback.match(/worker=0/g) ?? []).length, 1);
+  assert.equal((rollback.match(/worker=1/g) ?? []).length, 1);
   assert.match(backup, /pg_dump --format=custom/);
   assert.match(backup, /pg_restore --list/);
   assert.match(backup, /baileys-session\.tar\.gz/);
@@ -83,6 +117,12 @@ test("rollback exige tag e backup cobre banco, sessão e Redis", async () => {
   assert.match(backup, /sha256sum/);
   assert.match(backup, /worker_replicas/);
   assert.match(backup, /antes do backup da sessao Baileys/);
+  assert.match(backup, /BACKUP_ROOT="\$\{BACKUP_ROOT:-\/root\/wa-sender-simple-backups\}"/);
+  assert.match(
+    deploy,
+    /BACKUP_ROOT="\$BACKUP_ROOT" bash \.\/scripts\/backup\.sh/
+  );
+  assert.match(deploy, /docker service rm "\$migration_service"/);
   const packageJson = JSON.parse(await read("package.json")) as {
     scripts?: Record<string, string>;
   };
