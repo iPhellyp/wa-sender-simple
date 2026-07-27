@@ -199,13 +199,13 @@ test("preflight não cria BullMQ, não usa heartbeat real e emite somente códig
 
 test("readiness BullMQ antecede chave readiness e scheduler, com cleanup seguro", async () => {
   const sender = await read("src/worker/sender-worker.ts");
-  const initialHeartbeat = sender.indexOf(
-    "recordWorkerHeartbeat(heartbeatRedis),\n    HEARTBEAT_INITIALIZATION_TIMEOUT_MS"
+  const initialHeartbeat = sender.search(
+    /recordWorkerHeartbeat\(heartbeatRedis\),\s+HEARTBEAT_INITIALIZATION_TIMEOUT_MS/
   );
-  const clearPreviousReadiness = sender.indexOf(
-    "removeWorkerReadiness(heartbeatRedis),\n    HEARTBEAT_INITIALIZATION_TIMEOUT_MS"
+  const clearPreviousReadiness = sender.search(
+    /removeWorkerReadiness\(heartbeatRedis\),\s+HEARTBEAT_INITIALIZATION_TIMEOUT_MS/
   );
-  const heartbeatTimer = sender.indexOf("const heartbeatTimer = setInterval");
+  const heartbeatTimer = sender.indexOf("heartbeatTimer = setInterval");
   const worker = sender.indexOf("worker = new Worker(");
   const waitUntilReady = sender.indexOf("worker.waitUntilReady()");
   const readiness = sender.indexOf(
