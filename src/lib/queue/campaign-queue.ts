@@ -5,11 +5,13 @@ export const CAMPAIGN_QUEUE_NAME = "campaign-sender";
 export const SEND_RECIPIENT_JOB = "send-recipient";
 export const CONNECT_WHATSAPP_JOB = "connect-whatsapp";
 export const DISCONNECT_WHATSAPP_JOB = "disconnect-whatsapp";
+export const PRESERVE_DISCONNECT_WHATSAPP_JOB = "preserve-disconnect-whatsapp";
 export const RESET_WHATSAPP_JOB = "reset-whatsapp";
 export const SEND_MANUAL_MESSAGE_JOB = "send-manual-message";
 export const SYNC_WHATSAPP_HISTORY_JOB = "sync-whatsapp-history";
 export const SYNC_WHATSAPP_CATALOG_JOB = "sync-whatsapp-catalog";
 export const APPLY_WHATSAPP_LABELS_JOB = "apply-whatsapp-labels";
+export const MUTATE_WHATSAPP_CHAT_LABEL_JOB = "mutate-whatsapp-chat-label";
 
 type InstanceJobData = {
   instanceId?: string;
@@ -35,6 +37,14 @@ export type ApplyWhatsappLabelsJobData = InstanceJobData & {
   labelId: string;
   waLabelId: string;
   jids: string[];
+};
+
+export type MutateWhatsappChatLabelJobData = InstanceJobData & {
+  operation: "apply" | "remove";
+  chatId: string;
+  labelId: string;
+  waLabelId: string;
+  jid: string;
 };
 
 let queue: Queue | null = null;
@@ -159,19 +169,12 @@ export async function enqueueRecipient(recipientId: string, delayMs: number): Pr
   };
 }
 
-export async function enqueueWhatsappConnect(instanceId: string) {
+export async function enqueueWhatsappConnect(instanceId: string): Promise<SyncJobEnqueueResult> {
   const normalizedInstanceId = requireInstanceId(instanceId, CONNECT_WHATSAPP_JOB);
-  const jobId = buildJobId(CONNECT_WHATSAPP_JOB, normalizedInstanceId);
-  await removeStaleJob(jobId);
-  await getCampaignQueue().add(
+  return enqueueDedupedSyncJob(
     CONNECT_WHATSAPP_JOB,
-    { instanceId: normalizedInstanceId },
-    {
-      attempts: 1,
-      jobId,
-      removeOnComplete: true,
-      removeOnFail: 100
-    }
+    buildJobId(CONNECT_WHATSAPP_JOB, normalizedInstanceId),
+    { instanceId: normalizedInstanceId }
   );
 }
 
@@ -191,6 +194,15 @@ export async function enqueueWhatsappDisconnect(instanceId: string) {
   );
 
   return job.id ?? null;
+}
+
+export async function enqueueWhatsappPreserveDisconnect(instanceId: string) {
+  const normalizedInstanceId = requireInstanceId(instanceId, PRESERVE_DISCONNECT_WHATSAPP_JOB);
+  return enqueueDedupedSyncJob(
+    PRESERVE_DISCONNECT_WHATSAPP_JOB,
+    buildJobId(PRESERVE_DISCONNECT_WHATSAPP_JOB, normalizedInstanceId),
+    { instanceId: normalizedInstanceId }
+  );
 }
 
 export async function enqueueWhatsappReset(instanceId: string) {
@@ -269,4 +281,19 @@ export async function enqueueApplyWhatsappLabels(data: ApplyWhatsappLabelsJobDat
   );
 
   return job.id ?? null;
+}
+
+export async function enqueueMutateWhatsappChatLabel(data: MutateWhatsappChatLabelJobData) {
+  const instanceId = requireInstanceId(data.instanceId, MUTATE_WHATSAPP_CHAT_LABEL_JOB);
+  const jobId = buildJobId(
+    MUTATE_WHATSAPP_CHAT_LABEL_JOB,
+    data.operation,
+    instanceId,
+    data.chatId,
+    data.waLabelId
+  );
+  return enqueueDedupedSyncJob(MUTATE_WHATSAPP_CHAT_LABEL_JOB, jobId, {
+    ...data,
+    instanceId
+  });
 }

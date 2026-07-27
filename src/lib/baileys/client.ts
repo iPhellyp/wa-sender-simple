@@ -1826,6 +1826,39 @@ export async function applyWhatsappLabelToJids(params: { waLabelId: string; jids
   };
 }
 
+export async function removeWhatsappLabelFromJids(params: { waLabelId: string; jids: string[] }) {
+  const activeSocket = await getConnectedSocket();
+  const removeChatLabel =
+    typeof activeSocket.removeChatLabel === "function"
+      ? activeSocket.removeChatLabel.bind(activeSocket)
+      : null;
+
+  if (!removeChatLabel) {
+    return { ok: false, removed: 0, skipped: params.jids.length, failed: 0 };
+  }
+
+  let removed = 0;
+  let skipped = 0;
+  let failed = 0;
+
+  for (const jid of Array.from(new Set(params.jids))) {
+    const normalizedJid = normalizeChatJid(jid);
+    if (!normalizedJid || shouldIgnoreJidForX1Only(normalizedJid)) {
+      skipped += 1;
+      continue;
+    }
+
+    try {
+      await removeChatLabel(normalizedJid, params.waLabelId);
+      removed += 1;
+    } catch {
+      failed += 1;
+    }
+  }
+
+  return { ok: failed === 0, removed, skipped, failed };
+}
+
 export async function sendWhatsappMessageToJid(jid: string, text: string) {
   const messageText = text.trim();
 

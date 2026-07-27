@@ -6,6 +6,8 @@ import {
   APPLY_WHATSAPP_LABELS_JOB,
   CONNECT_WHATSAPP_JOB,
   DISCONNECT_WHATSAPP_JOB,
+  MUTATE_WHATSAPP_CHAT_LABEL_JOB,
+  PRESERVE_DISCONNECT_WHATSAPP_JOB,
   RESET_WHATSAPP_JOB,
   SEND_MANUAL_MESSAGE_JOB,
   SEND_RECIPIENT_JOB,
@@ -13,6 +15,7 @@ import {
   SYNC_WHATSAPP_HISTORY_JOB,
   closeCampaignQueue,
   type ApplyWhatsappLabelsJobData,
+  type MutateWhatsappChatLabelJobData,
   type SendManualMessageJobData,
   type SyncWhatsappCatalogJobData
 } from "../lib/queue/campaign-queue";
@@ -25,6 +28,7 @@ import {
   applyWhatsappLabelsForInstance,
   disconnectWhatsappInstance,
   getWhatsappInstanceRuntimeStatus,
+  mutateWhatsappChatLabelForInstance,
   reconnectWhatsappInstance,
   requestWhatsappCatalogSyncForInstance,
   requestWhatsappHistorySyncForInstance,
@@ -1080,6 +1084,13 @@ const worker = new Worker(
       return;
     }
 
+    if (job.name === PRESERVE_DISCONNECT_WHATSAPP_JOB) {
+      const instanceId = getRequiredJobInstanceId(job.data, PRESERVE_DISCONNECT_WHATSAPP_JOB);
+      await disconnectWhatsappInstance(instanceId);
+      console.log("[worker] preserve-disconnect-whatsapp finished", { instanceId });
+      return;
+    }
+
     if (job.name === RESET_WHATSAPP_JOB) {
       const instanceId = getRequiredJobInstanceId(job.data, RESET_WHATSAPP_JOB);
       console.log("[worker] reset-whatsapp job received", { instanceId });
@@ -1194,6 +1205,52 @@ const worker = new Worker(
         failed: result.failed
       });
 
+      return;
+    }
+
+    if (job.name === MUTATE_WHATSAPP_CHAT_LABEL_JOB) {
+      const data = job.data as Partial<MutateWhatsappChatLabelJobData>;
+      const instanceId = getRequiredJobInstanceId(data, MUTATE_WHATSAPP_CHAT_LABEL_JOB);
+      if (data.operation !== "apply" && data.operation !== "remove") {
+        throw new Error("mutate-whatsapp-chat-label possui operação inválida");
+      }
+      const operation = data.operation;
+      const jid = String(data.jid ?? "").trim();
+      const waLabelId = String(data.waLabelId ?? "").trim();
+      const chatId = String(data.chatId ?? "").trim();
+      const labelId = String(data.labelId ?? "").trim();
+
+      if (!jid || !waLabelId || !chatId || !labelId) {
+        throw new Error("mutate-whatsapp-chat-label possui dados inválidos");
+      }
+
+      await mutateWhatsappChatLabelForInstance({
+        instanceId,
+        operation,
+        jid,
+        waLabelId
+      });
+
+      if (operation === "apply") {
+        await prisma.whatsappChatLabel.upsert({
+          where: {
+            instanceId_chatId_labelId: { instanceId, chatId, labelId }
+          },
+          update: { jid },
+          create: { instanceId, chatId, labelId, jid }
+        });
+      } else {
+        await prisma.whatsappChatLabel.deleteMany({
+          where: { instanceId, chatId, labelId }
+        });
+      }
+
+      console.log("[worker] mutate-whatsapp-chat-label finished", {
+        instanceId,
+        operation,
+        chatId,
+        labelId
+      });
       return;
     }
 

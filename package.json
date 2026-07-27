@@ -8,6 +8,7 @@
     "start": "next start",
     "worker": "tsx src/worker/sender-worker.ts",
     "test:campaigns": "tsx --test src/lib/campaigns/dispatch-policy.test.ts",
+    "test:internal-api": "node --experimental-test-module-mocks --import tsx --test src/lib/internal-api/internal-api.test.ts src/lib/internal-api/services.test.ts src/lib/server/whatsapp-instances.test.ts",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:deploy": "prisma migrate deploy"
