@@ -42,6 +42,17 @@ enum WhatsappInstanceRole {
   GENERAL
 }
 
+enum WhatsappLabelEventOperation {
+  APPLY
+  REMOVE
+}
+
+enum WhatsappLabelEventSource {
+  INTERNAL_API
+  WHATSAPP
+  UNKNOWN
+}
+
 model Contact {
   id              String              @id @default(cuid())
   instanceId      String
@@ -80,6 +91,7 @@ model WhatsappInstance {
   whatsappContacts WhatsappContact[]
   labels          WhatsappLabel[]
   chatLabels      WhatsappChatLabel[]
+  labelEvents     WhatsappLabelEvent[]
   messages        WhatsappMessage[]
   campaigns       Campaign[]
   recipients      CampaignRecipient[]
@@ -214,6 +226,27 @@ model WhatsappChatLabel {
   @@index([labelId])
 }
 
+model WhatsappLabelEvent {
+  id                BigInt                      @id @default(autoincrement())
+  eventId           String                      @unique @db.Uuid
+  instanceId        String
+  chatId            String
+  jid               String
+  phoneNormalized   String?
+  waLabelId         String
+  operation         WhatsappLabelEventOperation
+  observedAt        DateTime
+  source            WhatsappLabelEventSource
+  correlationKey    String?
+  eligibleForCrm    Boolean                     @default(false)
+  ineligibleReason  String?
+  createdAt         DateTime                    @default(now())
+  instance          WhatsappInstance            @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+
+  @@index([instanceId, id])
+  @@index([createdAt, id])
+}
+
 model Campaign {
   id                     String              @id @default(cuid())
   instanceId             String
@@ -242,6 +275,8 @@ model Campaign {
   mediaMimeType          String?
   mediaSizeBytes         Int?
   lastError              String?             @db.Text
+  dispatchConfig         Json?
+  nextDispatchAt         DateTime?
   instance               WhatsappInstance    @relation(fields: [instanceId], references: [id], onDelete: Restrict)
   recipients             CampaignRecipient[]
   sendLogs               SendLog[]
@@ -249,6 +284,7 @@ model Campaign {
 
   @@index([instanceId, createdAt])
   @@index([instanceId, status, scheduledAt])
+  @@index([instanceId, status, nextDispatchAt])
   @@index([status])
   @@index([targetMode])
   @@index([targetLabelId])

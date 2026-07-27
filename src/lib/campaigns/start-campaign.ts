@@ -2,6 +2,10 @@ import { CampaignStatus, Prisma } from "@prisma/client";
 import { prisma } from "../prisma/client";
 import { loadValidatedCampaignMedia } from "./media";
 import { schedulePendingRecipients } from "./schedule";
+import {
+  isSerializableTransactionConflict,
+  MAX_SERIALIZABLE_TRANSACTION_ATTEMPTS
+} from "./transaction-conflict";
 
 type StartCampaignOrigin = "MANUAL" | "SCHEDULER";
 
@@ -18,12 +22,6 @@ export type StartCampaignResult = {
   campaignId: string;
   reason?: string;
 };
-
-const MAX_TRANSACTION_ATTEMPTS = 3;
-
-function isTransactionConflict(error: unknown) {
-  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2034";
-}
 
 export async function startCampaign({
   campaignId,
@@ -84,7 +82,7 @@ export async function startCampaign({
 
   let claimResult: StartCampaignResult | null = null;
 
-  for (let attempt = 1; attempt <= MAX_TRANSACTION_ATTEMPTS; attempt += 1) {
+  for (let attempt = 1; attempt <= MAX_SERIALIZABLE_TRANSACTION_ATTEMPTS; attempt += 1) {
     try {
       claimResult = await prisma.$transaction(
         async (transaction) => {
@@ -206,7 +204,10 @@ export async function startCampaign({
       );
       break;
     } catch (error) {
-      if (!isTransactionConflict(error) || attempt === MAX_TRANSACTION_ATTEMPTS) {
+      if (
+        !isSerializableTransactionConflict(error) ||
+        attempt === MAX_SERIALIZABLE_TRANSACTION_ATTEMPTS
+      ) {
         throw error;
       }
     }

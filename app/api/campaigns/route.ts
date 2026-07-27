@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { renderCampaignMessage } from "@/src/lib/campaigns/message-template";
 import {
   CampaignMediaError,
@@ -7,6 +8,7 @@ import {
   serializeCampaignForApi
 } from "@/src/lib/campaigns/media";
 import { parseCampaignScheduleInput } from "@/src/lib/campaigns/scheduling-input";
+import { type CampaignDispatchSettings, validateDispatchSettings } from "@/src/lib/campaigns/dispatch-policy";
 import {
   emptyRecipientStatusSummary,
   getCampaignRecipientCountMap,
@@ -22,14 +24,6 @@ import {
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-function serializeAdvancedSettings(value: unknown) {
-  if (!value || typeof value !== "object") {
-    return null;
-  }
-
-  return `settings:${JSON.stringify(value)}`;
-}
 
 function campaignMediaErrorResponse(error: unknown) {
   if (error instanceof CampaignMediaError) {
@@ -104,7 +98,10 @@ export async function POST(request: NextRequest) {
   const maxRecipients = Number(payload.maxRecipients ?? 0);
   const requestedMaxRecipients =
     Number.isInteger(maxRecipients) && maxRecipients > 0 ? Math.min(maxRecipients, 500) : null;
-  const advancedSettings = serializeAdvancedSettings(payload.advancedSettings);
+  const dispatchSettings =
+    payload.advancedSettings && typeof payload.advancedSettings === "object"
+      ? payload.advancedSettings as CampaignDispatchSettings
+      : null;
   const scheduleInput = parseCampaignScheduleInput(payload.sendMode, payload.scheduledAt);
   const contactIds = Array.isArray(payload.contactIds)
     ? Array.from(new Set(payload.contactIds.map((id) => String(id).trim()).filter(Boolean)))
@@ -125,6 +122,11 @@ export async function POST(request: NextRequest) {
       { error: "Intervalo deve ser inteiro e maior ou igual a 1 minuto" },
       { status: 400 }
     );
+  }
+
+  const dispatchValidationError = dispatchSettings ? validateDispatchSettings(dispatchSettings) : null;
+  if (dispatchValidationError) {
+    return NextResponse.json({ error: dispatchValidationError }, { status: 400 });
   }
 
   if (contactIds.length === 0 && uniqueChatIds.length === 0) {
@@ -201,7 +203,9 @@ export async function POST(request: NextRequest) {
             excludeGroups: true,
             dedupeKey,
             maxRecipients: requestedMaxRecipients ?? individualChats.length,
-            sendWindowStart: advancedSettings,
+            dispatchConfig: dispatchSettings ? dispatchSettings as Prisma.InputJsonValue : Prisma.DbNull,
+            sendWindowStart: dispatchSettings?.windowStart ?? null,
+            sendWindowEnd: dispatchSettings?.windowEnd ?? null,
             recipients: {
               create: individualChats.slice(0, requestedMaxRecipients ?? individualChats.length).map((chat) => ({
                 instanceId,
@@ -277,7 +281,9 @@ export async function POST(request: NextRequest) {
           status: scheduleInput.status,
           scheduledAt: scheduleInput.scheduledAt,
           maxRecipients: requestedMaxRecipients,
-          sendWindowStart: advancedSettings,
+          dispatchConfig: dispatchSettings ? dispatchSettings as Prisma.InputJsonValue : Prisma.DbNull,
+          sendWindowStart: dispatchSettings?.windowStart ?? null,
+          sendWindowEnd: dispatchSettings?.windowEnd ?? null,
           recipients: {
             create: uniqueContactsByPhone.map((contact) => ({
               instanceId,

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { renderCampaignMessage } from "@/src/lib/campaigns/message-template";
+import { forecastDispatch, validateDispatchSettings } from "@/src/lib/campaigns/dispatch-policy";
 
 type ContactOption = {
   id: string;
@@ -299,6 +300,16 @@ export function CampaignsClient({
   const [maxDelaySeconds, setMaxDelaySeconds] = useState(90);
   const [pauseEvery, setPauseEvery] = useState(25);
   const [pauseMinutes, setPauseMinutes] = useState(10);
+  const [dailyLimit, setDailyLimit] = useState(600);
+  const [dailyLimitConfirmed, setDailyLimitConfirmed] = useState(false);
+  const [windowStart, setWindowStart] = useState("06:00");
+  const [windowEnd, setWindowEnd] = useState("22:00");
+  const [timezone, setTimezone] = useState("America/Sao_Paulo");
+  const [continueNextDay, setContinueNextDay] = useState(true);
+  const [pauseAfter25Minutes, setPauseAfter25Minutes] = useState(5);
+  const [pauseAfter50Minutes, setPauseAfter50Minutes] = useState(10);
+  const [pauseAfter75Minutes, setPauseAfter75Minutes] = useState(15);
+  const [pauseAfter100Minutes, setPauseAfter100Minutes] = useState(20);
   const [batchLimit, setBatchLimit] = useState(100);
   const [recipientLimitMode, setRecipientLimitMode] = useState<"all" | "limited">("all");
   const [dedupeMode, setDedupeMode] = useState<DedupeMode>("same_campaign");
@@ -348,18 +359,39 @@ export function CampaignsClient({
         : selectedContacts.size;
   const securityConfirmed = confirmedAudience && confirmedMessage && confirmedGroups;
   const scheduleValidation = getScheduleValidation(sendMode, scheduledLocalDateTime);
+  const currentDispatchSettings = {
+    delayMode, fixedSeconds, fixedMinutes,
+    dailyLimit, timezone, windowStart, windowEnd, continueNextDay,
+    minDelaySeconds, maxDelaySeconds,
+    pauseAfter25Minutes, pauseAfter50Minutes, pauseAfter75Minutes, pauseAfter100Minutes
+  };
+  const dispatchPolicyError = validateDispatchSettings(currentDispatchSettings);
   const canCreate =
     Boolean(name.trim()) &&
     Boolean(message.trim()) &&
     intervalMinutes >= 1 &&
     audienceCount > 0 &&
     scheduleValidation.ok &&
+    dailyLimitConfirmed &&
+    !dispatchPolicyError &&
     !mediaError &&
     securityConfirmed;
   const sampleContact = prefilledContacts[0] ?? contacts[0] ?? null;
   const renderedPreviewMessage = previewMessage || (
     message.trim() ? renderCampaignMessage(message, sampleContact) : ""
   );
+  const dispatchForecast = useMemo(() => {
+    if (audienceCount <= 0 || !dailyLimitConfirmed) return null;
+    try {
+      return forecastDispatch(
+        audienceCount,
+        sendMode === "SCHEDULED" && scheduledLocalDateTime ? new Date(scheduledLocalDateTime) : new Date(),
+        currentDispatchSettings
+      );
+    } catch {
+      return null;
+    }
+  }, [audienceCount, dailyLimitConfirmed, delayMode, fixedSeconds, fixedMinutes, dailyLimit, timezone, windowStart, windowEnd, continueNextDay, minDelaySeconds, maxDelaySeconds, pauseAfter25Minutes, pauseAfter50Minutes, pauseAfter75Minutes, pauseAfter100Minutes, sendMode, scheduledLocalDateTime]);
 
   function updateIntervalFromDelay(nextMode = delayMode) {
     const seconds =
@@ -633,7 +665,16 @@ export function CampaignsClient({
           maxDelaySeconds,
           pauseEvery,
           pauseMinutes,
-          batchLimit
+          batchLimit,
+          dailyLimit,
+          timezone,
+          windowStart,
+          windowEnd,
+          continueNextDay,
+          pauseAfter25Minutes,
+          pauseAfter50Minutes,
+          pauseAfter75Minutes,
+          pauseAfter100Minutes
         }
       };
       const endpoint =
@@ -1186,6 +1227,35 @@ export function CampaignsClient({
                     {testFeedback.text}
                   </div>
                 ) : null}
+                <div className="filter-bar">
+                  <div className="field">
+                    <label htmlFor="daily-limit">Limite diario</label>
+                    <input className="input" id="daily-limit" min="1" type="number" value={dailyLimit} onChange={(event) => { setDailyLimit(Math.max(1, Number(event.target.value))); setDailyLimitConfirmed(false); }} />
+                  </div>
+                  <div className="field">
+                    <label htmlFor="window-start">Inicio diario</label>
+                    <input className="input" id="window-start" type="time" value={windowStart} onChange={(event) => setWindowStart(event.target.value)} />
+                  </div>
+                  <div className="field">
+                    <label htmlFor="window-end">Fim diario</label>
+                    <input className="input" id="window-end" type="time" value={windowEnd} onChange={(event) => setWindowEnd(event.target.value)} />
+                  </div>
+                  <div className="field">
+                    <label htmlFor="campaign-timezone">Timezone</label>
+                    <input className="input" id="campaign-timezone" value={timezone} onChange={(event) => setTimezone(event.target.value)} />
+                  </div>
+                </div>
+                <div className="filter-bar">
+                  <label className="check-card">
+                    <input checked={continueNextDay} type="checkbox" onChange={(event) => setContinueNextDay(event.target.checked)} />
+                    <span>Continuar automaticamente no proximo dia</span>
+                  </label>
+                  <label className="check-card">
+                    <input checked={dailyLimitConfirmed} type="checkbox" onChange={(event) => setDailyLimitConfirmed(event.target.checked)} />
+                    <span>Confirmo o limite de {dailyLimit} mensagens por dia</span>
+                  </label>
+                </div>
+                {dispatchPolicyError ? <div className="message error compact">{dispatchPolicyError}</div> : null}
                 <div className="field">
                   <label htmlFor="delay-mode">Delay seguro</label>
                   <select
@@ -1252,12 +1322,20 @@ export function CampaignsClient({
                 ) : null}
                 <div className="filter-bar">
                   <div className="field">
-                    <label htmlFor="pause-every">Pausar a cada X mensagens</label>
-                    <input className="input" id="pause-every" min="1" type="number" value={pauseEvery} onChange={(event) => setPauseEvery(Number(event.target.value))} />
+                    <label htmlFor="pause-25">Pausa apos 25</label>
+                    <input className="input" id="pause-25" min="0" type="number" value={pauseAfter25Minutes} onChange={(event) => setPauseAfter25Minutes(Number(event.target.value))} />
                   </div>
                   <div className="field">
-                    <label htmlFor="pause-minutes">Tempo da pausa em minutos</label>
-                    <input className="input" id="pause-minutes" min="1" type="number" value={pauseMinutes} onChange={(event) => setPauseMinutes(Number(event.target.value))} />
+                    <label htmlFor="pause-50">Pausa apos 50</label>
+                    <input className="input" id="pause-50" min="0" type="number" value={pauseAfter50Minutes} onChange={(event) => setPauseAfter50Minutes(Number(event.target.value))} />
+                  </div>
+                  <div className="field">
+                    <label htmlFor="pause-75">Pausa apos 75</label>
+                    <input className="input" id="pause-75" min="0" type="number" value={pauseAfter75Minutes} onChange={(event) => setPauseAfter75Minutes(Number(event.target.value))} />
+                  </div>
+                  <div className="field">
+                    <label htmlFor="pause-100">Pausa apos 100</label>
+                    <input className="input" id="pause-100" min="0" type="number" value={pauseAfter100Minutes} onChange={(event) => setPauseAfter100Minutes(Number(event.target.value))} />
                   </div>
                   {audienceMode !== "label" ? (
                     <div className="field">
@@ -1309,11 +1387,23 @@ export function CampaignsClient({
                     <li>Nome: {name || "nao informado"}</li>
                     <li>Publico: {audienceLabel(audienceMode)}</li>
                     <li>Destinatarios: {audienceCount}</li>
-                    <li>Intervalo: {intervalMinutes || 0} minuto(s)</li>
-                    <li>Delay: {delayMode === "random_range" ? `${minDelaySeconds}-${maxDelaySeconds}s` : `${intervalMinutes}min equivalente`}</li>
-                    <li>Pausa: {pauseMinutes}min a cada {pauseEvery} mensagens</li>
+                    <li>
+                      Intervalo: {delayMode === "fixed_seconds"
+                        ? `${fixedSeconds} segundo(s) fixos`
+                        : delayMode === "fixed_minutes"
+                          ? `${fixedMinutes} minuto(s) fixos`
+                          : `aleatorio entre ${minDelaySeconds} e ${maxDelaySeconds} segundos`}
+                    </li>
+                    <li>
+                      Pausas progressivas: 25 ({pauseAfter25Minutes}min), 50 ({pauseAfter50Minutes}min), 75 ({pauseAfter75Minutes}min) e 100 ({pauseAfter100Minutes}min)
+                    </li>
                     <li>Quantidade: {recipientLimitMode === "all" ? "todos os elegiveis" : `limite total de ${batchLimit}`}</li>
                     <li>Repeticao: {dedupeMode === "recent_days" ? `excluir ultimos ${excludeAlreadySentDays} dias` : dedupeMode === "allow_resend" ? "reenvio intencional" : "somente nesta campanha"}</li>
+                    <li>Limite diario: {dailyLimit}</li>
+                    <li>Janela: {windowStart} ate {windowEnd} ({timezone})</li>
+                    {dispatchForecast ? (
+                      <li>Estimativa: {dispatchForecast.estimatedDays} dia(s), conclusao provavel em {dispatchForecast.expected.toLocaleString("pt-BR")}</li>
+                    ) : null}
                     <li>Mensagem: {message.trim() ? "preenchida" : "pendente"}</li>
                     <li>
                       Anexo: {mediaFile && mediaKind

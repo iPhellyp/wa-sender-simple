@@ -97,17 +97,16 @@ export async function POST(request: NextRequest) {
     }
   });
 
-  const jobId = await enqueueWhatsappConnect(instance.id);
+  const connectJob = await enqueueWhatsappConnect(instance.id);
   console.log("[whatsapp-api] connection enqueued", {
     action,
     instanceId: instance.id,
-    sessionKey: instance.sessionKey,
     hasCredsJson: currentSession.hasCredsJson ?? false,
     hasRegisteredSession: currentSession.hasRegisteredSession ?? false,
     hasMeId: currentSession.hasMeId ?? false,
     isPairingPartial: currentSession.isPairingPartial ?? false,
     sessionFilesCount: currentSession.sessionFilesCount ?? 0,
-    jobId
+    jobId: connectJob.jobId
   });
 
   return NextResponse.json({

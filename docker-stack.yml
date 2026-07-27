@@ -11,6 +11,11 @@ services:
       - postgres_data:/var/lib/postgresql/data
     networks:
       - wa_sender_internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
     deploy:
       replicas: 1
       restart_policy:
@@ -23,13 +28,18 @@ services:
       - redis_data:/data
     networks:
       - wa_sender_internal
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
     deploy:
       replicas: 1
       restart_policy:
         condition: any
 
   app:
-    image: wa-sender-simple:latest
+    image: wa-sender-simple:${IMAGE_TAG:?IMAGE_TAG obrigatoria}
     environment:
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
       APP_URL: "${APP_URL:-https://wa2.supereducarbrasil.com.br}"
@@ -38,16 +48,31 @@ services:
       DATABASE_URL: "${DATABASE_URL:-postgresql://wa_sender:wa_sender@wa_sender_simple_postgres:5432/wa_sender_simple?schema=public}"
       NEXT_PUBLIC_APP_URL: "${NEXT_PUBLIC_APP_URL:-https://wa2.supereducarbrasil.com.br}"
       REDIS_URL: "${REDIS_URL:-redis://wa_sender_simple_redis:6379}"
+      WA2_INTERNAL_API_SECRET: "${WA2_INTERNAL_API_SECRET}"
+      WA2_INTERNAL_API_PREVIOUS_SECRET: "${WA2_INTERNAL_API_PREVIOUS_SECRET:-}"
+      WA2_INTERNAL_API_RATE_LIMIT: "${WA2_INTERNAL_API_RATE_LIMIT:-60}"
+      WA2_INTERNAL_API_RATE_WINDOW_SECONDS: "${WA2_INTERNAL_API_RATE_WINDOW_SECONDS:-60}"
+      WA2_INTERNAL_API_IDEMPOTENCY_TTL_SECONDS: "${WA2_INTERNAL_API_IDEMPOTENCY_TTL_SECONDS:-86400}"
     volumes:
       - baileys_session:/app/data/baileys-session
       - uploads:/app/uploads
     networks:
       - wa_sender_internal
       - iPHnet
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/internal/v1/health',{headers:{authorization:'Bearer '+process.env.WA2_INTERNAL_API_SECRET}}).then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     deploy:
-      replicas: 1
+      replicas: ${APP_REPLICAS:-1}
       restart_policy:
         condition: any
+      update_config:
+        parallelism: 1
+        order: start-first
+        failure_action: rollback
       labels:
         - traefik.enable=true
         - traefik.docker.network=iPHnet
@@ -58,7 +83,7 @@ services:
         - traefik.http.services.wa-sender-simple.loadbalancer.server.port=3000
 
   worker:
-    image: wa-sender-simple:latest
+    image: wa-sender-simple:${IMAGE_TAG:?IMAGE_TAG obrigatoria}
     command: npm run worker
     environment:
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
@@ -73,14 +98,25 @@ services:
       - uploads:/app/uploads
     networks:
       - wa_sender_internal
+    healthcheck:
+      test: ["CMD", "npm", "run", "worker:health"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 45s
     deploy:
-      replicas: 1
+      replicas: ${WORKER_REPLICAS:-1}
       restart_policy:
         condition: any
+      update_config:
+        parallelism: 1
+        order: stop-first
+        failure_action: rollback
 
 networks:
   wa_sender_internal:
     driver: overlay
+    attachable: true
   iPHnet:
     external: true
     name: iPHnet

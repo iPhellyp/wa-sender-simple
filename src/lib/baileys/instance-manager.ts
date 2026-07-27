@@ -24,6 +24,7 @@ import { normalizeBrazilPhone } from "../phone/normalize";
 import { shouldIgnoreJidForX1Only } from "../whatsapp/jid";
 import {
   applyWhatsappLabelToJids as applyWhatsappLabelToJidsDefault,
+  removeWhatsappLabelFromJids as removeWhatsappLabelFromJidsDefault,
   disconnectBaileys,
   getWhatsappStatusPayload,
   requestWhatsappHistorySync,
@@ -503,7 +504,6 @@ async function startSecondaryWhatsappInstance(instance: WhatsappInstance) {
       console.log("[instance-manager] clearing partial pairing session before new qr", {
         action: "generate_qr",
         instanceId: instance.id,
-        sessionKey: instance.sessionKey,
         sessionDir: sessionInfo.sessionDir,
         sessionFilesCount: sessionInfo.sessionFilesCount,
         hasCredsJson: sessionInfo.hasCredsJson,
@@ -518,7 +518,6 @@ async function startSecondaryWhatsappInstance(instance: WhatsappInstance) {
     console.log("[instance-manager] starting instance", {
       action: sessionInfo.hasRegisteredSession || sessionInfo.hasMeId || Boolean(instance.phone) ? "resume_session" : "generate_qr",
       instanceId: instance.id,
-      sessionKey: instance.sessionKey,
       sessionDir: sessionInfo.sessionDir,
       sessionFilesCount: sessionInfo.sessionFilesCount,
       hasCredsJson: sessionInfo.hasCredsJson,
@@ -575,7 +574,6 @@ async function startSecondaryWhatsappInstance(instance: WhatsappInstance) {
           console.log("[instance-manager] qr updated", {
             action: "generate_qr",
             instanceId: instance.id,
-            sessionKey: instance.sessionKey,
             hasQr: true,
             persistedQr: true
           });
@@ -761,8 +759,7 @@ export async function disconnectWhatsappInstance(instanceId?: string | null) {
     lastError: null
   });
   console.log("[instance-manager] disconnected instance", {
-    instanceId: instance.id,
-    sessionKey: instance.sessionKey
+    instanceId: instance.id
   });
   return getWhatsappInstanceRuntimeStatus(instance.id);
 }
@@ -788,8 +785,7 @@ export async function resetWhatsappInstance(instanceId?: string | null) {
     lastError: null
   });
   console.log("[instance-manager] reset instance", {
-    instanceId: instance.id,
-    sessionKey: instance.sessionKey
+    instanceId: instance.id
   });
   return getWhatsappInstanceRuntimeStatus(instance.id);
 }
@@ -1146,6 +1142,40 @@ export async function applyWhatsappLabelsForInstance(params: {
     failed,
     message: `Etiquetas aplicadas: ${applied}.`
   };
+}
+
+export async function mutateWhatsappChatLabelForInstance(params: {
+  instanceId: string;
+  operation: "apply" | "remove";
+  waLabelId: string;
+  jid: string;
+}) {
+  const instance = await resolveWhatsappInstance(params.instanceId);
+
+  if (instance.id === DEFAULT_WHATSAPP_INSTANCE_ID) {
+    return params.operation === "apply"
+      ? applyWhatsappLabelToJidsDefault({
+          waLabelId: params.waLabelId,
+          jids: [params.jid]
+        })
+      : removeWhatsappLabelFromJidsDefault({
+          waLabelId: params.waLabelId,
+          jids: [params.jid]
+        });
+  }
+
+  const socket = await getConnectedInstanceSocket(instance.id);
+  const mutate =
+    params.operation === "apply"
+      ? socket.addChatLabel?.bind(socket)
+      : socket.removeChatLabel?.bind(socket);
+
+  if (!mutate) {
+    throw new Error("Operação de etiqueta indisponível no socket Baileys");
+  }
+
+  await mutate(params.jid, params.waLabelId);
+  return { ok: true };
 }
 
 export { getDefaultWhatsappInstance };

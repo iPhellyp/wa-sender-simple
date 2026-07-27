@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import type { WhatsappInstanceRole } from "@prisma/client";
+import type { WhatsappInstance, WhatsappInstanceRole } from "@prisma/client";
 import { getWhatsappInstanceRuntimeStatus } from "@/src/lib/baileys/instance-manager";
 import { prisma } from "@/src/lib/prisma/client";
 import {
   WHATSAPP_INSTANCE_ROLE_LABELS,
-  buildInstanceSessionKey,
+  createWhatsappInstance,
   isWhatsappInstanceRole
 } from "@/src/lib/server/whatsapp-instances";
 
@@ -13,6 +13,21 @@ export const dynamic = "force-dynamic";
 
 const CONNECTING_STALE_MS = 120_000;
 const QR_STALE_MS = 180_000;
+
+function sanitizeInstance(instance: WhatsappInstance) {
+  return {
+    id: instance.id,
+    name: instance.name,
+    phone: instance.phone,
+    role: instance.role,
+    status: instance.status,
+    isDefault: instance.isDefault,
+    lastConnectedAt: instance.lastConnectedAt,
+    lastSyncAt: instance.lastSyncAt,
+    createdAt: instance.createdAt,
+    updatedAt: instance.updatedAt
+  };
+}
 
 function getEffectiveStatus(rawStatus: string, hasConfirmedSession: boolean) {
   if (
@@ -93,7 +108,7 @@ export async function GET() {
       const canSyncHistory = canSyncQuick;
 
       return {
-        ...instance,
+        ...sanitizeInstance(instance),
         rawStatus,
         status,
         displayName: runtimeStatus?.displayName ?? null,
@@ -132,8 +147,6 @@ export async function POST(request: NextRequest) {
   };
   const name = String(payload.name ?? "").trim();
   const role = String(payload.role ?? "GENERAL").trim();
-  const existingCount = await prisma.whatsappInstance.count();
-  const isDefault = existingCount === 0;
 
   if (!name) {
     return NextResponse.json({ error: "Nome obrigatorio" }, { status: 400 });
@@ -143,18 +156,14 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Funcao de instancia invalida" }, { status: 400 });
   }
 
-  const instance = await prisma.whatsappInstance.create({
-    data: {
-      name,
-      role: role as WhatsappInstanceRole,
-      sessionKey: buildInstanceSessionKey(name),
-      isDefault
-    }
+  const { instance } = await createWhatsappInstance({
+    name,
+    role: role as WhatsappInstanceRole
   });
 
   return NextResponse.json(
     {
-      instance,
+      instance: sanitizeInstance(instance),
       roleLabel: WHATSAPP_INSTANCE_ROLE_LABELS[instance.role]
     },
     { status: 201 }

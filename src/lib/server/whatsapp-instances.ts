@@ -1,5 +1,11 @@
 import { prisma } from "../prisma/client";
 import { cookies } from "next/headers";
+import { createHash } from "crypto";
+import {
+  Prisma,
+  type WhatsappInstance,
+  type WhatsappInstanceRole
+} from "@prisma/client";
 
 export const WHATSAPP_INSTANCE_ROLES = [
   "SALES",
@@ -62,6 +68,106 @@ function slugSessionKey(value: string) {
 export function buildInstanceSessionKey(name: string) {
   const base = slugSessionKey(name) || "instance";
   return `${base}-${Date.now()}`;
+}
+
+export function normalizeSemanticInstanceName(name: string) {
+  return name.normalize("NFKC").trim().replace(/\s+/g, " ");
+}
+
+function semanticInstanceNameKey(name: string) {
+  return normalizeSemanticInstanceName(name).toLocaleLowerCase("pt-BR");
+}
+
+type SemanticInstanceLookup = {
+  whatsappInstance: {
+    findMany(options: {
+      where: { role: WhatsappInstanceRole };
+      orderBy: { createdAt: "asc" };
+    }): Promise<WhatsappInstance[]>;
+  };
+};
+
+async function findSemanticallyEquivalentInstance(
+  client: SemanticInstanceLookup,
+  name: string,
+  role: WhatsappInstanceRole
+) {
+  const expectedName = semanticInstanceNameKey(name);
+  const candidates = await client.whatsappInstance.findMany({
+    where: { role },
+    orderBy: { createdAt: "asc" }
+  });
+  return candidates.find((candidate) => semanticInstanceNameKey(candidate.name) === expectedName);
+}
+
+function advisoryLockId(value: string) {
+  return createHash("sha256").update(value, "utf8").digest().readBigInt64BE(0);
+}
+
+export async function createWhatsappInstance(options: {
+  name: string;
+  role: WhatsappInstanceRole;
+  reuseExisting?: boolean;
+}) {
+  if (!options.reuseExisting) {
+    const existingCount = await prisma.whatsappInstance.count();
+    const instance = await prisma.whatsappInstance.create({
+      data: {
+        name: options.name,
+        role: options.role,
+        sessionKey: buildInstanceSessionKey(options.name),
+        isDefault: existingCount === 0
+      }
+    });
+    return { instance, created: true };
+  }
+
+  const semanticName = normalizeSemanticInstanceName(options.name);
+  const existing = await findSemanticallyEquivalentInstance(
+    prisma,
+    semanticName,
+    options.role
+  );
+  if (existing) {
+    return { instance: existing, created: false };
+  }
+
+  const semanticLockId = advisoryLockId(
+    `wa2-instance-semantic:${options.role}:${semanticInstanceNameKey(semanticName)}`
+  );
+  const defaultLockId = advisoryLockId("wa2-instance-default-selection");
+
+  return prisma.$transaction(async (transaction) => {
+    await transaction.$executeRaw(
+      Prisma.sql`SELECT pg_advisory_xact_lock(${semanticLockId})`
+    );
+    const concurrentExisting = await findSemanticallyEquivalentInstance(
+      transaction,
+      semanticName,
+      options.role
+    );
+    if (concurrentExisting) {
+      return { instance: concurrentExisting, created: false };
+    }
+
+    let existingCount = await transaction.whatsappInstance.count();
+    if (existingCount === 0) {
+      await transaction.$executeRaw(
+        Prisma.sql`SELECT pg_advisory_xact_lock(${defaultLockId})`
+      );
+      existingCount = await transaction.whatsappInstance.count();
+    }
+
+    const instance = await transaction.whatsappInstance.create({
+      data: {
+        name: semanticName,
+        role: options.role,
+        sessionKey: buildInstanceSessionKey(semanticName),
+        isDefault: existingCount === 0
+      }
+    });
+    return { instance, created: true };
+  });
 }
 
 export async function ensureDefaultWhatsappInstance() {

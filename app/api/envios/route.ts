@@ -72,6 +72,7 @@ export async function GET(request: NextRequest) {
         scheduledAt: campaign.scheduledAt,
         startedAt: campaign.startedAt,
         completedAt: campaign.completedAt,
+        nextDispatchAt: campaign.nextDispatchAt,
         hasMedia: Boolean(campaign.mediaPath),
         mediaKind: campaign.mediaKind,
         mediaOriginalName: campaign.mediaOriginalName,

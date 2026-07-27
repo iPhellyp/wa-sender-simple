@@ -2,77 +2,7 @@ import { CampaignRecipientStatus, CampaignStatus } from "@prisma/client";
 import { prisma } from "../prisma/client";
 import { enqueueRecipient } from "../queue/campaign-queue";
 import { completeCampaignIfDone } from "./progress";
-
-type AdvancedCampaignSettings = {
-  delayMode?: "fixed_seconds" | "fixed_minutes" | "random_range";
-  fixedSeconds?: number;
-  fixedMinutes?: number;
-  minDelaySeconds?: number;
-  maxDelaySeconds?: number;
-  pauseEvery?: number;
-  pauseMinutes?: number;
-  batchLimit?: number;
-};
-
-function parseAdvancedSettings(value: string | null): AdvancedCampaignSettings {
-  if (!value?.startsWith("settings:")) {
-    return {};
-  }
-
-  try {
-    const parsed = JSON.parse(value.slice("settings:".length)) as AdvancedCampaignSettings;
-    return parsed && typeof parsed === "object" ? parsed : {};
-  } catch {
-    return {};
-  }
-}
-
-function getNormalDelayMs(settings: AdvancedCampaignSettings, fallbackDelayMs: number, intervalMinutes: number) {
-  if (settings.delayMode === "fixed_seconds" && Number.isFinite(settings.fixedSeconds)) {
-    return Math.max(0, Number(settings.fixedSeconds) * 1000);
-  }
-
-  if (settings.delayMode === "fixed_minutes" && Number.isFinite(settings.fixedMinutes)) {
-    return Math.max(0, Number(settings.fixedMinutes) * 60 * 1000);
-  }
-
-  if (
-    settings.delayMode === "random_range" &&
-    Number.isFinite(settings.minDelaySeconds) &&
-    Number.isFinite(settings.maxDelaySeconds)
-  ) {
-    const min = Math.max(0, Number(settings.minDelaySeconds));
-    const max = Math.max(min, Number(settings.maxDelaySeconds));
-    return Math.round((min + Math.random() * (max - min)) * 1000);
-  }
-
-  return Math.max(0, fallbackDelayMs || intervalMinutes * 60 * 1000);
-}
-
-function getNextDelayMs(params: {
-  settings: AdvancedCampaignSettings;
-  fallbackDelayMs: number;
-  intervalMinutes: number;
-  sentCount: number;
-}) {
-  if (params.sentCount === 0) {
-    return Math.max(0, params.fallbackDelayMs);
-  }
-
-  const pauseEvery = Number(params.settings.pauseEvery ?? 0);
-
-  if (
-    Number.isInteger(pauseEvery) &&
-    pauseEvery > 0 &&
-    params.sentCount > 0 &&
-    params.sentCount % pauseEvery === 0
-  ) {
-    const pauseMinutes = Math.max(1, Number(params.settings.pauseMinutes ?? 1));
-    return pauseMinutes * 60 * 1000;
-  }
-
-  return getNormalDelayMs(params.settings, params.fallbackDelayMs, params.intervalMinutes);
-}
+import { getDispatchDay, nextDispatchDecision, resolveDispatchSettings } from "./dispatch-policy";
 
 export async function schedulePendingRecipients(campaignId: string, delayMs = 0) {
   const campaign = await prisma.campaign.findUnique({
@@ -138,11 +68,31 @@ export async function schedulePendingRecipients(campaignId: string, delayMs = 0)
   });
 
   if (scheduledRecipient) {
+    await prisma.campaign.updateMany({
+      where: { id: campaignId, instanceId: campaign.instanceId, status: CampaignStatus.running },
+      data: { nextDispatchAt: scheduledRecipient.scheduledAt }
+    });
     await enqueueRecipient(
       scheduledRecipient.id,
       Math.max(0, (scheduledRecipient.scheduledAt?.getTime() ?? Date.now()) - Date.now())
     );
     return;
+  }
+
+  const now = new Date();
+  const settings = resolveDispatchSettings(campaign.dispatchConfig, campaign.sendWindowStart);
+  let sentToday = sentCount;
+
+  if (Number.isInteger(settings.dailyLimit) && Number(settings.dailyLimit) > 0) {
+    const day = getDispatchDay(now, settings);
+    sentToday = await prisma.campaignRecipient.count({
+      where: {
+        instanceId: campaign.instanceId,
+        campaignId,
+        status: CampaignRecipientStatus.sent,
+        sentAt: { gte: day.dayStart, lt: day.dayEnd }
+      }
+    });
   }
 
   for (const recipient of campaign.recipients) {
@@ -164,13 +114,24 @@ export async function schedulePendingRecipients(campaignId: string, delayMs = 0)
       continue;
     }
 
-    const scheduledDelayMs = getNextDelayMs({
-      settings: parseAdvancedSettings(campaign.sendWindowStart),
+    const decision = nextDispatchDecision({
+      now,
+      settings,
       fallbackDelayMs: delayMs,
-      intervalMinutes: campaign.intervalMinutes,
-      sentCount
+      sentToday,
+      sentInCycle: sentCount,
+      hasPending: true
     });
-    const scheduledAt = new Date(Date.now() + scheduledDelayMs);
+
+    if (decision.pauseCampaign || !decision.nextAt) {
+      await prisma.campaign.updateMany({
+        where: { id: campaignId, instanceId: campaign.instanceId, status: CampaignStatus.running },
+        data: { status: CampaignStatus.paused, nextDispatchAt: null, lastError: "Campanha pausada ao final da janela diaria" }
+      });
+      return;
+    }
+
+    const scheduledAt = decision.nextAt;
     const updatedRecipient = await prisma.campaignRecipient.updateMany({
       where: {
         id: recipient.id,
@@ -185,11 +146,19 @@ export async function schedulePendingRecipients(campaignId: string, delayMs = 0)
     });
 
     if (updatedRecipient.count > 0) {
+      await prisma.campaign.updateMany({
+        where: { id: campaignId, instanceId: campaign.instanceId, status: CampaignStatus.running },
+        data: { nextDispatchAt: scheduledAt }
+      });
       await enqueueRecipient(recipient.id, scheduledAt.getTime() - Date.now());
     }
 
     return;
   }
 
+  await prisma.campaign.updateMany({
+    where: { id: campaignId, instanceId: campaign.instanceId },
+    data: { nextDispatchAt: null }
+  });
   await completeCampaignIfDone(campaignId);
 }
