@@ -265,9 +265,14 @@ test("aplicação de etiqueta enfileira uma vez e repetição local não duplica
     instanceId: "instance-1",
     chatId: "chat-1",
     waLabelId: "10",
-    operation: "apply"
+    operation: "apply",
+    correlationKey: "request-123"
   });
   assert.equal(first.enqueued, true);
+  assert.equal(
+    (queueCalls[0]?.data as { correlationKey?: string }).correlationKey,
+    "request-123"
+  );
   chatLabel = { id: "association-1" };
   const replay = await services.mutateInternalChatLabel({
     instanceId: "instance-1",

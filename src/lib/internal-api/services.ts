@@ -276,6 +276,7 @@ export async function mutateInternalChatLabel(options: {
   chatId: string;
   waLabelId: string;
   operation: "apply" | "remove";
+  correlationKey?: string;
 }) {
   const chat = await requireInternalChat(options.instanceId, options.chatId);
   assertMutableChatJid(chat.jid);
@@ -311,7 +312,8 @@ export async function mutateInternalChatLabel(options: {
     chatId: chat.id,
     labelId: label.id,
     waLabelId: label.waLabelId,
-    jid: chat.jid
+    jid: chat.jid,
+    correlationKey: options.correlationKey
   });
   return { changed: true, enqueued: !job.deduped, jobId: job.jobId };
 }

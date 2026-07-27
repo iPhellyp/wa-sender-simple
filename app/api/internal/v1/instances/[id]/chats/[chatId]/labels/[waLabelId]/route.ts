@@ -14,13 +14,14 @@ type RouteContext = {
 function mutate(operation: "apply" | "remove") {
   return async (request: NextRequest, context: RouteContext) =>
     withInternalApi(
-      async () => {
+      async (_request, internalContext) => {
         const { id, chatId, waLabelId } = await context.params;
         const result = await mutateInternalChatLabel({
           instanceId: validateResourceId(id, "instanceId"),
           chatId: validateResourceId(chatId, "chatId"),
           waLabelId: validateResourceId(waLabelId, "waLabelId"),
-          operation
+          operation,
+          correlationKey: internalContext.requestId
         });
         return internalJson(
           {

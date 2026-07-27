@@ -48,6 +48,12 @@ import {
   MAX_SERIALIZABLE_TRANSACTION_ATTEMPTS
 } from "../lib/campaigns/transaction-conflict";
 import { hashMessage, resolveCampaignJid, type SkippedReason } from "../lib/labels/audience";
+import {
+  clearPendingInternalLabelMutation,
+  recordLabelAssociationChange,
+  registerPendingInternalLabelMutation,
+  type LabelEventOperation
+} from "../lib/labels/label-events";
 import { normalizeBrazilPhone, toWhatsappJid } from "../lib/phone/normalize";
 import { clearWhatsappOperationalData } from "../lib/server/whatsapp-session-data";
 import { DEFAULT_WHATSAPP_INSTANCE_ID } from "../lib/server/whatsapp-instances";
@@ -1219,30 +1225,44 @@ const worker = new Worker(
       const waLabelId = String(data.waLabelId ?? "").trim();
       const chatId = String(data.chatId ?? "").trim();
       const labelId = String(data.labelId ?? "").trim();
+      const correlationKey = String(data.correlationKey ?? "").trim() || null;
 
       if (!jid || !waLabelId || !chatId || !labelId) {
         throw new Error("mutate-whatsapp-chat-label possui dados inválidos");
       }
 
-      await mutateWhatsappChatLabelForInstance({
+      const eventOperation: LabelEventOperation =
+        operation === "apply" ? "APPLY" : "REMOVE";
+      const pendingMutation = {
         instanceId,
-        operation,
         jid,
-        waLabelId
+        waLabelId,
+        operation: eventOperation
+      };
+      registerPendingInternalLabelMutation({
+        ...pendingMutation,
+        correlationKey
       });
 
-      if (operation === "apply") {
-        await prisma.whatsappChatLabel.upsert({
-          where: {
-            instanceId_chatId_labelId: { instanceId, chatId, labelId }
-          },
-          update: { jid },
-          create: { instanceId, chatId, labelId, jid }
+      try {
+        await mutateWhatsappChatLabelForInstance({
+          instanceId,
+          operation,
+          jid,
+          waLabelId
         });
-      } else {
-        await prisma.whatsappChatLabel.deleteMany({
-          where: { instanceId, chatId, labelId }
+        await recordLabelAssociationChange({
+          instanceId,
+          chatId,
+          labelId,
+          waLabelId,
+          jid,
+          operation: eventOperation,
+          source: "INTERNAL_API",
+          correlationKey
         });
+      } finally {
+        clearPendingInternalLabelMutation(pendingMutation);
       }
 
       console.log("[worker] mutate-whatsapp-chat-label finished", {

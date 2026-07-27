@@ -1,8 +1,14 @@
 import type { BaileysEventMap } from "@whiskeysockets/baileys";
 import { prisma } from "../prisma/client";
 import { DEFAULT_WHATSAPP_INSTANCE_ID } from "../server/whatsapp-instances";
-import { ensureChatForJid, isGroupJid, normalizeChatJid } from "./sync";
-import { recordX1GroupSkips, shouldIgnoreJidForX1Only } from "../whatsapp/jid";
+import { isGroupJid } from "./sync";
+import {
+  classifyLabelEventTarget,
+  consumePendingInternalLabelMutation,
+  normalizeLabelEventJid,
+  recordLabelAssociationChange,
+  type LabelEventOperation
+} from "../labels/label-events";
 
 const CHAT_LABEL_TYPE = "label_jid";
 
@@ -112,42 +118,31 @@ async function resolveLabelByWaId(waLabelId: string, instanceId = DEFAULT_WHATSA
   });
 }
 
-export async function removeWhatsappLabelAssociation(
-  chatId: string,
-  labelInternalId: string,
-  instanceId = DEFAULT_WHATSAPP_INSTANCE_ID
+async function resolveLabelForAssociation(
+  waLabelId: string,
+  operation: LabelEventOperation,
+  instanceId: string
 ) {
-  await prisma.whatsappChatLabel.deleteMany({
-    where: {
-      instanceId,
-      chatId,
-      labelId: labelInternalId
-    }
-  });
-}
+  const existing = await resolveLabelByWaId(waLabelId, instanceId);
 
-export async function upsertWhatsappLabelAssociation(
-  jid: string,
-  labelInternalId: string,
-  chatId: string,
-  instanceId = DEFAULT_WHATSAPP_INSTANCE_ID
-) {
-  await prisma.whatsappChatLabel.upsert({
+  if (existing || operation === "REMOVE") {
+    return existing;
+  }
+
+  return prisma.whatsappLabel.upsert({
     where: {
-      instanceId_chatId_labelId: {
+      instanceId_waLabelId: {
         instanceId,
-        chatId,
-        labelId: labelInternalId
+        waLabelId
       }
     },
-    update: {
-      jid
-    },
+    update: {},
     create: {
       instanceId,
-      chatId,
-      labelId: labelInternalId,
-      jid
+      waLabelId,
+      name: safeLabelName(null, waLabelId),
+      predefined: false,
+      deleted: false
     }
   });
 }
@@ -185,7 +180,7 @@ export async function syncLabelsAssociation(
       return counters;
     }
 
-    const jid = normalizeChatJid(association.chatId);
+    const jid = normalizeLabelEventJid(association.chatId);
     const waLabelId = String(association.labelId ?? "").trim();
 
     if (!jid || !waLabelId) {
@@ -193,37 +188,47 @@ export async function syncLabelsAssociation(
       return counters;
     }
 
-    if (shouldIgnoreJidForX1Only(jid)) {
-      counters.skipped = 1;
-      if (isGroupJid(jid)) {
-        counters.groupsSkipped = 1;
-        recordX1GroupSkips("labels");
-      }
-      console.log("[catalog] associations saved", counters);
-      return counters;
-    }
-
-    const label = await resolveLabelByWaId(waLabelId, instanceId);
-
-    if (!label || label.deleted) {
+    if (event.type !== "add" && event.type !== "remove") {
       counters.skipped = 1;
       return counters;
     }
 
-    const chat = await ensureChatForJid(jid, undefined, instanceId);
+    const operation: LabelEventOperation =
+      event.type === "remove" ? "REMOVE" : "APPLY";
+    const label = await resolveLabelForAssociation(waLabelId, operation, instanceId);
 
-    if (event.type === "remove") {
-      await removeWhatsappLabelAssociation(chat.id, label.id, instanceId);
-      counters.removed = 1;
-      counters.processed = 1;
-      counters.x1Saved = 1;
+    if (!label || (event.type === "add" && label.deleted)) {
+      counters.skipped = 1;
+      return counters;
+    }
+
+    const pending = consumePendingInternalLabelMutation({
+      instanceId,
+      jid,
+      waLabelId,
+      operation
+    });
+    const result = await recordLabelAssociationChange({
+      instanceId,
+      labelId: label.id,
+      waLabelId,
+      jid,
+      operation,
+      source: pending ? "INTERNAL_API" : "WHATSAPP",
+      correlationKey: pending?.correlationKey
+    });
+    const target = classifyLabelEventTarget(jid);
+
+    if (!result.changed) {
+      counters.skipped = 1;
       console.log("[catalog] associations saved", counters);
       return counters;
     }
 
-    await upsertWhatsappLabelAssociation(jid, label.id, chat.id, instanceId);
     counters.processed = 1;
-    counters.x1Saved = 1;
+    counters.removed = operation === "REMOVE" ? 1 : 0;
+    counters.x1Saved = target.eligibleForCrm ? 1 : 0;
+    counters.groupsSkipped = isGroupJid(jid) ? 1 : 0;
   } catch (error) {
     counters.failed = 1;
     console.warn("[sync] labels association failed", {

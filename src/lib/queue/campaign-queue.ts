@@ -45,6 +45,7 @@ export type MutateWhatsappChatLabelJobData = InstanceJobData & {
   labelId: string;
   waLabelId: string;
   jid: string;
+  correlationKey?: string;
 };
 
 let queue: Queue | null = null;
