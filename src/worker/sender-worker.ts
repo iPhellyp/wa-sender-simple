@@ -58,7 +58,13 @@ import { normalizeBrazilPhone, toWhatsappJid } from "../lib/phone/normalize";
 import { clearWhatsappOperationalData } from "../lib/server/whatsapp-session-data";
 import { DEFAULT_WHATSAPP_INSTANCE_ID } from "../lib/server/whatsapp-instances";
 import { shouldIgnoreJidForX1Only } from "../lib/whatsapp/jid";
-import { createHeartbeatRedis, recordWorkerHeartbeat } from "./heartbeat";
+import {
+  createHeartbeatRedis,
+  recordWorkerHeartbeat,
+  recordWorkerReadiness,
+  removeWorkerReadiness
+} from "./heartbeat";
+import { withTimeout } from "./timeout";
 
 const finalRecipientStatuses: CampaignRecipientStatus[] = [
   CampaignRecipientStatus.sent,
@@ -67,13 +73,10 @@ const finalRecipientStatuses: CampaignRecipientStatus[] = [
 ];
 const redisConnectionOptions = getRedisConnectionOptions();
 const heartbeatRedis = createHeartbeatRedis();
-
-console.log("[worker] sender-worker started");
-console.log("[worker] redis connection", {
-  host: redisConnectionOptions.host,
-  port: redisConnectionOptions.port,
-  db: redisConnectionOptions.db
-});
+heartbeatRedis.on("error", () => undefined);
+const HEARTBEAT_INITIALIZATION_TIMEOUT_MS = 5_000;
+const BULLMQ_READINESS_TIMEOUT_MS = 10_000;
+const RESOURCE_CLOSE_TIMEOUT_MS = 2_000;
 
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Erro desconhecido";
@@ -1038,7 +1041,60 @@ async function processRecipient(recipientId: string) {
   );
 }
 
-const worker = new Worker(
+async function closeWorkerRuntimeResources(worker?: Worker) {
+  await Promise.allSettled([
+    worker?.close(),
+    closeCampaignQueue(),
+    withTimeout(
+      removeWorkerReadiness(heartbeatRedis),
+      RESOURCE_CLOSE_TIMEOUT_MS
+    ),
+    withTimeout(prisma.$disconnect(), RESOURCE_CLOSE_TIMEOUT_MS)
+  ]);
+  try {
+    await withTimeout(heartbeatRedis.quit(), RESOURCE_CLOSE_TIMEOUT_MS);
+  } catch {
+    heartbeatRedis.disconnect();
+  }
+}
+
+try {
+  await withTimeout(
+    removeWorkerReadiness(heartbeatRedis),
+    HEARTBEAT_INITIALIZATION_TIMEOUT_MS
+  );
+} catch {
+  console.error("WORKER_BULLMQ_READINESS_FAILED");
+  await closeWorkerRuntimeResources();
+  process.exit(1);
+}
+
+try {
+  await withTimeout(
+    recordWorkerHeartbeat(heartbeatRedis),
+    HEARTBEAT_INITIALIZATION_TIMEOUT_MS
+  );
+} catch {
+  console.error("WORKER_HEARTBEAT_INITIALIZATION_FAILED");
+  await closeWorkerRuntimeResources();
+  process.exit(1);
+}
+
+const heartbeatTimer = setInterval(() => {
+  void withTimeout(
+    recordWorkerHeartbeat(heartbeatRedis),
+    HEARTBEAT_INITIALIZATION_TIMEOUT_MS
+  ).catch(() => {
+    console.error("WORKER_HEARTBEAT_PERIODIC_FAILED");
+  });
+}, 15_000);
+heartbeatTimer.unref();
+console.log("[worker] heartbeat initialized");
+let readinessTimer: ReturnType<typeof setInterval> | null = null;
+
+let worker: Worker;
+try {
+  worker = new Worker(
   CAMPAIGN_QUEUE_NAME,
   async (job) => {
     console.log("[worker] job received", {
@@ -1297,15 +1353,38 @@ const worker = new Worker(
     connection: redisConnectionOptions,
     concurrency: 1
   }
-);
+  );
+} catch {
+  clearInterval(heartbeatTimer);
+  console.error("WORKER_RUNTIME_INITIALIZATION_FAILED");
+  await closeWorkerRuntimeResources();
+  process.exit(1);
+}
 
-await recordWorkerHeartbeat(heartbeatRedis);
-const heartbeatTimer = setInterval(() => {
-  void recordWorkerHeartbeat(heartbeatRedis).catch((error) => {
-    console.error("[worker] heartbeat failed", { error: getErrorMessage(error) });
-  });
-}, 15_000);
-heartbeatTimer.unref();
+try {
+  await withTimeout(
+    worker.waitUntilReady(),
+    BULLMQ_READINESS_TIMEOUT_MS
+  );
+  await withTimeout(
+    recordWorkerReadiness(heartbeatRedis),
+    HEARTBEAT_INITIALIZATION_TIMEOUT_MS
+  );
+  readinessTimer = setInterval(() => {
+    void withTimeout(
+      recordWorkerReadiness(heartbeatRedis),
+      HEARTBEAT_INITIALIZATION_TIMEOUT_MS
+    ).catch(() => {
+      console.error("WORKER_READINESS_PERIODIC_FAILED");
+    });
+  }, 15_000);
+  readinessTimer.unref();
+} catch {
+  clearInterval(heartbeatTimer);
+  console.error("WORKER_BULLMQ_READINESS_FAILED");
+  await closeWorkerRuntimeResources(worker);
+  process.exit(1);
+}
 
 worker.on("failed", (job, error) => {
   console.error("[worker] sender-worker job failed", {
@@ -1315,7 +1394,16 @@ worker.on("failed", (job, error) => {
   });
 });
 
-const campaignScheduler = startCampaignScheduler();
+let campaignScheduler: ReturnType<typeof startCampaignScheduler>;
+try {
+  campaignScheduler = startCampaignScheduler();
+} catch {
+  clearInterval(heartbeatTimer);
+  if (readinessTimer) clearInterval(readinessTimer);
+  console.error("WORKER_RUNTIME_INITIALIZATION_FAILED");
+  await closeWorkerRuntimeResources(worker);
+  process.exit(1);
+}
 let shuttingDown = false;
 
 async function shutdown(signal: "SIGTERM" | "SIGINT") {
@@ -1325,17 +1413,14 @@ async function shutdown(signal: "SIGTERM" | "SIGINT") {
 
   try {
     clearInterval(heartbeatTimer);
+    if (readinessTimer) clearInterval(readinessTimer);
     await campaignScheduler.stop();
-    await worker.close();
-    await closeCampaignQueue();
-    await Promise.all([heartbeatRedis.quit(), prisma.$disconnect()]);
+    await closeWorkerRuntimeResources(worker);
     console.log("[worker] shutdown finished", { signal });
     process.exit(0);
-  } catch (error) {
-    console.error("[worker] shutdown failed", {
-      signal,
-      error: getErrorMessage(error)
-    });
+  } catch {
+    console.error("WORKER_SHUTDOWN_FAILED");
+    await closeWorkerRuntimeResources(worker);
     process.exit(1);
   }
 }
