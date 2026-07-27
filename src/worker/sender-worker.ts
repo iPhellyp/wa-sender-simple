@@ -71,9 +71,6 @@ const finalRecipientStatuses: CampaignRecipientStatus[] = [
   CampaignRecipientStatus.failed,
   CampaignRecipientStatus.canceled
 ];
-const redisConnectionOptions = getRedisConnectionOptions();
-const heartbeatRedis = createHeartbeatRedis();
-heartbeatRedis.on("error", () => undefined);
 const HEARTBEAT_INITIALIZATION_TIMEOUT_MS = 5_000;
 const BULLMQ_READINESS_TIMEOUT_MS = 10_000;
 const RESOURCE_CLOSE_TIMEOUT_MS = 2_000;
@@ -1041,60 +1038,79 @@ async function processRecipient(recipientId: string) {
   );
 }
 
-async function closeWorkerRuntimeResources(worker?: Worker) {
-  await Promise.allSettled([
-    worker?.close(),
-    closeCampaignQueue(),
-    withTimeout(
-      removeWorkerReadiness(heartbeatRedis),
-      RESOURCE_CLOSE_TIMEOUT_MS
-    ),
-    withTimeout(prisma.$disconnect(), RESOURCE_CLOSE_TIMEOUT_MS)
-  ]);
-  try {
-    await withTimeout(heartbeatRedis.quit(), RESOURCE_CLOSE_TIMEOUT_MS);
-  } catch {
-    heartbeatRedis.disconnect();
+let cleanupRuntimeOnFatal: (() => Promise<void>) | null = null;
+
+async function main() {
+  const redisConnectionOptions = getRedisConnectionOptions();
+  const heartbeatRedis = createHeartbeatRedis();
+  heartbeatRedis.on("error", () => undefined);
+  let runtimeWorker: Worker | undefined;
+  let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  let readinessTimer: ReturnType<typeof setInterval> | null = null;
+  let campaignScheduler: ReturnType<typeof startCampaignScheduler> | null = null;
+
+  async function closeWorkerRuntimeResources(worker?: Worker) {
+    await Promise.allSettled([
+      worker?.close(),
+      closeCampaignQueue(),
+      withTimeout(
+        removeWorkerReadiness(heartbeatRedis),
+        RESOURCE_CLOSE_TIMEOUT_MS
+      ),
+      withTimeout(prisma.$disconnect(), RESOURCE_CLOSE_TIMEOUT_MS)
+    ]);
+    try {
+      await withTimeout(heartbeatRedis.quit(), RESOURCE_CLOSE_TIMEOUT_MS);
+    } catch {
+      heartbeatRedis.disconnect();
+    }
   }
-}
 
-try {
-  await withTimeout(
-    removeWorkerReadiness(heartbeatRedis),
-    HEARTBEAT_INITIALIZATION_TIMEOUT_MS
-  );
-} catch {
-  console.error("WORKER_BULLMQ_READINESS_FAILED");
-  await closeWorkerRuntimeResources();
-  process.exit(1);
-}
+  cleanupRuntimeOnFatal = async () => {
+    if (heartbeatTimer) clearInterval(heartbeatTimer);
+    if (readinessTimer) clearInterval(readinessTimer);
+    if (campaignScheduler) {
+      await campaignScheduler.stop().catch(() => undefined);
+    }
+    await closeWorkerRuntimeResources(runtimeWorker);
+  };
 
-try {
-  await withTimeout(
-    recordWorkerHeartbeat(heartbeatRedis),
-    HEARTBEAT_INITIALIZATION_TIMEOUT_MS
-  );
-} catch {
-  console.error("WORKER_HEARTBEAT_INITIALIZATION_FAILED");
-  await closeWorkerRuntimeResources();
-  process.exit(1);
-}
+  try {
+    await withTimeout(
+      removeWorkerReadiness(heartbeatRedis),
+      HEARTBEAT_INITIALIZATION_TIMEOUT_MS
+    );
+  } catch {
+    console.error("WORKER_BULLMQ_READINESS_FAILED");
+    await closeWorkerRuntimeResources();
+    process.exit(1);
+  }
 
-const heartbeatTimer = setInterval(() => {
-  void withTimeout(
-    recordWorkerHeartbeat(heartbeatRedis),
-    HEARTBEAT_INITIALIZATION_TIMEOUT_MS
-  ).catch(() => {
-    console.error("WORKER_HEARTBEAT_PERIODIC_FAILED");
-  });
-}, 15_000);
-heartbeatTimer.unref();
-console.log("[worker] heartbeat initialized");
-let readinessTimer: ReturnType<typeof setInterval> | null = null;
+  try {
+    await withTimeout(
+      recordWorkerHeartbeat(heartbeatRedis),
+      HEARTBEAT_INITIALIZATION_TIMEOUT_MS
+    );
+  } catch {
+    console.error("WORKER_HEARTBEAT_INITIALIZATION_FAILED");
+    await closeWorkerRuntimeResources();
+    process.exit(1);
+  }
 
-let worker: Worker;
-try {
-  worker = new Worker(
+  heartbeatTimer = setInterval(() => {
+    void withTimeout(
+      recordWorkerHeartbeat(heartbeatRedis),
+      HEARTBEAT_INITIALIZATION_TIMEOUT_MS
+    ).catch(() => {
+      console.error("WORKER_HEARTBEAT_PERIODIC_FAILED");
+    });
+  }, 15_000);
+  heartbeatTimer.unref();
+  console.log("[worker] heartbeat initialized");
+
+  let worker: Worker;
+  try {
+    worker = new Worker(
   CAMPAIGN_QUEUE_NAME,
   async (job) => {
     console.log("[worker] job received", {
@@ -1353,82 +1369,91 @@ try {
     connection: redisConnectionOptions,
     concurrency: 1
   }
-  );
-} catch {
-  clearInterval(heartbeatTimer);
-  console.error("WORKER_RUNTIME_INITIALIZATION_FAILED");
-  await closeWorkerRuntimeResources();
-  process.exit(1);
-}
-
-try {
-  await withTimeout(
-    worker.waitUntilReady(),
-    BULLMQ_READINESS_TIMEOUT_MS
-  );
-  await withTimeout(
-    recordWorkerReadiness(heartbeatRedis),
-    HEARTBEAT_INITIALIZATION_TIMEOUT_MS
-  );
-  readinessTimer = setInterval(() => {
-    void withTimeout(
-      recordWorkerReadiness(heartbeatRedis),
-      HEARTBEAT_INITIALIZATION_TIMEOUT_MS
-    ).catch(() => {
-      console.error("WORKER_READINESS_PERIODIC_FAILED");
-    });
-  }, 15_000);
-  readinessTimer.unref();
-} catch {
-  clearInterval(heartbeatTimer);
-  console.error("WORKER_BULLMQ_READINESS_FAILED");
-  await closeWorkerRuntimeResources(worker);
-  process.exit(1);
-}
-
-worker.on("failed", (job, error) => {
-  console.error("[worker] sender-worker job failed", {
-    jobId: job?.id,
-    jobName: job?.name,
-    error: error.message
-  });
-});
-
-let campaignScheduler: ReturnType<typeof startCampaignScheduler>;
-try {
-  campaignScheduler = startCampaignScheduler();
-} catch {
-  clearInterval(heartbeatTimer);
-  if (readinessTimer) clearInterval(readinessTimer);
-  console.error("WORKER_RUNTIME_INITIALIZATION_FAILED");
-  await closeWorkerRuntimeResources(worker);
-  process.exit(1);
-}
-let shuttingDown = false;
-
-async function shutdown(signal: "SIGTERM" | "SIGINT") {
-  if (shuttingDown) return;
-  shuttingDown = true;
-  console.log("[worker] shutdown started", { signal });
+    );
+    runtimeWorker = worker;
+  } catch {
+    clearInterval(heartbeatTimer);
+    console.error("WORKER_RUNTIME_INITIALIZATION_FAILED");
+    await closeWorkerRuntimeResources();
+    process.exit(1);
+  }
 
   try {
-    clearInterval(heartbeatTimer);
-    if (readinessTimer) clearInterval(readinessTimer);
-    await campaignScheduler.stop();
-    await closeWorkerRuntimeResources(worker);
-    console.log("[worker] shutdown finished", { signal });
-    process.exit(0);
+    await withTimeout(
+      worker.waitUntilReady(),
+      BULLMQ_READINESS_TIMEOUT_MS
+    );
+    await withTimeout(
+      recordWorkerReadiness(heartbeatRedis),
+      HEARTBEAT_INITIALIZATION_TIMEOUT_MS
+    );
+    readinessTimer = setInterval(() => {
+      void withTimeout(
+        recordWorkerReadiness(heartbeatRedis),
+        HEARTBEAT_INITIALIZATION_TIMEOUT_MS
+      ).catch(() => {
+        console.error("WORKER_READINESS_PERIODIC_FAILED");
+      });
+    }, 15_000);
+    readinessTimer.unref();
   } catch {
-    console.error("WORKER_SHUTDOWN_FAILED");
+    clearInterval(heartbeatTimer);
+    console.error("WORKER_BULLMQ_READINESS_FAILED");
     await closeWorkerRuntimeResources(worker);
     process.exit(1);
   }
+
+  worker.on("failed", (job, error) => {
+    console.error("[worker] sender-worker job failed", {
+      jobId: job?.id,
+      jobName: job?.name,
+      error: error.message
+    });
+  });
+
+  try {
+    campaignScheduler = startCampaignScheduler();
+  } catch {
+    clearInterval(heartbeatTimer);
+    if (readinessTimer) clearInterval(readinessTimer);
+    console.error("WORKER_RUNTIME_INITIALIZATION_FAILED");
+    await closeWorkerRuntimeResources(worker);
+    process.exit(1);
+  }
+  let shuttingDown = false;
+
+  async function shutdown(signal: "SIGTERM" | "SIGINT") {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    console.log("[worker] shutdown started", { signal });
+
+    try {
+      if (heartbeatTimer) clearInterval(heartbeatTimer);
+      if (readinessTimer) clearInterval(readinessTimer);
+      if (campaignScheduler) await campaignScheduler.stop();
+      await closeWorkerRuntimeResources(worker);
+      console.log("[worker] shutdown finished", { signal });
+      process.exit(0);
+    } catch {
+      console.error("WORKER_SHUTDOWN_FAILED");
+      await closeWorkerRuntimeResources(worker);
+      process.exit(1);
+    }
+  }
+
+  process.once("SIGTERM", () => {
+    void shutdown("SIGTERM");
+  });
+
+  process.once("SIGINT", () => {
+    void shutdown("SIGINT");
+  });
 }
 
-process.once("SIGTERM", () => {
-  void shutdown("SIGTERM");
-});
-
-process.once("SIGINT", () => {
-  void shutdown("SIGINT");
+void main().catch(async () => {
+  console.error("WORKER_RUNTIME_INITIALIZATION_FAILED");
+  if (cleanupRuntimeOnFatal) {
+    await cleanupRuntimeOnFatal().catch(() => undefined);
+  }
+  process.exitCode = 1;
 });
