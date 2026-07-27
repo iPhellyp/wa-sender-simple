@@ -32,8 +32,12 @@ A migration é `npm run prisma:deploy` em serviço Swarm temporário, com uma
 única tarefa no manager e sem exigir rede overlay attachable. O deploy exige
 estado `complete`, exit code `0`, timeout de 300 segundos e remove o serviço em
 sucesso ou falha. `MIGRATION_NETWORK` substitui a rede interna e
-`MIGRATION_TIMEOUT_SECONDS` ajusta o timeout. Falha interrompe o deploy. Nunca
-use `prisma migrate dev`, `prisma db push`, reset, drop ou truncate em produção.
+`MIGRATION_TIMEOUT_SECONDS` ajusta o timeout. O nome temporário usa
+`w2m_<tag-sanitizada>_<epoch>_<pid>`, limita a tag a 12 caracteres e é validado
+explicitamente para nunca ser enviado ao Swarm com mais de 63 caracteres. Com
+epoch de 10 dígitos e PID Linux de até 7 dígitos, o máximo calculado é 35
+caracteres. Falha interrompe o deploy. Nunca use `docker run`,
+`prisma migrate dev`, `prisma db push`, reset, drop ou truncate em produção.
 
 ## Healthchecks
 
@@ -51,7 +55,9 @@ healthcheck exige heartbeat recente, PostgreSQL e Redis disponíveis.
 - `SHA256SUMS`.
 
 O diretório usa permissão restrita, timestamp UTC e nunca é apagado
-automaticamente.
+automaticamente. Por padrão, os artefatos ficam fora do repositório em
+`/root/wa-sender-simple-backups`; a variável externa `BACKUP_ROOT` pode alterar
+essa raiz. O deploy passa o valor explicitamente para `scripts/backup.sh`.
 
 ## Rollback
 
@@ -59,8 +65,11 @@ automaticamente.
 ./scripts/rollback.sh TAG_ANTERIOR
 ```
 
-Tag vazia ou inválida é rejeitada. O worker é pausado antes da troca, o app é
-atualizado e validado pelo Swarm, e então o worker volta com a mesma tag.
+Tag vazia ou inválida é rejeitada. O worker é pausado antes da troca. App e
+worker são atualizados com `--no-healthcheck` para aceitar imagens antigas. O
+app é escalado explicitamente para 1 e o rollback exige exatamente uma task e
+um container `Running`; só então o worker é mantido em 0 ou escalado para 1 e
+validado pelo mesmo critério.
 Bindings/importações devem permanecer pausados até validação funcional quando
 aplicável. Não há downgrade de schema. Restore de banco só ocorre com corrupção
 comprovada e autorização explícita.
