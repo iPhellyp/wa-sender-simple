@@ -1,5 +1,5 @@
 import { Worker } from "bullmq";
-import { CampaignRecipientStatus, CampaignStatus } from "@prisma/client";
+import { CampaignRecipientStatus, CampaignStatus, Prisma } from "@prisma/client";
 import { prisma } from "../lib/prisma/client";
 import {
   CAMPAIGN_QUEUE_NAME,
@@ -38,6 +38,11 @@ import { completeCampaignIfDone } from "../lib/campaigns/progress";
 import { CampaignMediaError, loadValidatedCampaignMedia } from "../lib/campaigns/media";
 import { schedulePendingRecipients } from "../lib/campaigns/schedule";
 import { startCampaignScheduler } from "../lib/campaigns/scheduler";
+import { getDispatchDay, nextDispatchDecision, resolveDispatchSettings } from "../lib/campaigns/dispatch-policy";
+import {
+  isSerializableTransactionConflict,
+  MAX_SERIALIZABLE_TRANSACTION_ATTEMPTS
+} from "../lib/campaigns/transaction-conflict";
 import { hashMessage, resolveCampaignJid, type SkippedReason } from "../lib/labels/audience";
 import { normalizeBrazilPhone, toWhatsappJid } from "../lib/phone/normalize";
 import { clearWhatsappOperationalData } from "../lib/server/whatsapp-session-data";
@@ -432,11 +437,57 @@ async function confirmRecipientStillAuthorized(recipient: {
       instanceId: recipient.instanceId
     },
     select: {
-      status: true
+      status: true,
+      sendWindowStart: true,
+      dispatchConfig: true
     }
   });
 
   if (campaign?.status === CampaignStatus.running) {
+    const settings = resolveDispatchSettings(campaign.dispatchConfig, campaign.sendWindowStart);
+    if (Number.isInteger(settings.dailyLimit) && Number(settings.dailyLimit) > 0) {
+      const now = new Date();
+      const day = getDispatchDay(now, settings);
+      const sentToday = await prisma.campaignRecipient.count({
+        where: {
+          instanceId: recipient.instanceId,
+          campaignId: recipient.campaignId,
+          status: CampaignRecipientStatus.sent,
+          sentAt: { gte: day.dayStart, lt: day.dayEnd }
+        }
+      });
+      const outsideWindow = now < day.windowStart || now > day.windowEnd;
+      if (outsideWindow || sentToday >= Number(settings.dailyLimit)) {
+        const decision = nextDispatchDecision({
+          now,
+          settings,
+          sentToday,
+          hasPending: true,
+          fallbackDelayMs: 0
+        });
+        await prisma.$transaction([
+          prisma.campaignRecipient.updateMany({
+            where: {
+              id: recipient.id,
+              instanceId: recipient.instanceId,
+              status: CampaignRecipientStatus.sending
+            },
+            data: {
+              status: CampaignRecipientStatus.scheduled,
+              scheduledAt: decision.nextAt ?? now
+            }
+          }),
+          prisma.campaign.updateMany({
+            where: { id: recipient.campaignId, instanceId: recipient.instanceId, status: CampaignStatus.running },
+            data: decision.pauseCampaign
+              ? { status: CampaignStatus.paused, nextDispatchAt: null, lastError: "Campanha pausada ao final da janela diaria" }
+              : { nextDispatchAt: decision.nextAt }
+          })
+        ]);
+        return false;
+      }
+    }
+
     const claimedRecipient = await prisma.campaignRecipient.findFirst({
       where: {
         id: recipient.id,
@@ -577,34 +628,62 @@ async function processRecipient(recipientId: string) {
     return;
   }
 
-  const claimed = await prisma.campaignRecipient.updateMany({
-    where: {
-      id: recipient.id,
-      instanceId: recipient.instanceId,
-      campaignId: recipient.campaignId,
-      status: CampaignRecipientStatus.scheduled,
-      OR: [
-        {
-          scheduledAt: null
-        },
-        {
-          scheduledAt: {
-            lte: new Date()
+  let claimed: { count: number } | null = null;
+  for (let attempt = 1; attempt <= MAX_SERIALIZABLE_TRANSACTION_ATTEMPTS; attempt += 1) {
+    try {
+      claimed = await prisma.$transaction(async (transaction) => {
+        const now = new Date();
+        const sendingCount = await transaction.campaignRecipient.count({
+          where: {
+            instanceId: recipient.instanceId,
+            campaignId: recipient.campaignId,
+            status: CampaignRecipientStatus.sending
           }
-        }
-      ]
-    },
-    data: {
-      status: CampaignRecipientStatus.sending,
-      error: null,
-      attemptCount: {
-        increment: 1
-      },
-      lastAttemptAt: new Date()
-    }
-  });
+        });
+        if (sendingCount > 0) return { count: 0 };
 
-  if (claimed.count !== 1) {
+        const settings = resolveDispatchSettings(recipient.campaign.dispatchConfig, recipient.campaign.sendWindowStart);
+        if (Number.isInteger(settings.dailyLimit) && Number(settings.dailyLimit) > 0) {
+          const day = getDispatchDay(now, settings);
+          const sentToday = await transaction.campaignRecipient.count({
+            where: {
+              instanceId: recipient.instanceId,
+              campaignId: recipient.campaignId,
+              status: CampaignRecipientStatus.sent,
+              sentAt: { gte: day.dayStart, lt: day.dayEnd }
+            }
+          });
+          if (sentToday >= Number(settings.dailyLimit)) return { count: 0 };
+        }
+
+        return transaction.campaignRecipient.updateMany({
+          where: {
+            id: recipient.id,
+            instanceId: recipient.instanceId,
+            campaignId: recipient.campaignId,
+            status: CampaignRecipientStatus.scheduled,
+            OR: [{ scheduledAt: null }, { scheduledAt: { lte: now } }]
+          },
+          data: {
+            status: CampaignRecipientStatus.sending,
+            error: null,
+            attemptCount: { increment: 1 },
+            lastAttemptAt: now
+          }
+        });
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+      break;
+    } catch (error) {
+      if (
+        !isSerializableTransactionConflict(error) ||
+        attempt === MAX_SERIALIZABLE_TRANSACTION_ATTEMPTS
+      ) {
+        throw error;
+      }
+    }
+  }
+
+  if (claimed?.count !== 1) {
     return;
   }
 

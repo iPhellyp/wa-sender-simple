@@ -242,6 +242,8 @@ model Campaign {
   mediaMimeType          String?
   mediaSizeBytes         Int?
   lastError              String?             @db.Text
+  dispatchConfig         Json?
+  nextDispatchAt         DateTime?
   instance               WhatsappInstance    @relation(fields: [instanceId], references: [id], onDelete: Restrict)
   recipients             CampaignRecipient[]
   sendLogs               SendLog[]
@@ -249,6 +251,7 @@ model Campaign {
 
   @@index([instanceId, createdAt])
   @@index([instanceId, status, scheduledAt])
+  @@index([instanceId, status, nextDispatchAt])
   @@index([status])
   @@index([targetMode])
   @@index([targetLabelId])

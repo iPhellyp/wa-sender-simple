@@ -7,6 +7,7 @@
     "build": "prisma generate && next build",
     "start": "next start",
     "worker": "tsx src/worker/sender-worker.ts",
+    "test:campaigns": "tsx --test src/lib/campaigns/dispatch-policy.test.ts",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:deploy": "prisma migrate deploy"

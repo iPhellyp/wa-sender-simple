@@ -29,7 +29,8 @@ export async function POST(
         }
       },
       data: {
-        status: CampaignStatus.canceled
+        status: CampaignStatus.canceled,
+        nextDispatchAt: null
       }
     }),
     prisma.campaignRecipient.updateMany({

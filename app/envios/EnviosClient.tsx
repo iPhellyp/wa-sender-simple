@@ -19,6 +19,7 @@ type EnvioSummary = {
   scheduledAt: string | null;
   startedAt: string | null;
   completedAt: string | null;
+  nextDispatchAt: string | null;
   hasMedia: boolean;
   mediaKind: string | null;
   mediaOriginalName: string | null;
@@ -46,6 +47,7 @@ type RecipientDetail = {
 
 type CampaignDetails = {
   id: string;
+  instanceId: string;
   name: string;
   status: string;
   targetMode: string;
@@ -64,6 +66,16 @@ type CampaignDetails = {
     pageSize: number;
     total: number;
     totalPages: number;
+  };
+  dispatchRuntime: null | {
+    settings: { dailyLimit?: number; timezone?: string; windowStart?: string; windowEnd?: string };
+    sentToday: number;
+    remainingToday: number;
+    cyclePosition: number;
+    nextPauseMark: number;
+    nextDispatchAt: string | null;
+    nextWindowStart: string;
+    estimatedCompletionAt: string;
   };
 };
 
@@ -267,6 +279,18 @@ export function EnviosClient({ selectedCampaignId }: { selectedCampaignId?: stri
       }
     })();
   }, [activeInstanceId]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      void loadCampaigns().catch(() => undefined);
+      if (selectedId) {
+        void fetchDetails(selectedId, details?.recipientPagination.page ?? 1)
+          .then(setDetails)
+          .catch(() => undefined);
+      }
+    }, 10_000);
+    return () => window.clearInterval(timer);
+  }, [activeInstanceId, selectedId, details?.recipientPagination.page]);
 
   useEffect(() => {
     if (loading) {
@@ -645,6 +669,24 @@ export function EnviosClient({ selectedCampaignId }: { selectedCampaignId?: stri
                   </div>
                 ) : null}
               </div>
+
+              {selectedDetails.dispatchRuntime ? (
+                <div className="data-card compact">
+                  <div className="detail-metrics">
+                    <span><strong>{selectedDetails.dispatchRuntime.sentToday}</strong> enviados hoje</span>
+                    <span><strong>{selectedDetails.dispatchRuntime.remainingToday}</strong> restantes hoje</span>
+                    <span><strong>{selectedDetails.dispatchRuntime.cyclePosition}</strong> posicao no ciclo</span>
+                    <span><strong>{selectedDetails.dispatchRuntime.nextPauseMark}</strong> proximo marco</span>
+                  </div>
+                  <div className="row-meta">
+                    <span>Proxima execucao: {formatDate(selectedDetails.dispatchRuntime.nextDispatchAt)}</span>
+                    <span>Proxima abertura: {formatDate(selectedDetails.dispatchRuntime.nextWindowStart)}</span>
+                    <span>Timezone: {selectedDetails.dispatchRuntime.settings.timezone}</span>
+                    <span>Instancia remetente: {selectedDetails.instanceId}</span>
+                    <span>Conclusao estimada: {formatDate(selectedDetails.dispatchRuntime.estimatedCompletionAt)}</span>
+                  </div>
+                </div>
+              ) : null}
             </div>
           ) : (
             <div className="empty-state compact">

@@ -43,7 +43,8 @@ export async function completeCampaignIfDone(campaignId: string) {
     },
     data: {
       status: CampaignStatus.completed,
-      completedAt: new Date()
+      completedAt: new Date(),
+      nextDispatchAt: null
     }
   });
 }

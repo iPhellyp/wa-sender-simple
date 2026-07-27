@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { appendInstanceIdToHref, getStoredActiveInstanceId } from "@/src/lib/client/active-instance";
+import { validateDispatchSettings } from "@/src/lib/campaigns/dispatch-policy";
 
 type AudienceResponse = {
   label: { id: string; name: string };
@@ -36,13 +37,23 @@ export function LabelSendClient({ labelId }: { labelId: string }) {
   const [excludeAlreadySentDays, setExcludeAlreadySentDays] = useState(7);
   const [recipientLimitMode, setRecipientLimitMode] = useState<"all" | "limited">("all");
   const [maxRecipients, setMaxRecipients] = useState(100);
-  const [intervalMinutes, setIntervalMinutes] = useState(1);
+  const [dailyLimit, setDailyLimit] = useState(600);
+  const [dailyLimitConfirmed, setDailyLimitConfirmed] = useState(false);
+  const [windowStart, setWindowStart] = useState("06:00");
+  const [windowEnd, setWindowEnd] = useState("22:00");
+  const [timezone, setTimezone] = useState("America/Sao_Paulo");
   const [audience, setAudience] = useState<AudienceResponse | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [campaignId, setCampaignId] = useState<string | null>(null);
   const creationKeyRef = useRef(globalThis.crypto.randomUUID());
+  const dispatchValidationError = validateDispatchSettings({
+    dailyLimit, timezone, windowStart, windowEnd,
+    minDelaySeconds: 30, maxDelaySeconds: 90,
+    pauseAfter25Minutes: 5, pauseAfter50Minutes: 10,
+    pauseAfter75Minutes: 15, pauseAfter100Minutes: 20
+  });
 
   useEffect(() => {
     setActiveInstanceId(getStoredActiveInstanceId());
@@ -108,7 +119,20 @@ export function LabelSendClient({ labelId }: { labelId: string }) {
           excludeAlreadySentDays: dedupeMode === "recent_days" ? excludeAlreadySentDays : null,
           maxRecipients: recipientLimitMode === "limited" ? maxRecipients : null,
           creationKey: creationKeyRef.current,
-          intervalMinutes,
+          advancedSettings: {
+            delayMode: "random_range",
+            minDelaySeconds: 30,
+            maxDelaySeconds: 90,
+            dailyLimit,
+            windowStart,
+            windowEnd,
+            timezone,
+            continueNextDay: true,
+            pauseAfter25Minutes: 5,
+            pauseAfter50Minutes: 10,
+            pauseAfter75Minutes: 15,
+            pauseAfter100Minutes: 20
+          },
           startNow,
           instanceId: activeInstanceId || undefined
         })
@@ -176,17 +200,18 @@ export function LabelSendClient({ labelId }: { labelId: string }) {
             onChange={(event) => setMessage(event.target.value)}
           />
         </label>
-        <label>
-          Intervalo entre envios (minutos)
-          <input
-            className="input"
-            min={1}
-            required
-            type="number"
-            value={intervalMinutes}
-            onChange={(event) => setIntervalMinutes(Number(event.target.value))}
-          />
+        <div className="message compact">Intervalo aleatório entre 30 e 90 segundos</div>
+        <div className="filter-bar">
+          <label>Limite diario<input className="input" min={1} type="number" value={dailyLimit} onChange={(event) => { setDailyLimit(Math.max(1, Number(event.target.value))); setDailyLimitConfirmed(false); }} /></label>
+          <label>Inicio diario<input className="input" type="time" value={windowStart} onChange={(event) => setWindowStart(event.target.value)} /></label>
+          <label>Fim diario<input className="input" type="time" value={windowEnd} onChange={(event) => setWindowEnd(event.target.value)} /></label>
+          <label>Timezone<input className="input" value={timezone} onChange={(event) => setTimezone(event.target.value)} /></label>
+        </div>
+        <label className="checkbox-row">
+          <input checked={dailyLimitConfirmed} type="checkbox" onChange={(event) => setDailyLimitConfirmed(event.target.checked)} />
+          <span>Confirmo o limite de {dailyLimit} mensagens por dia</span>
         </label>
+        {dispatchValidationError ? <div className="message error compact">{dispatchValidationError}</div> : null}
         <label className="checkbox-row">
           <input checked disabled type="checkbox" readOnly />
           <span>
@@ -310,7 +335,7 @@ export function LabelSendClient({ labelId }: { labelId: string }) {
           <div className="button-row">
             <button
               className="button"
-              disabled={busy || audience.selected === 0}
+              disabled={busy || audience.selected === 0 || !dailyLimitConfirmed || Boolean(dispatchValidationError)}
               type="button"
               onClick={() => void createCampaign(false)}
             >
@@ -318,7 +343,7 @@ export function LabelSendClient({ labelId }: { labelId: string }) {
             </button>
             <button
               className="button danger"
-              disabled={busy || audience.selected === 0}
+              disabled={busy || audience.selected === 0 || !dailyLimitConfirmed || Boolean(dispatchValidationError)}
               type="button"
               onClick={() => void createCampaign(true)}
             >

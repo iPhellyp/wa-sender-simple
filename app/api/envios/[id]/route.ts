@@ -8,6 +8,7 @@ import {
   getCampaignRecipientCountMap,
   totalRecipientCount
 } from "@/src/lib/campaigns/recipient-counts";
+import { forecastDispatch, getDispatchDay, resolveDispatchSettings } from "@/src/lib/campaigns/dispatch-policy";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -69,6 +70,35 @@ export async function GET(
   const countMap = await getCampaignRecipientCountMap(instanceId, [campaign.id]);
   const recipientSummary = countMap.get(campaign.id) ?? emptyRecipientStatusSummary();
   const recipientTotal = totalRecipientCount(recipientSummary);
+  const dispatchSettings = resolveDispatchSettings(campaign.dispatchConfig, campaign.sendWindowStart);
+  let dispatchRuntime = null;
+  if (Number.isInteger(dispatchSettings.dailyLimit) && Number(dispatchSettings.dailyLimit) > 0) {
+    const now = new Date();
+    const day = getDispatchDay(now, dispatchSettings);
+    const sentToday = await prisma.campaignRecipient.count({
+      where: {
+        instanceId,
+        campaignId: campaign.id,
+        status: "sent",
+        sentAt: { gte: day.dayStart, lt: day.dayEnd }
+      }
+    });
+    const remaining = (recipientSummary.pending ?? 0) + (recipientSummary.scheduled ?? 0) + (recipientSummary.sending ?? 0);
+    const forecast = forecastDispatch(remaining, campaign.nextDispatchAt ?? now, dispatchSettings);
+    const totalSent = recipientSummary.sent ?? 0;
+    const cyclePosition = totalSent === 0 ? 0 : ((totalSent - 1) % 100) + 1;
+    const nextPauseMark = [25, 50, 75, 100].find((mark) => mark > cyclePosition) ?? 125;
+    dispatchRuntime = {
+      settings: dispatchSettings,
+      sentToday,
+      remainingToday: Math.max(0, Number(dispatchSettings.dailyLimit) - sentToday),
+      cyclePosition,
+      nextPauseMark,
+      nextDispatchAt: campaign.nextDispatchAt,
+      nextWindowStart: day.nextWindowStart,
+      estimatedCompletionAt: forecast.expected
+    };
+  }
 
   const jids = Array.from(
     new Set(campaign.recipients.map((recipient) => recipient.jid?.trim()).filter((jid): jid is string => Boolean(jid)))
@@ -160,7 +190,8 @@ export async function GET(
         pageSize,
         total: recipientTotal,
         totalPages: Math.max(1, Math.ceil(recipientTotal / pageSize))
-      }
+      },
+      dispatchRuntime
     }
   });
 }

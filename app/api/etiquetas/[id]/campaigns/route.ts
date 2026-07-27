@@ -9,6 +9,7 @@ import {
   serializeCampaignForApi
 } from "@/src/lib/campaigns/media";
 import { parseCampaignScheduleInput } from "@/src/lib/campaigns/scheduling-input";
+import { type CampaignDispatchSettings, validateDispatchSettings } from "@/src/lib/campaigns/dispatch-policy";
 import { startCampaign } from "@/src/lib/campaigns/start-campaign";
 import { prisma } from "@/src/lib/prisma/client";
 import {
@@ -20,14 +21,6 @@ import { getActiveInstanceIdFromSearchOrDefault } from "@/src/lib/server/whatsap
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-function serializeAdvancedSettings(value: unknown) {
-  if (!value || typeof value !== "object") {
-    return null;
-  }
-
-  return `settings:${JSON.stringify(value)}`;
-}
 
 function campaignMediaErrorResponse(error: unknown) {
   if (error instanceof CampaignMediaError) {
@@ -89,6 +82,10 @@ export async function POST(
       ? null
       : Number(payload.maxRecipients);
   const creationKey = String(payload.creationKey ?? randomUUID()).trim();
+  const dispatchSettings =
+    payload.advancedSettings && typeof payload.advancedSettings === "object"
+      ? payload.advancedSettings as CampaignDispatchSettings
+      : null;
   const scheduleInput = parseCampaignScheduleInput(payload.sendMode, payload.scheduledAt);
 
   if (!name) {
@@ -119,6 +116,11 @@ export async function POST(
       { error: "Intervalo deve ser inteiro e maior ou igual a 1 minuto" },
       { status: 400 }
     );
+  }
+
+  const dispatchValidationError = dispatchSettings ? validateDispatchSettings(dispatchSettings) : null;
+  if (dispatchValidationError) {
+    return NextResponse.json({ error: dispatchValidationError }, { status: 400 });
   }
 
   if (!(["same_campaign", "recent_days", "allow_resend"] as const).includes(dedupeMode)) {
@@ -209,8 +211,9 @@ export async function POST(
             dedupeKey,
             creationKey,
             maxRecipients,
-            sendWindowStart: serializeAdvancedSettings(payload.advancedSettings) ?? payload.sendWindowStart?.trim() ?? null,
-            sendWindowEnd: payload.sendWindowEnd?.trim() || null
+            dispatchConfig: dispatchSettings ? dispatchSettings as Prisma.InputJsonValue : Prisma.DbNull,
+            sendWindowStart: dispatchSettings?.windowStart ?? payload.sendWindowStart?.trim() ?? null,
+            sendWindowEnd: dispatchSettings?.windowEnd ?? payload.sendWindowEnd?.trim() ?? null
           }
         });
 
