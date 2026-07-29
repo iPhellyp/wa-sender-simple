@@ -36,6 +36,21 @@ const baseInstance: MockInstance = {
 let instance: typeof baseInstance | null = baseInstance;
 let session: Record<string, unknown> | null = null;
 let chat: { id: string; jid: string } | null = null;
+let chats: Array<{
+  id: string;
+  jid: string;
+  lastInboundAt: Date | null;
+  lastOutboundAt: Date | null;
+  labels: Array<{ label: { waLabelId: string; name: string; color: number } }>;
+}> = [];
+let crmContacts: Array<{ id: string; name: string; phoneNormalized: string }> = [];
+let whatsappContacts: Array<{
+  id: string;
+  name: string | null;
+  pushName: string | null;
+  jid: string;
+  phone: string | null;
+}> = [];
 let label: { id: string; waLabelId: string } | null = null;
 let chatLabel: { id: string } | null = null;
 let queueCalls: Array<{ name: string; data: unknown }> = [];
@@ -77,17 +92,18 @@ const prismaMock = {
   },
   whatsappChat: {
     findFirst: async () => chat,
-    findMany: async () => [],
+    findMany: async () => chats,
   },
   whatsappChatLabel: {
     findUnique: async () => chatLabel,
     findMany: async () => []
   },
   contact: {
-    findUnique: async () => null
+    findMany: async () => crmContacts
   },
   whatsappContact: {
-    findMany: async () => []
+    findMany: async () => whatsappContacts,
+    findFirst: async () => whatsappContacts[0] ?? null
   },
   $transaction: async (callback: (transaction: unknown) => Promise<unknown>) =>
     callback(prismaMock)
@@ -131,6 +147,9 @@ function reset() {
   instance = { ...baseInstance };
   session = null;
   chat = null;
+  chats = [];
+  crmContacts = [];
+  whatsappContacts = [];
   label = null;
   chatLabel = null;
   queueCalls = [];
@@ -258,6 +277,163 @@ test("disconnect usa exclusivamente o job que preserva sessão", async () => {
   assert.deepEqual(queueCalls.map((call) => call.name), ["preserve-disconnect"]);
 });
 
+test("by-phone resolve telefone E.164 exato em contato e chat", async () => {
+  whatsappContacts = [{
+    id: "contact-1",
+    name: "Contato",
+    pushName: null,
+    jid: "5538999990000@s.whatsapp.net",
+    phone: "5538999990000"
+  }];
+  chats = [{
+    id: "chat-1",
+    jid: "5538999990000@s.whatsapp.net",
+    lastInboundAt: now,
+    lastOutboundAt: null,
+    labels: []
+  }];
+  const result = await services.findInternalContactByPhone(
+    "instance-1",
+    "5538999990000"
+  );
+  assert.equal(result.contact.jid, "5538999990000@s.whatsapp.net");
+  assert.equal(result.chat?.id, "chat-1");
+});
+
+test("by-phone resolve JID c.us e contato somente no catálogo", async () => {
+  whatsappContacts = [{
+    id: "contact-1",
+    name: null,
+    pushName: "Contato",
+    jid: "5538999990000@c.us",
+    phone: null
+  }];
+  const result = await services.findInternalContactByPhone(
+    "instance-1",
+    "5538999990000"
+  );
+  assert.equal(result.contact.jid, "5538999990000@c.us");
+  assert.equal(result.chat, null);
+});
+
+test("by-phone resolve contato somente no histórico/chat", async () => {
+  chats = [{
+    id: "chat-1",
+    jid: "5538999990000@s.whatsapp.net",
+    lastInboundAt: now,
+    lastOutboundAt: null,
+    labels: []
+  }];
+  const result = await services.findInternalContactByPhone(
+    "instance-1",
+    "5538999990000"
+  );
+  assert.equal(result.contact.id, "chat-1");
+  assert.equal(result.chat?.id, "chat-1");
+});
+
+test("by-phone usa alias brasileiro somente quando unívoco", async () => {
+  whatsappContacts = [{
+    id: "contact-1",
+    name: "Contato",
+    pushName: null,
+    jid: "553899990000@s.whatsapp.net",
+    phone: "553899990000"
+  }];
+  const result = await services.findInternalContactByPhone(
+    "instance-1",
+    "5538999990000"
+  );
+  assert.equal(result.contact.phoneNormalized, "5538999990000");
+  assert.equal(result.contact.jid, "553899990000@s.whatsapp.net");
+});
+
+test("by-phone prioriza exato e rejeita aliases múltiplos sem exato", async () => {
+  whatsappContacts = [{
+    id: "contact-1",
+    name: "Exato",
+    pushName: null,
+    jid: "5538999990000@s.whatsapp.net",
+    phone: "5538999990000"
+  }, {
+    id: "contact-2",
+    name: "Alias",
+    pushName: null,
+    jid: "553899990000@s.whatsapp.net",
+    phone: "553899990000"
+  }];
+  const exact = await services.findInternalContactByPhone(
+    "instance-1",
+    "5538999990000"
+  );
+  assert.equal(exact.contact.id, "contact-1");
+
+  whatsappContacts = [{
+    id: "contact-2",
+    name: "Alias",
+    pushName: null,
+    jid: "553899990000@s.whatsapp.net",
+    phone: "553899990000"
+  }, {
+    id: "contact-3",
+    name: "Alias divergente",
+    pushName: null,
+    jid: "553899990000@c.us",
+    phone: "553899990000"
+  }];
+  await assert.rejects(
+    services.findInternalContactByPhone("instance-1", "5538999990000"),
+    (error: unknown) =>
+      error instanceof InternalApiError && error.code === "CONTACT_AMBIGUOUS"
+  );
+});
+
+test("by-phone retorna LID_UNRESOLVED sem inventar vínculo", async () => {
+  whatsappContacts = [{
+    id: "lid-1",
+    name: "LID",
+    pushName: null,
+    jid: "5538999990000@lid",
+    phone: null
+  }];
+  await assert.rejects(
+    services.findInternalContactByPhone("instance-1", "5538999990000"),
+    (error: unknown) =>
+      error instanceof InternalApiError && error.code === "LID_UNRESOLVED"
+  );
+});
+
+test("by-phone retorna CONTACT_NOT_FOUND quando armazenamento não possui candidato", async () => {
+  await assert.rejects(
+    services.findInternalContactByPhone("instance-1", "5538999990000"),
+    (error: unknown) =>
+      error instanceof InternalApiError && error.code === "CONTACT_NOT_FOUND"
+  );
+});
+
+test("by-phone resolve LID quando a associação persistida possui telefone", async () => {
+  whatsappContacts = [{
+    id: "lid-1",
+    name: "LID",
+    pushName: null,
+    jid: "123@lid",
+    phone: "5538999990000"
+  }];
+  chats = [{
+    id: "chat-lid",
+    jid: "123@lid",
+    lastInboundAt: now,
+    lastOutboundAt: null,
+    labels: []
+  }];
+  const result = await services.findInternalContactByPhone(
+    "instance-1",
+    "5538999990000"
+  );
+  assert.equal(result.contact.jid, "5538999990000@s.whatsapp.net");
+  assert.equal(result.chat?.jid, "123@lid");
+});
+
 test("aplicação de etiqueta enfileira uma vez e repetição local não duplica", async () => {
   chat = { id: "chat-1", jid: "5511987654321@s.whatsapp.net" };
   label = { id: "label-1", waLabelId: "10" };
@@ -324,6 +500,25 @@ test("LID é bloqueado antes de qualquer job", async () => {
       error instanceof InternalApiError && error.code === "LID_UNRESOLVED"
   );
   assert.equal(queueCalls.length, 0);
+});
+
+test("LID com associação telefônica persistida pode receber etiqueta", async () => {
+  chat = { id: "chat-1", jid: "123@lid" };
+  label = { id: "label-1", waLabelId: "10" };
+  whatsappContacts = [{
+    id: "lid-1",
+    name: null,
+    pushName: null,
+    jid: "123@lid",
+    phone: "5538999990000"
+  }];
+  const result = await services.mutateInternalChatLabel({
+    instanceId: "instance-1",
+    chatId: "chat-1",
+    waLabelId: "10",
+    operation: "apply"
+  });
+  assert.equal(result.enqueued, true);
 });
 
 test("grupo é bloqueado com 422 antes de qualquer job", async () => {

@@ -11,6 +11,12 @@ import {
 import { createWhatsappInstance } from "../server/whatsapp-instances";
 import { classifyJid } from "./jid";
 import { InternalApiError } from "./errors";
+import {
+  brazilianPhoneAliases,
+  chooseResolvedPhone,
+  phoneFromIndividualJid,
+  phoneJids
+} from "./phone-resolution";
 
 export async function requireInternalInstance(instanceId: string) {
   const instance = await prisma.whatsappInstance.findUnique({
@@ -261,10 +267,21 @@ export async function listInternalChatLabels(instanceId: string, chatId: string)
   }).then((rows) => rows.map((row) => row.label));
 }
 
-function assertMutableChatJid(jid: string) {
+async function assertMutableChatJid(instanceId: string, jid: string) {
   const type = classifyJid(jid);
   if (type === "lid") {
-    throw new InternalApiError("LID_UNRESOLVED", "LID sem telefone resolvido", 422);
+    const mapping = await prisma.whatsappContact.findFirst({
+      where: {
+        instanceId,
+        jid,
+        phone: { not: null }
+      },
+      select: { id: true }
+    });
+    if (!mapping) {
+      throw new InternalApiError("LID_UNRESOLVED", "LID sem telefone resolvido", 422);
+    }
+    return;
   }
   if (type !== "individual_phone") {
     throw new InternalApiError("UNSUPPORTED_JID", "JID não suportado", 422);
@@ -279,7 +296,7 @@ export async function mutateInternalChatLabel(options: {
   correlationKey?: string;
 }) {
   const chat = await requireInternalChat(options.instanceId, options.chatId);
-  assertMutableChatJid(chat.jid);
+  await assertMutableChatJid(options.instanceId, chat.jid);
   const label = await prisma.whatsappLabel.findFirst({
     where: {
       instanceId: options.instanceId,
@@ -320,56 +337,107 @@ export async function mutateInternalChatLabel(options: {
 
 export async function findInternalContactByPhone(instanceId: string, phoneNormalized: string) {
   await requireInternalInstance(instanceId);
-  const jids = [
-    `${phoneNormalized}@s.whatsapp.net`,
-    `${phoneNormalized}@c.us`
-  ];
-  const [crmContact, whatsappContacts, chats] = await Promise.all([
-    prisma.contact.findUnique({
-      where: {
-        instanceId_phoneNormalized: { instanceId, phoneNormalized }
-      },
+  const candidatePhones = brazilianPhoneAliases(phoneNormalized);
+  const jids = candidatePhones.flatMap(phoneJids);
+  const lidJids = candidatePhones.map((phone) => `${phone}@lid`);
+  const [crmContacts, whatsappContacts] = await Promise.all([
+    prisma.contact.findMany({
+      where: { instanceId, phoneNormalized: { in: candidatePhones } },
       select: { id: true, name: true, phoneNormalized: true }
     }),
     prisma.whatsappContact.findMany({
-      where: { instanceId, phone: phoneNormalized },
-      select: { id: true, name: true, pushName: true, jid: true, phone: true },
-      take: 2
-    }),
-    prisma.whatsappChat.findMany({
-      where: { instanceId, jid: { in: jids } },
-      select: {
-        id: true,
-        jid: true,
-        lastInboundAt: true,
-        lastOutboundAt: true,
-        labels: {
-          select: {
-            label: {
-              select: { waLabelId: true, name: true, color: true }
-            }
-          }
-        }
+      where: {
+        instanceId,
+        OR: [
+          { phone: { in: candidatePhones } },
+          { jid: { in: [...jids, ...lidJids] } }
+        ]
       },
-      take: 2
+      select: { id: true, name: true, pushName: true, jid: true, phone: true },
+      take: 10
     })
   ]);
+  const mappedLidJids = whatsappContacts
+    .filter((contact) => contact.phone && contact.jid.endsWith("@lid"))
+    .map((contact) => contact.jid);
+  const chats = await prisma.whatsappChat.findMany({
+    where: { instanceId, jid: { in: [...jids, ...lidJids, ...mappedLidJids] } },
+    select: {
+      id: true,
+      jid: true,
+      lastInboundAt: true,
+      lastOutboundAt: true,
+      labels: {
+        select: {
+          label: {
+            select: { waLabelId: true, name: true, color: true }
+          }
+        }
+      }
+    },
+    take: 10
+  });
 
-  if (whatsappContacts.length > 1 || chats.length > 1) {
+  const resolvedPhone = chooseResolvedPhone(phoneNormalized, [
+    ...crmContacts.map((contact) => contact.phoneNormalized),
+    ...whatsappContacts.flatMap((contact) => {
+      const jidPhone = phoneFromIndividualJid(contact.jid);
+      return [contact.phone, jidPhone].filter((phone): phone is string => Boolean(phone));
+    }),
+    ...chats.map((chat) => phoneFromIndividualJid(chat.jid)).filter(
+      (phone): phone is string => Boolean(phone)
+    )
+  ]);
+  if (resolvedPhone === "AMBIGUOUS") {
     throw new InternalApiError("CONTACT_AMBIGUOUS", "Contato ambíguo", 409);
   }
-  const whatsappContact = whatsappContacts[0] ?? null;
-  const chat = chats[0] ?? null;
-  if (!crmContact && !whatsappContact && !chat) {
+  if (!resolvedPhone) {
+    if (
+      whatsappContacts.some((contact) => contact.jid.endsWith("@lid")) ||
+      chats.some((chat) => chat.jid.endsWith("@lid"))
+    ) {
+      throw new InternalApiError("LID_UNRESOLVED", "LID sem telefone resolvido", 422);
+    }
     throw new InternalApiError("CONTACT_NOT_FOUND", "Contato não encontrado", 404);
   }
+  const matchingContactJids = new Set(
+    whatsappContacts
+      .filter((contact) =>
+        contact.phone === resolvedPhone ||
+        phoneFromIndividualJid(contact.jid) === resolvedPhone
+      )
+      .map((contact) => contact.jid)
+  );
+  const matchingChatJids = new Set(
+    chats
+      .filter((candidate) => phoneFromIndividualJid(candidate.jid) === resolvedPhone)
+      .map((candidate) => candidate.jid)
+  );
+  if (matchingContactJids.size > 1 || matchingChatJids.size > 1) {
+    throw new InternalApiError("CONTACT_AMBIGUOUS", "Contato ambíguo", 409);
+  }
+  const crmContact =
+    crmContacts.find((contact) => contact.phoneNormalized === resolvedPhone) ?? null;
+  const whatsappContact =
+    whatsappContacts.find((contact) =>
+      contact.phone === resolvedPhone ||
+      phoneFromIndividualJid(contact.jid) === resolvedPhone
+    ) ?? null;
+  const chat =
+    chats.find((candidate) =>
+      phoneFromIndividualJid(candidate.jid) === resolvedPhone ||
+      (whatsappContact?.jid === candidate.jid && candidate.jid.endsWith("@lid"))
+    ) ?? null;
+  const responseJid = whatsappContact?.jid.endsWith("@lid")
+    ? phoneJids(resolvedPhone)[0]
+    : whatsappContact?.jid ?? chat?.jid ?? phoneJids(resolvedPhone)[0];
 
   return {
     contact: {
-      id: whatsappContact?.id ?? crmContact?.id ?? null,
+      id: whatsappContact?.id ?? crmContact?.id ?? chat?.id ?? null,
       phoneNormalized,
       name: whatsappContact?.name ?? whatsappContact?.pushName ?? crmContact?.name ?? null,
-      jid: whatsappContact?.jid ?? chat?.jid ?? jids[0]
+      jid: responseJid
     },
     chat: chat
       ? {

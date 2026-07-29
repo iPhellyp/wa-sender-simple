@@ -227,7 +227,7 @@ export async function ensureChatForJid(
 }
 
 function extractPhoneFromJid(jid: string) {
-  if (!jid.endsWith("@s.whatsapp.net")) {
+  if (!/@(s\.whatsapp\.net|c\.us)$/.test(jid)) {
     return null;
   }
 
@@ -660,7 +660,10 @@ export async function upsertContactFromBaileys(
   contact: Partial<Contact>,
   instanceId = DEFAULT_WHATSAPP_INSTANCE_ID
 ) {
-  const jid = normalizeChatJid(contact.jid ?? contact.id ?? contact.lid);
+  const rawCandidates = [contact.jid, contact.id, contact.lid]
+    .map(normalizeChatJid)
+    .filter((jid): jid is string => Boolean(jid));
+  const jid = rawCandidates[0] ?? null;
 
   if (!jid) {
     return false;
@@ -695,6 +698,9 @@ export async function upsertContactFromBaileys(
   const pushName = pickBestDisplayName(existingContact?.pushName, [incomingPushName, incomingName], jid);
   const shouldUpdateName = isBetterDisplayName(existingContact?.name, name, jid);
   const shouldUpdatePushName = isBetterDisplayName(existingContact?.pushName, pushName, jid);
+  const resolvedPhone = rawCandidates
+    .map(extractPhoneFromJid)
+    .find((phone): phone is string => Boolean(phone)) ?? null;
 
   await prisma.whatsappContact.upsert({
     where: {
@@ -704,7 +710,7 @@ export async function upsertContactFromBaileys(
       }
     },
     update: {
-      phone: extractPhoneFromJid(jid),
+      phone: resolvedPhone,
       ...(shouldUpdateName ? { name } : {}),
       ...(shouldUpdatePushName ? { pushName } : {}),
       ...(contact.verifiedName !== undefined ? { isBusiness: Boolean(contact.verifiedName) } : {})
@@ -712,19 +718,44 @@ export async function upsertContactFromBaileys(
     create: {
       instanceId,
       jid,
-      phone: extractPhoneFromJid(jid),
+      phone: resolvedPhone,
       name,
       pushName,
       isBusiness: Boolean(contact.verifiedName)
     }
   });
 
+  const lidJid = rawCandidates.find((candidate) => candidate.endsWith("@lid"));
+  if (lidJid && lidJid !== jid && resolvedPhone) {
+    await prisma.whatsappContact.upsert({
+      where: {
+        instanceId_jid: {
+          instanceId,
+          jid: lidJid
+        }
+      },
+      update: {
+        phone: resolvedPhone,
+        ...(shouldUpdateName ? { name } : {}),
+        ...(shouldUpdatePushName ? { pushName } : {})
+      },
+      create: {
+        instanceId,
+        jid: lidJid,
+        phone: resolvedPhone,
+        name,
+        pushName,
+        isBusiness: Boolean(contact.verifiedName)
+      }
+    });
+  }
+
   await materializeWhatsappContactAsChat(
     {
       jid,
       name,
       pushName,
-      phone: extractPhoneFromJid(jid)
+      phone: resolvedPhone
     },
     instanceId
   );
