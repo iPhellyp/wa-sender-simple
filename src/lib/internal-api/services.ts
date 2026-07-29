@@ -511,6 +511,7 @@ export async function listInternalLabeledIdentities(instanceId: string) {
   );
   return chats.map((chat) => ({
     chatId: chat.id,
+    jid: chat.jid,
     phoneNormalized: phoneFromIndividualJid(chat.jid) ?? byLid[chat.jid] ?? null,
     resolution: chat.jid.endsWith("@lid")
       ? Object.hasOwn(byLid, chat.jid) ? "LID_HISTORICAL" : "LID_UNRESOLVED"
