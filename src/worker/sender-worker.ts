@@ -9,6 +9,7 @@ import {
   MUTATE_WHATSAPP_CHAT_LABEL_JOB,
   PRESERVE_DISCONNECT_WHATSAPP_JOB,
   RESET_WHATSAPP_JOB,
+  REBUILD_WHATSAPP_IDENTITIES_JOB,
   SEND_MANUAL_MESSAGE_JOB,
   SEND_RECIPIENT_JOB,
   SYNC_WHATSAPP_CATALOG_JOB,
@@ -33,6 +34,7 @@ import {
   requestWhatsappCatalogSyncForInstance,
   requestWhatsappHistorySyncForInstance,
   resetWhatsappInstance,
+  rebuildWhatsappIdentitiesForInstance,
   sendWhatsappContentForInstance,
   sendWhatsappMessageForInstance,
   WhatsappInstanceUnavailableError
@@ -1220,6 +1222,13 @@ async function main() {
       }
 
       return;
+    }
+
+    if (job.name === REBUILD_WHATSAPP_IDENTITIES_JOB) {
+      const instanceId = getRequiredJobInstanceId(job.data, REBUILD_WHATSAPP_IDENTITIES_JOB);
+      const result = await rebuildWhatsappIdentitiesForInstance(instanceId);
+      console.log("[worker] identity rebuild finished", { instanceId, ...result });
+      return result;
     }
 
     if (job.name === SYNC_WHATSAPP_CATALOG_JOB) {

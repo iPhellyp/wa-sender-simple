@@ -6,8 +6,10 @@ import {
   enqueueWhatsappCatalogSync,
   enqueueWhatsappConnect,
   enqueueWhatsappHistorySync,
-  enqueueWhatsappPreserveDisconnect
+  enqueueWhatsappPreserveDisconnect,
+  enqueueWhatsappIdentityRebuild
 } from "../queue/campaign-queue";
+import { getIdentityDiagnostics } from "../baileys/identity-map";
 import { createWhatsappInstance } from "../server/whatsapp-instances";
 import { classifyJid } from "./jid";
 import { InternalApiError } from "./errors";
@@ -340,7 +342,7 @@ export async function findInternalContactByPhone(instanceId: string, phoneNormal
   const candidatePhones = brazilianPhoneAliases(phoneNormalized);
   const jids = candidatePhones.flatMap(phoneJids);
   const lidJids = candidatePhones.map((phone) => `${phone}@lid`);
-  const [crmContacts, whatsappContacts] = await Promise.all([
+  const [crmContacts, whatsappContacts, identities] = await Promise.all([
     prisma.contact.findMany({
       where: { instanceId, phoneNormalized: { in: candidatePhones } },
       select: { id: true, name: true, phoneNormalized: true }
@@ -355,11 +357,17 @@ export async function findInternalContactByPhone(instanceId: string, phoneNormal
       },
       select: { id: true, name: true, pushName: true, jid: true, phone: true },
       take: 10
-    })
+    }),
+    prisma.whatsappIdentity?.findMany({
+      where: { instanceId, phoneNormalized: { in: candidatePhones }, confidence: "DETERMINISTIC" },
+      select: { lidJid: true, phoneNormalized: true },
+      take: 10
+    }) ?? Promise.resolve([])
   ]);
   const mappedLidJids = whatsappContacts
     .filter((contact) => contact.phone && contact.jid.endsWith("@lid"))
-    .map((contact) => contact.jid);
+    .map((contact) => contact.jid)
+    .concat(identities.map((identity) => identity.lidJid));
   const chats = await prisma.whatsappChat.findMany({
     where: { instanceId, jid: { in: [...jids, ...lidJids, ...mappedLidJids] } },
     select: {
@@ -385,6 +393,9 @@ export async function findInternalContactByPhone(instanceId: string, phoneNormal
       return [contact.phone, jidPhone].filter((phone): phone is string => Boolean(phone));
     }),
     ...chats.map((chat) => phoneFromIndividualJid(chat.jid)).filter(
+      (phone): phone is string => Boolean(phone)
+    ),
+    ...identities.map((identity) => identity.phoneNormalized).filter(
       (phone): phone is string => Boolean(phone)
     )
   ]);
@@ -423,10 +434,12 @@ export async function findInternalContactByPhone(instanceId: string, phoneNormal
       contact.phone === resolvedPhone ||
       phoneFromIndividualJid(contact.jid) === resolvedPhone
     ) ?? null;
+  const identity = identities.find((candidate) => candidate.phoneNormalized === resolvedPhone) ?? null;
   const chat =
     chats.find((candidate) =>
       phoneFromIndividualJid(candidate.jid) === resolvedPhone ||
-      (whatsappContact?.jid === candidate.jid && candidate.jid.endsWith("@lid"))
+      (whatsappContact?.jid === candidate.jid && candidate.jid.endsWith("@lid")) ||
+      identity?.lidJid === candidate.jid
     ) ?? null;
   const responseJid = whatsappContact?.jid.endsWith("@lid")
     ? phoneJids(resolvedPhone)[0]
@@ -447,6 +460,55 @@ export async function findInternalContactByPhone(instanceId: string, phoneNormal
           lastOutboundAt: chat.lastOutboundAt?.toISOString() ?? null
         }
       : null,
-    labels: chat?.labels.map((row) => row.label) ?? []
+    labels: chat?.labels.map((row) => row.label) ?? [],
+    resolution: identity && chat?.jid === identity.lidJid
+      ? "LID_HISTORICAL"
+      : resolvedPhone === phoneNormalized ? "EXACT" : "ALIAS",
+    labeledCrm: Boolean(chat?.labels.some((row) => /^CRM (?:0[1-5]|99)(?:\b|\s|-)/.test(row.label.name)))
   };
+}
+
+export async function rebuildInternalIdentities(instanceId: string) {
+  await requireInternalInstance(instanceId);
+  const job = await enqueueWhatsappIdentityRebuild(instanceId);
+  return { instanceId, jobId: job.jobId, deduped: job.deduped };
+}
+
+export async function getInternalIdentityDiagnostics(instanceId: string) {
+  await requireInternalInstance(instanceId);
+  return getIdentityDiagnostics(instanceId);
+}
+
+export async function listInternalLabeledIdentities(instanceId: string) {
+  await requireInternalInstance(instanceId);
+  const official = [
+    "CRM 01 - Em atendimento", "CRM 02 - Qualificado",
+    "CRM 03 - Inscrição no vestibular", "CRM 04 - Vestibular concluído",
+    "CRM 05 - Matriculado", "CRM 99 - Perdido"
+  ];
+  const chats = await prisma.whatsappChat.findMany({
+    where: { instanceId, isGroup: false,
+      labels: { some: { label: { deleted: false, name: { in: official } } } } },
+    select: {
+      id: true, jid: true,
+      labels: { where: { label: { deleted: false, name: { in: official } } },
+        select: { label: { select: { waLabelId: true, name: true } } } }
+    }
+  });
+  const lidJids = chats.filter((chat) => chat.jid.endsWith("@lid")).map((chat) => chat.jid);
+  const identities = lidJids.length ? await prisma.whatsappIdentity.findMany({
+    where: { instanceId, lidJid: { in: lidJids }, confidence: "DETERMINISTIC" },
+    select: { lidJid: true, phoneNormalized: true }
+  }) : [];
+  const byLid = Object.fromEntries(
+    identities.map((identity) => [identity.lidJid, identity.phoneNormalized])
+  );
+  return chats.map((chat) => ({
+    chatId: chat.id,
+    phoneNormalized: phoneFromIndividualJid(chat.jid) ?? byLid[chat.jid] ?? null,
+    resolution: chat.jid.endsWith("@lid")
+      ? Object.hasOwn(byLid, chat.jid) ? "LID_HISTORICAL" : "LID_UNRESOLVED"
+      : "PN",
+    labels: chat.labels.map((row) => row.label)
+  }));
 }

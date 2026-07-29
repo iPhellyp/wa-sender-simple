@@ -12,6 +12,7 @@ export const SYNC_WHATSAPP_HISTORY_JOB = "sync-whatsapp-history";
 export const SYNC_WHATSAPP_CATALOG_JOB = "sync-whatsapp-catalog";
 export const APPLY_WHATSAPP_LABELS_JOB = "apply-whatsapp-labels";
 export const MUTATE_WHATSAPP_CHAT_LABEL_JOB = "mutate-whatsapp-chat-label";
+export const REBUILD_WHATSAPP_IDENTITIES_JOB = "rebuild-whatsapp-identities";
 
 type InstanceJobData = {
   instanceId?: string;
@@ -262,6 +263,15 @@ export async function enqueueWhatsappCatalogSync(data: SyncWhatsappCatalogJobDat
       ...data,
       instanceId
     }
+  );
+}
+
+export async function enqueueWhatsappIdentityRebuild(instanceId: string): Promise<SyncJobEnqueueResult> {
+  const normalizedInstanceId = requireInstanceId(instanceId, REBUILD_WHATSAPP_IDENTITIES_JOB);
+  return enqueueDedupedSyncJob(
+    REBUILD_WHATSAPP_IDENTITIES_JOB,
+    buildJobId(REBUILD_WHATSAPP_IDENTITIES_JOB, normalizedInstanceId),
+    { instanceId: normalizedInstanceId }
   );
 }
 

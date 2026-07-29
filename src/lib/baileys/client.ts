@@ -31,6 +31,7 @@ import {
   normalizeChatJid
 } from "./sync";
 import { syncLabelsAssociation, syncLabelsEdit } from "./labels-sync";
+import { persistIdentityPair, persistIdentityPairs } from "./identity-map";
 import { getBaileysSessionFilesInfo } from "./session-files";
 
 const SESSION_ID = "default";
@@ -774,9 +775,19 @@ async function createSocket(options: {
   sock.ev.on("contacts.update", (event) => {
     void syncContactsUpdate(event).catch((error) => logAsyncHandlerError("sync contacts update", error));
   });
+  sock.ev.on("chats.phoneNumberShare", (event) => {
+    void persistIdentityPair(DEFAULT_WHATSAPP_INSTANCE_ID, {
+      lidJid: event.lid,
+      phoneJid: event.jid,
+      source: "PHONE_NUMBER_SHARE",
+      evidence: "chats.phoneNumberShare"
+    }).catch((error) => logAsyncHandlerError("persist phone number share", error));
+  });
   sock.ev.on("messages.upsert", (event) => {
     void handleIncomingMessages(event).catch((error) => logAsyncHandlerError("baileys opt-out", error));
     void syncMessagesUpsert(event).catch((error) => logAsyncHandlerError("sync messages upsert", error));
+    void persistIdentityPairs(DEFAULT_WHATSAPP_INSTANCE_ID, event.messages, "MESSAGES_UPSERT")
+      .catch((error) => logAsyncHandlerError("persist message identities", error));
   });
   sock.ev.on("messages.update", (event) => {
     void syncMessagesUpdate(event).catch((error) => logAsyncHandlerError("sync messages update", error));

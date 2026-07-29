@@ -92,6 +92,7 @@ model WhatsappInstance {
   labels          WhatsappLabel[]
   chatLabels      WhatsappChatLabel[]
   labelEvents     WhatsappLabelEvent[]
+  identities      WhatsappIdentity[]
   messages        WhatsappMessage[]
   campaigns       Campaign[]
   recipients      CampaignRecipient[]
@@ -163,6 +164,24 @@ model WhatsappContact {
   @@unique([instanceId, jid])
   @@index([instanceId, phone])
   @@index([phone])
+}
+
+model WhatsappIdentity {
+  id              String   @id @default(cuid())
+  instanceId      String
+  lidJid          String
+  phoneJid        String?
+  phoneNormalized String?
+  source          String
+  confidence      String
+  evidence        String
+  firstSeenAt     DateTime @default(now())
+  lastSeenAt      DateTime @updatedAt
+  instance        WhatsappInstance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+
+  @@unique([instanceId, lidJid])
+  @@index([instanceId, phoneNormalized])
+  @@index([instanceId, confidence])
 }
 
 model WhatsappMessage {

@@ -17,6 +17,7 @@ import {
   shouldIgnoreJidForX1Only
 } from "../whatsapp/jid";
 import { extractMessageText as extractOptOutMessageText } from "./opt-out";
+import { persistIdentityPairs } from "./identity-map";
 
 const BATCH_SIZE = 25;
 
@@ -1121,6 +1122,7 @@ export async function syncMessagingHistorySet(
   event: BaileysEventMap["messaging-history.set"],
   instanceId = DEFAULT_WHATSAPP_INSTANCE_ID
 ) {
+  await persistIdentityPairs(instanceId, event, "MESSAGING_HISTORY_SET");
   const syncType = event.syncType ?? null;
   const progress = (event as { progress?: number | null }).progress ?? null;
   const x1Chats = splitX1Chats(event.chats);
@@ -1198,6 +1200,7 @@ export async function syncChatsUpsert(
   chats: BaileysEventMap["chats.upsert"],
   instanceId = DEFAULT_WHATSAPP_INSTANCE_ID
 ) {
+  await persistIdentityPairs(instanceId, chats, "CHATS_UPSERT");
   const x1Chats = splitX1Chats(chats);
 
   if (x1Chats.groupSkipped > 0) {
@@ -1215,6 +1218,7 @@ export async function syncChatsUpdate(
   chats: BaileysEventMap["chats.update"],
   instanceId = DEFAULT_WHATSAPP_INSTANCE_ID
 ) {
+  await persistIdentityPairs(instanceId, chats, "CHATS_UPDATE");
   const x1Chats = splitX1Chats(chats);
 
   if (x1Chats.groupSkipped > 0) {
@@ -1232,6 +1236,7 @@ export async function syncContactsUpsert(
   contacts: BaileysEventMap["contacts.upsert"],
   instanceId = DEFAULT_WHATSAPP_INSTANCE_ID
 ) {
+  await persistIdentityPairs(instanceId, contacts, "CONTACTS_UPSERT");
   const x1Contacts = splitX1Contacts(contacts);
 
   if (x1Contacts.groupSkipped > 0) {
@@ -1249,6 +1254,7 @@ export async function syncContactsUpdate(
   contacts: BaileysEventMap["contacts.update"],
   instanceId = DEFAULT_WHATSAPP_INSTANCE_ID
 ) {
+  await persistIdentityPairs(instanceId, contacts, "CONTACTS_UPDATE");
   const x1Contacts = splitX1Contacts(contacts);
 
   if (x1Contacts.groupSkipped > 0) {
@@ -1266,6 +1272,7 @@ export async function syncMessagesUpsert(
   event: BaileysEventMap["messages.upsert"],
   instanceId = DEFAULT_WHATSAPP_INSTANCE_ID
 ) {
+  await persistIdentityPairs(instanceId, event.messages, "MESSAGES_UPSERT");
   const x1Messages = splitX1Messages(event.messages);
 
   console.log("[sync] messages.upsert received", {

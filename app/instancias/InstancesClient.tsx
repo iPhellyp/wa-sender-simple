@@ -356,7 +356,7 @@ export function InstancesClient() {
 
   async function postWhatsappAction(
     instance: InstanceSummary,
-    action: "reconnect" | "sync-catalog" | "sync-catalog-full" | "sync-history"
+    action: "reconnect" | "sync-catalog" | "sync-catalog-full" | "sync-history" | "rebuild-identities"
   ) {
     const actionPath = action === "sync-catalog-full" ? "sync-catalog" : action;
     setBusy(true);
@@ -637,6 +637,16 @@ export function InstancesClient() {
                 {busyInstanceId === instance.id && busyAction === "sync-history"
                   ? "Atualizando..."
                   : "Verificar e atualizar chats"}
+              </button>
+              <button
+                className="button secondary compact-button"
+                disabled={busy || instance.canSyncQuick === false}
+                type="button"
+                onClick={() => void postWhatsappAction(instance, "rebuild-identities")}
+              >
+                {busyInstanceId === instance.id && busyAction === "rebuild-identities"
+                  ? "Reconstruindo..."
+                  : "Reconstruir identidades históricas"}
               </button>
               <button
                 className="button secondary compact-button"

@@ -48,6 +48,7 @@ import {
 import { syncLabelsAssociation, syncLabelsEdit } from "./labels-sync";
 import { extractMessageText, isOptOutMessage } from "./opt-out";
 import { getBaileysSessionFilesInfo } from "./session-files";
+import { persistIdentityPair, persistIdentityPairs, rebuildPersistedIdentities } from "./identity-map";
 
 const CATALOG_APP_STATE_COLLECTIONS = ALL_WA_PATCH_NAMES;
 const RECOVERABLE_SESSION_MESSAGE =
@@ -551,9 +552,18 @@ async function startSecondaryWhatsappInstance(instance: WhatsappInstance) {
     socket.ev.on("chats.update", (chats) => void syncChatsUpdate(chats, instance.id));
     socket.ev.on("contacts.upsert", (contacts) => void syncContactsUpsert(contacts, instance.id));
     socket.ev.on("contacts.update", (contacts) => void syncContactsUpdate(contacts, instance.id));
+    socket.ev.on("chats.phoneNumberShare", (event) => {
+      void persistIdentityPair(instance.id, {
+        lidJid: event.lid,
+        phoneJid: event.jid,
+        source: "PHONE_NUMBER_SHARE",
+        evidence: "chats.phoneNumberShare"
+      });
+    });
     socket.ev.on("messages.upsert", (event) => {
       void handleIncomingOptOutMessages(event, instance.id);
       void syncMessagesUpsert(event, instance.id);
+      void persistIdentityPairs(instance.id, event.messages, "MESSAGES_UPSERT");
     });
     socket.ev.on("messages.update", (messages) => void syncMessagesUpdate(messages, instance.id));
     socket.ev.on("labels.edit", (label) => void syncLabelsEdit(label, instance.id));
@@ -889,6 +899,45 @@ async function getConnectedInstanceSocket(instanceId: string) {
       INSTANCE_CONNECTION_TIMEOUT_MS / 1000
     } segundos para envio.`
   );
+}
+
+export async function rebuildWhatsappIdentitiesForInstance(instanceId: string) {
+  const socket = await getConnectedInstanceSocket(instanceId);
+  const persisted = await rebuildPersistedIdentities(instanceId);
+  const contacts = await prisma.whatsappContact.findMany({
+    where: {
+      instanceId,
+      OR: [{ jid: { endsWith: "@s.whatsapp.net" } }, { jid: { endsWith: "@c.us" } }]
+    },
+    select: { jid: true }
+  });
+  const uniqueJids = [...new Set(contacts.map((contact) =>
+    contact.jid.replace(/@c\.us$/, "@s.whatsapp.net")
+  ))];
+  let queried = 0;
+  let observed = 0;
+  let created = 0;
+  let unchanged = 0;
+  let ambiguous = 0;
+  for (let index = 0; index < uniqueJids.length; index += 100) {
+    const batch = uniqueJids.slice(index, index + 100);
+    const results = await socket.onWhatsApp(...batch);
+    queried += batch.length;
+    for (const result of results ?? []) {
+      if (!result.lid || !result.jid) continue;
+      observed++;
+      const saved = await persistIdentityPair(instanceId, {
+        lidJid: String(result.lid),
+        phoneJid: result.jid,
+        source: "USYNC_CONTACT_LID",
+        evidence: "onWhatsApp.contact+lid"
+      });
+      if (saved.status === "created") created++;
+      if (saved.status === "unchanged") unchanged++;
+      if (saved.status === "ambiguous") ambiguous++;
+    }
+  }
+  return { persisted, queried, observed, created, unchanged, ambiguous };
 }
 
 export async function sendWhatsappMessageForInstance(instanceId: string, jid: string, text: string) {
