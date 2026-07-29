@@ -10,6 +10,15 @@ export const dynamic = "force-dynamic";
 export async function POST(request: NextRequest, context: { params: Promise<{ id: string }> }) {
   return withInternalApi(async () => {
     const { id } = await context.params;
-    return internalJson(await rebuildInternalIdentities(validateResourceId(id, "instanceId")), 202);
+    const body = await request.json().catch(() => ({})) as { phones?: unknown };
+    const phones = Array.isArray(body.phones)
+      ? [...new Set(body.phones.filter(
+          (phone): phone is string => typeof phone === "string" && /^55[1-9]\d{9,10}$/.test(phone)
+        ))].slice(0, 2_000)
+      : [];
+    return internalJson(
+      await rebuildInternalIdentities(validateResourceId(id, "instanceId"), phones),
+      202
+    );
   }, { idempotent: true })(request);
 }

@@ -9,6 +9,7 @@ import {
   enqueueWhatsappPreserveDisconnect,
   enqueueWhatsappIdentityRebuild
 } from "../queue/campaign-queue";
+import { getWhatsappIdentityRebuildStatus } from "../queue/campaign-queue";
 import { getIdentityDiagnostics } from "../baileys/identity-map";
 import { createWhatsappInstance } from "../server/whatsapp-instances";
 import { classifyJid } from "./jid";
@@ -468,10 +469,15 @@ export async function findInternalContactByPhone(instanceId: string, phoneNormal
   };
 }
 
-export async function rebuildInternalIdentities(instanceId: string) {
+export async function rebuildInternalIdentities(instanceId: string, phones: string[] = []) {
   await requireInternalInstance(instanceId);
-  const job = await enqueueWhatsappIdentityRebuild(instanceId);
+  const job = await enqueueWhatsappIdentityRebuild(instanceId, phones);
   return { instanceId, jobId: job.jobId, deduped: job.deduped };
+}
+
+export async function getInternalIdentityRebuildStatus(instanceId: string) {
+  await requireInternalInstance(instanceId);
+  return getWhatsappIdentityRebuildStatus(instanceId);
 }
 
 export async function getInternalIdentityDiagnostics(instanceId: string) {

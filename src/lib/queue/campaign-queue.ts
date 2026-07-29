@@ -18,6 +18,10 @@ type InstanceJobData = {
   instanceId?: string;
 };
 
+export type RebuildWhatsappIdentitiesJobData = InstanceJobData & {
+  phones?: string[];
+};
+
 export type SendManualMessageJobData = InstanceJobData & {
   chatId: string;
   jid: string;
@@ -266,13 +270,25 @@ export async function enqueueWhatsappCatalogSync(data: SyncWhatsappCatalogJobDat
   );
 }
 
-export async function enqueueWhatsappIdentityRebuild(instanceId: string): Promise<SyncJobEnqueueResult> {
+export async function enqueueWhatsappIdentityRebuild(
+  instanceId: string,
+  phones: string[] = []
+): Promise<SyncJobEnqueueResult> {
   const normalizedInstanceId = requireInstanceId(instanceId, REBUILD_WHATSAPP_IDENTITIES_JOB);
   return enqueueDedupedSyncJob(
     REBUILD_WHATSAPP_IDENTITIES_JOB,
     buildJobId(REBUILD_WHATSAPP_IDENTITIES_JOB, normalizedInstanceId),
-    { instanceId: normalizedInstanceId }
+    { instanceId: normalizedInstanceId, phones }
   );
+}
+
+export async function getWhatsappIdentityRebuildStatus(instanceId: string) {
+  const normalizedInstanceId = requireInstanceId(instanceId, REBUILD_WHATSAPP_IDENTITIES_JOB);
+  const job = await getCampaignQueue().getJob(
+    buildJobId(REBUILD_WHATSAPP_IDENTITIES_JOB, normalizedInstanceId)
+  );
+  if (!job) return { status: "complete" as const };
+  return { status: await job.getState() };
 }
 
 export async function enqueueApplyWhatsappLabels(data: ApplyWhatsappLabelsJobData) {

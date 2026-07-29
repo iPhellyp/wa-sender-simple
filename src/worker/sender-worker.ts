@@ -19,6 +19,7 @@ import {
   type MutateWhatsappChatLabelJobData,
   type SendManualMessageJobData,
   type SyncWhatsappCatalogJobData
+  ,type RebuildWhatsappIdentitiesJobData
 } from "../lib/queue/campaign-queue";
 import { getRedisConnectionOptions } from "../lib/queue/connection";
 import {
@@ -1225,8 +1226,12 @@ async function main() {
     }
 
     if (job.name === REBUILD_WHATSAPP_IDENTITIES_JOB) {
-      const instanceId = getRequiredJobInstanceId(job.data, REBUILD_WHATSAPP_IDENTITIES_JOB);
-      const result = await rebuildWhatsappIdentitiesForInstance(instanceId);
+      const data = job.data as Partial<RebuildWhatsappIdentitiesJobData>;
+      const instanceId = getRequiredJobInstanceId(data, REBUILD_WHATSAPP_IDENTITIES_JOB);
+      const phones = Array.isArray(data.phones)
+        ? data.phones.filter((phone): phone is string => /^55[1-9]\d{9,10}$/.test(phone))
+        : [];
+      const result = await rebuildWhatsappIdentitiesForInstance(instanceId, phones);
       console.log("[worker] identity rebuild finished", { instanceId, ...result });
       return result;
     }

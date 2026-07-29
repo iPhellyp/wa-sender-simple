@@ -901,7 +901,10 @@ async function getConnectedInstanceSocket(instanceId: string) {
   );
 }
 
-export async function rebuildWhatsappIdentitiesForInstance(instanceId: string) {
+export async function rebuildWhatsappIdentitiesForInstance(
+  instanceId: string,
+  candidatePhones: string[] = []
+) {
   const socket = await getConnectedInstanceSocket(instanceId);
   const persisted = await rebuildPersistedIdentities(instanceId);
   const contacts = await prisma.whatsappContact.findMany({
@@ -911,9 +914,10 @@ export async function rebuildWhatsappIdentitiesForInstance(instanceId: string) {
     },
     select: { jid: true }
   });
-  const uniqueJids = [...new Set(contacts.map((contact) =>
-    contact.jid.replace(/@c\.us$/, "@s.whatsapp.net")
-  ))];
+  const uniqueJids = [...new Set([
+    ...contacts.map((contact) => contact.jid.replace(/@c\.us$/, "@s.whatsapp.net")),
+    ...candidatePhones.map((phone) => `${phone}@s.whatsapp.net`)
+  ])];
   let queried = 0;
   let observed = 0;
   let created = 0;
