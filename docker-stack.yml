@@ -71,7 +71,7 @@ services:
         condition: any
       update_config:
         parallelism: 1
-        order: start-first
+        order: stop-first
         failure_action: rollback
       labels:
         - traefik.enable=true

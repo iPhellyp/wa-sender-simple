@@ -895,6 +895,7 @@ export async function getWhatsappInstanceRuntimeStatus(instanceId?: string | nul
     connectedPhone,
     displayName: runtime.displayName,
     profilePictureUrl: runtime.profilePictureUrl,
+    hasLiveSocket: Boolean(runtime.socket),
     lastError: runtime.lastError ?? session.lastError,
     updatedAt: session.updatedAt.toISOString(),
     lastOpenAt: runtime.lastOpenAt?.toISOString() ?? null,
@@ -911,7 +912,7 @@ export async function getWhatsappInstanceRuntimeStatus(instanceId?: string | nul
     autoReconnectDisabled: runtime.autoReconnectDisabled,
     isRecoverableSession:
       hasConfirmedSession &&
-      currentStatus !== WhatsappStatus.connected &&
+      (!runtime.socket || currentStatus !== WhatsappStatus.connected) &&
       !Boolean(runtime.qrCode ?? session.qrCode)
   };
 }

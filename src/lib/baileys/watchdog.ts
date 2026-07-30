@@ -12,6 +12,7 @@ type WatchdogInstance = { id: string };
 type WatchdogStatus = {
   status: string;
   isRecoverableSession?: boolean;
+  hasLiveSocket?: boolean;
   autoReconnectDisabled?: boolean;
   nextReconnectAt?: string | null;
 };
@@ -31,7 +32,7 @@ export async function runWhatsappWatchdogCycle(dependencies: {
     try {
       const status = await dependencies.getStatus(instance.id);
       if (
-        status.status === "connected" ||
+        (status.status === "connected" && status.hasLiveSocket) ||
         status.status === "connecting" ||
         status.autoReconnectDisabled ||
         !status.isRecoverableSession ||
