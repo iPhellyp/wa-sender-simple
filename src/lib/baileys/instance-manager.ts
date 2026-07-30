@@ -2,7 +2,6 @@ import makeWASocket, {
   ALL_WA_PATCH_NAMES,
   Browsers,
   DisconnectReason,
-  fetchLatestBaileysVersion,
   useMultiFileAuthState,
   type AnyMessageContent,
   type WASocket
@@ -537,7 +536,7 @@ async function startSecondaryWhatsappInstance(instance: WhatsappInstance) {
     }
 
     console.log("[instance-manager] starting instance", {
-      action: sessionInfo.hasRegisteredSession || sessionInfo.hasMeId || Boolean(instance.phone) ? "resume_session" : "generate_qr",
+      action: sessionInfo.hasRegisteredSession || sessionInfo.hasMeId ? "resume_session" : "generate_qr",
       instanceId: instance.id,
       sessionDir: sessionInfo.sessionDir,
       sessionFilesCount: sessionInfo.sessionFilesCount,
@@ -547,9 +546,7 @@ async function startSecondaryWhatsappInstance(instance: WhatsappInstance) {
     });
 
     const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
-    const { version } = await fetchLatestBaileysVersion();
     const socket = makeWASocket({
-      version,
       auth: state,
       browser: Browsers.ubuntu("Chrome"),
       logger: P({ level: process.env.BAILEYS_LOG_LEVEL ?? "silent" }),
@@ -674,6 +671,12 @@ async function startSecondaryWhatsappInstance(instance: WhatsappInstance) {
         }
 
         if (update.connection === "close") {
+          if (runtime.socket && runtime.socket !== socket) {
+            console.log("[instance-manager] stale socket close ignored", {
+              instanceId: instance.id
+            });
+            return;
+          }
           const statusCode = getDisconnectStatusCode(update.lastDisconnect?.error);
           const sessionInfo = await getBaileysSessionFilesInfoForInstance(instance);
           const closeErrorMessage = update.lastDisconnect?.error
@@ -870,11 +873,12 @@ export async function getWhatsappInstanceRuntimeStatus(instanceId?: string | nul
   const hasSessionFiles = sessionInfo.sessionFilesCount > 0;
   const connectedPhone = runtime.connectedPhone ?? session.connectedPhone ?? instance.phone;
   const currentStatus = runtime.status ?? session.status;
+  const hasStoredSessionPhone = Boolean(runtime.connectedPhone ?? session.connectedPhone);
   const hasConfirmedSession =
     sessionInfo.hasRegisteredSession ||
     sessionInfo.hasMeId ||
     currentStatus === WhatsappStatus.connected ||
-    Boolean(connectedPhone);
+    (hasSessionFiles && hasStoredSessionPhone);
 
   return {
     id: session.id,
