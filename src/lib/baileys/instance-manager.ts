@@ -63,6 +63,7 @@ const runtimeByInstanceId = new Map<string, WhatsappRuntime>();
 const startPromiseByInstanceId = new Map<string, Promise<WASocket>>();
 const INSTANCE_CONNECTION_TIMEOUT_MS = 30_000;
 const INSTANCE_CONNECTION_POLL_MS = 250;
+const AUTO_QUICK_SYNC_COOLDOWN_MS = 5 * 60_000;
 
 export class WhatsappInstanceUnavailableError extends Error {
   constructor(message: string) {
@@ -84,6 +85,14 @@ export type WhatsappRuntime = {
   startedAt: Date | null;
   lastOpenAt: Date | null;
   lastSyncRequestedAt: Date | null;
+  lastSocketEventAt: Date | null;
+  lastLabelEventAt: Date | null;
+  lastQuickSyncAt: Date | null;
+  lastCatalogSyncAt: Date | null;
+  lastHistorySyncAt: Date | null;
+  nextReconnectAt: Date | null;
+  lastErrorCode: string | null;
+  autoReconnectDisabled: boolean;
   reconnectAttempts: number;
   reconnectTimer: ReturnType<typeof setTimeout> | null;
 };
@@ -189,6 +198,14 @@ function getRuntime(instance: Pick<WhatsappInstance, "id" | "sessionKey" | "stat
     startedAt: null,
     lastOpenAt: null,
     lastSyncRequestedAt: null,
+    lastSocketEventAt: null,
+    lastLabelEventAt: null,
+    lastQuickSyncAt: null,
+    lastCatalogSyncAt: null,
+    lastHistorySyncAt: null,
+    nextReconnectAt: null,
+    lastErrorCode: null,
+    autoReconnectDisabled: false,
     reconnectAttempts: 0,
     reconnectTimer: null
   };
@@ -289,6 +306,8 @@ async function scheduleRecoverableReconnect(
     RECOVERABLE_RECONNECT_BACKOFF_MS[runtime.reconnectAttempts] ??
     RECOVERABLE_RECONNECT_BACKOFF_MS[RECOVERABLE_RECONNECT_BACKOFF_MS.length - 1];
   runtime.reconnectAttempts = attempt;
+  runtime.nextReconnectAt = new Date(Date.now() + delayMs);
+  runtime.lastErrorCode = options.statusCode ? String(options.statusCode) : "SOCKET_CLOSED";
   runtime.status = WhatsappStatus.connecting;
   runtime.qrCode = null;
   runtime.lastError = RECOVERABLE_SESSION_MESSAGE;
@@ -315,6 +334,7 @@ async function scheduleRecoverableReconnect(
 
   runtime.reconnectTimer = setTimeout(() => {
     runtime.reconnectTimer = null;
+    runtime.nextReconnectAt = null;
     console.log("[instance-manager] recoverable reconnect attempt", {
       action: "resume_session",
       instanceId: instance.id,
@@ -567,10 +587,15 @@ async function startSecondaryWhatsappInstance(instance: WhatsappInstance) {
     });
     socket.ev.on("messages.update", (messages) => void syncMessagesUpdate(messages, instance.id));
     socket.ev.on("labels.edit", (label) => void syncLabelsEdit(label, instance.id));
-    socket.ev.on("labels.association", (event) => void syncLabelsAssociation(event, instance.id));
+    socket.ev.on("labels.association", (event) => {
+      runtime.lastSocketEventAt = new Date();
+      runtime.lastLabelEventAt = runtime.lastSocketEventAt;
+      void syncLabelsAssociation(event, instance.id);
+    });
 
     socket.ev.on("connection.update", (update) => {
       void (async () => {
+        runtime.lastSocketEventAt = new Date();
         if (update.qr) {
           const qrCode = await QRCode.toDataURL(update.qr);
           runtime.status = WhatsappStatus.qr;
@@ -607,6 +632,8 @@ async function startSecondaryWhatsappInstance(instance: WhatsappInstance) {
           runtime.lastError = null;
           runtime.lastOpenAt = new Date();
           runtime.reconnectAttempts = 0;
+          runtime.nextReconnectAt = null;
+          runtime.lastErrorCode = null;
           if (runtime.reconnectTimer) {
             clearTimeout(runtime.reconnectTimer);
             runtime.reconnectTimer = null;
@@ -625,11 +652,24 @@ async function startSecondaryWhatsappInstance(instance: WhatsappInstance) {
             await clearWhatsappOperationalData("phone-changed-instance", instance.id);
           }
 
-          runtime.lastSyncRequestedAt = null;
-          console.log("[catalog] auto sync skipped after instance open", {
-            instanceId: instance.id,
-            reason: "manual-sync-required"
-          });
+          const now = Date.now();
+          if (
+            !runtime.lastQuickSyncAt ||
+            now - runtime.lastQuickSyncAt.getTime() >= AUTO_QUICK_SYNC_COOLDOWN_MS
+          ) {
+            runtime.lastQuickSyncAt = new Date(now);
+            void requestWhatsappCatalogSyncForInstance(instance.id)
+              .then(() => {
+                runtime.lastCatalogSyncAt = new Date();
+              })
+              .catch((error) => {
+                runtime.lastErrorCode = "AUTO_QUICK_SYNC_FAILED";
+                console.warn("[instance-manager] automatic quick sync failed", {
+                  instanceId: instance.id,
+                  error: errorMessage(error)
+                });
+              });
+          }
           return;
         }
 
@@ -648,6 +688,11 @@ async function startSecondaryWhatsappInstance(instance: WhatsappInstance) {
           const hadPairingQr = Boolean(runtime.qrCode);
           runtime.socket = null;
           runtime.lastError = closeErrorMessage;
+          runtime.lastErrorCode = statusCode ? String(statusCode) : "SOCKET_CLOSED";
+
+          if (statusCode === DisconnectReason.loggedOut) {
+            runtime.autoReconnectDisabled = true;
+          }
 
           if (sessionInfo.isPairingPartial && !hasSavedSession) {
             runtime.lastError = PAIRING_INCOMPLETE_MESSAGE;
@@ -734,6 +779,7 @@ export async function startWhatsappInstance(instanceId?: string | null) {
     return getWhatsappStatusPayload();
   }
 
+  getRuntime(instance).autoReconnectDisabled = false;
   await startSecondaryWhatsappInstance(instance);
   return getWhatsappInstanceRuntimeStatus(instance.id);
 }
@@ -758,6 +804,8 @@ export async function disconnectWhatsappInstance(instanceId?: string | null) {
     runtime.reconnectTimer = null;
   }
   runtime.reconnectAttempts = 0;
+  runtime.nextReconnectAt = null;
+  runtime.autoReconnectDisabled = true;
   runtime.socket?.end(new Error("Manual disconnect"));
   runtime.socket = null;
   runtime.status = WhatsappStatus.disconnected;
@@ -852,6 +900,15 @@ export async function getWhatsappInstanceRuntimeStatus(instanceId?: string | nul
     lastOpenAt: runtime.lastOpenAt?.toISOString() ?? null,
     lastConnectedAt: instance.lastConnectedAt?.toISOString() ?? null,
     lastSyncAt: instance.lastSyncAt?.toISOString() ?? null,
+    lastSocketEventAt: runtime.lastSocketEventAt?.toISOString() ?? null,
+    lastLabelEventAt: runtime.lastLabelEventAt?.toISOString() ?? null,
+    lastQuickSyncAt: runtime.lastQuickSyncAt?.toISOString() ?? null,
+    lastCatalogSyncAt: runtime.lastCatalogSyncAt?.toISOString() ?? null,
+    lastHistorySyncAt: runtime.lastHistorySyncAt?.toISOString() ?? null,
+    reconnectAttempts: runtime.reconnectAttempts,
+    nextReconnectAt: runtime.nextReconnectAt?.toISOString() ?? null,
+    lastErrorCode: runtime.lastErrorCode,
+    autoReconnectDisabled: runtime.autoReconnectDisabled,
     isRecoverableSession:
       hasConfirmedSession &&
       currentStatus !== WhatsappStatus.connected &&
