@@ -1048,6 +1048,9 @@ async function processRecipient(recipientId: string) {
 let cleanupRuntimeOnFatal: (() => Promise<void>) | null = null;
 
 async function main() {
+  console.log("[worker] qr runtime revision", {
+    revision: "branch-cjs-direct-version-v1"
+  });
   const redisConnectionOptions = getRedisConnectionOptions();
   const heartbeatRedis = createHeartbeatRedis();
   heartbeatRedis.on("error", () => undefined);

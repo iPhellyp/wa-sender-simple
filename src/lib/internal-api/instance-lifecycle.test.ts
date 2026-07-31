@@ -38,17 +38,23 @@ test("new_qr preserva a proteção de sessão confirmada", async () => {
 });
 
 
-test("versão canário e resultado real são obrigatórios", async () => {
+test("socket preserva o caminho comprovado do branch worker CJS", async () => {
   const [manager, worker, stack] = await Promise.all([
     read("src/lib/baileys/instance-manager.ts"),
     read("src/worker/sender-worker.ts"),
     read("docker-stack.yml")
   ]);
-  assert.match(manager, /fetchLatestBaileysVersion/);
-  assert.match(manager, /WA_WEB_VERSION/);
-  assert.match(manager, /version,\s*auth: state/);
+  assert.match(
+    manager,
+    /const \{ state, saveCreds \} = await useMultiFileAuthState\(sessionDir\)/
+  );
+  assert.match(
+    manager,
+    /const \{ version \} = await fetchLatestBaileysVersion\(\)/
+  );
+  assert.match(manager, /QR_RUNTIME_REVISION/);
+  assert.doesNotMatch(manager, /resolveWhatsappWebVersion/);
+  assert.match(worker, /qr runtime revision/);
   assert.match(worker, /outcomeDeadline/);
-  assert.match(worker, /WA_HANDSHAKE_REJECTED/);
-  assert.match(worker, /outcome: finalStatus === "connected" \? "connected" : "qr_ready"/);
-  assert.match(stack, /WA_WEB_VERSION:/);
+  assert.doesNotMatch(stack, /WA_WEB_VERSION:/);
 });

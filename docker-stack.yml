@@ -45,7 +45,6 @@ services:
       APP_URL: "${APP_URL:-https://wa2.supereducarbrasil.com.br}"
       BAILEYS_SESSION_DIR: /app/data/baileys-session
       BAILEYS_LOG_LEVEL: ${BAILEYS_LOG_LEVEL:-silent}
-      WA_WEB_VERSION: "${WA_WEB_VERSION:-}"
       DATABASE_URL: "${DATABASE_URL:-postgresql://wa_sender:wa_sender@wa_sender_simple_postgres:5432/wa_sender_simple?schema=public}"
       NEXT_PUBLIC_APP_URL: "${NEXT_PUBLIC_APP_URL:-https://wa2.supereducarbrasil.com.br}"
       REDIS_URL: "${REDIS_URL:-redis://wa_sender_simple_redis:6379}"
@@ -91,7 +90,6 @@ services:
       APP_URL: "${APP_URL:-https://wa2.supereducarbrasil.com.br}"
       BAILEYS_SESSION_DIR: /app/data/baileys-session
       BAILEYS_LOG_LEVEL: ${BAILEYS_LOG_LEVEL:-silent}
-      WA_WEB_VERSION: "${WA_WEB_VERSION:-}"
       DATABASE_URL: "${DATABASE_URL:-postgresql://wa_sender:wa_sender@wa_sender_simple_postgres:5432/wa_sender_simple?schema=public}"
       NEXT_PUBLIC_APP_URL: "${NEXT_PUBLIC_APP_URL:-https://wa2.supereducarbrasil.com.br}"
       REDIS_URL: "${REDIS_URL:-redis://wa_sender_simple_redis:6379}"
