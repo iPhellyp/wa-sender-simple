@@ -40,6 +40,7 @@ import {
   sendWhatsappMessageForInstance,
   WhatsappInstanceUnavailableError
 } from "../lib/baileys/instance-manager";
+import { startWhatsappWatchdog } from "../lib/baileys/watchdog";
 import { ensureChatForJid, isGroupJid, normalizeChatJid } from "../lib/baileys/sync";
 import { completeCampaignIfDone } from "../lib/campaigns/progress";
 import { CampaignMediaError, loadValidatedCampaignMedia } from "../lib/campaigns/media";
@@ -1410,6 +1411,9 @@ async function main() {
       });
     }, 15_000);
     readinessTimer.unref();
+
+    startWhatsappWatchdog();
+    console.log("[worker] WhatsApp watchdog initialized");
   } catch {
     clearInterval(heartbeatTimer);
     console.error("WORKER_BULLMQ_READINESS_FAILED");

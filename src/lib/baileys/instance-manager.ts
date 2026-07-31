@@ -245,9 +245,7 @@ function hasResumableSession(options: {
 }) {
   return Boolean(
     options.hasRegisteredSession ||
-    options.hasMeId ||
-    options.connectedPhone ||
-    options.instancePhone
+    options.hasMeId
   );
 }
 
@@ -873,12 +871,9 @@ export async function getWhatsappInstanceRuntimeStatus(instanceId?: string | nul
   const hasSessionFiles = sessionInfo.sessionFilesCount > 0;
   const connectedPhone = runtime.connectedPhone ?? session.connectedPhone ?? instance.phone;
   const currentStatus = runtime.status ?? session.status;
-  const hasStoredSessionPhone = Boolean(runtime.connectedPhone ?? session.connectedPhone);
   const hasConfirmedSession =
     sessionInfo.hasRegisteredSession ||
-    sessionInfo.hasMeId ||
-    currentStatus === WhatsappStatus.connected ||
-    (hasSessionFiles && hasStoredSessionPhone);
+    sessionInfo.hasMeId;
 
   return {
     id: session.id,
