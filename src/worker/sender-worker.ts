@@ -6,6 +6,7 @@ import {
   APPLY_WHATSAPP_LABELS_JOB,
   CONNECT_WHATSAPP_JOB,
   DISCONNECT_WHATSAPP_JOB,
+  DELETE_WHATSAPP_INSTANCE_JOB,
   MUTATE_WHATSAPP_CHAT_LABEL_JOB,
   PRESERVE_DISCONNECT_WHATSAPP_JOB,
   RESET_WHATSAPP_JOB,
@@ -16,6 +17,7 @@ import {
   SYNC_WHATSAPP_HISTORY_JOB,
   closeCampaignQueue,
   type ApplyWhatsappLabelsJobData,
+  type ConnectWhatsappJobData,
   type MutateWhatsappChatLabelJobData,
   type SendManualMessageJobData,
   type SyncWhatsappCatalogJobData
@@ -28,6 +30,7 @@ import {
 } from "../lib/baileys/client";
 import {
   applyWhatsappLabelsForInstance,
+  deleteWhatsappInstance,
   disconnectWhatsappInstance,
   getWhatsappInstanceRuntimeStatus,
   mutateWhatsappChatLabelForInstance,
@@ -1123,12 +1126,33 @@ async function main() {
     });
 
     if (job.name === CONNECT_WHATSAPP_JOB) {
-      const instanceId = getRequiredJobInstanceId(job.data, CONNECT_WHATSAPP_JOB);
-      console.log("[worker] connect-whatsapp job received", { instanceId });
+      const data = job.data as Partial<ConnectWhatsappJobData>;
+      const instanceId = getRequiredJobInstanceId(data, CONNECT_WHATSAPP_JOB);
+      const mode = ["auto", "resume", "new_qr"].includes(String(data.mode))
+        ? (data.mode as "auto" | "resume" | "new_qr")
+        : "auto";
+      console.log("[worker] connect-whatsapp job received", { instanceId, mode });
 
       try {
+        const before = await getWhatsappInstanceRuntimeStatus(instanceId);
+        const hasConfirmedSession = Boolean(
+          before.hasRegisteredSession || before.hasMeId
+        );
+
+        if (mode === "new_qr" && hasConfirmedSession) {
+          throw new Error("A sessao confirmada nao pode ser substituida por new_qr.");
+        }
+
+        if (mode === "resume" && !hasConfirmedSession) {
+          throw new Error("Nao existe sessao registrada para retomar.");
+        }
+
+        if (mode === "new_qr" || (mode === "auto" && !hasConfirmedSession)) {
+          await resetWhatsappInstance(instanceId);
+        }
+
         await reconnectWhatsappInstance(instanceId);
-        console.log("[worker] connect-whatsapp finished", { instanceId });
+        console.log("[worker] connect-whatsapp finished", { instanceId, mode });
       } catch (error) {
         if (isBaileysStartSkippedError(error)) {
           console.log("[worker] connect-whatsapp skipped", {
@@ -1138,13 +1162,20 @@ async function main() {
         }
 
         const lastError = `Falha ao iniciar conexao WhatsApp no worker: ${getErrorMessage(error)}`;
-        console.error("[worker] connect-whatsapp failed", { instanceId, error: lastError });
+        console.error("[worker] connect-whatsapp failed", { instanceId, mode, error: lastError });
         if (instanceId === DEFAULT_WHATSAPP_INSTANCE_ID) {
           await markWhatsappError(lastError);
         }
         throw error;
       }
 
+      return;
+    }
+
+    if (job.name === DELETE_WHATSAPP_INSTANCE_JOB) {
+      const instanceId = getRequiredJobInstanceId(job.data, DELETE_WHATSAPP_INSTANCE_JOB);
+      await deleteWhatsappInstance(instanceId);
+      console.log("[worker] delete-whatsapp-instance finished", { instanceId });
       return;
     }
 

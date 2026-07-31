@@ -65,10 +65,7 @@ function statusClass(status: string) {
 function hasConfirmedSession(instance: InstanceSummary) {
   return Boolean(
     instance.hasRegisteredSession ||
-    instance.hasMeId ||
-    instance.connectedPhone ||
-    instance.phone ||
-    instance.status === "connected"
+    instance.hasMeId
   );
 }
 

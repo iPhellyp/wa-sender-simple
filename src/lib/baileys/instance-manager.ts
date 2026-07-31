@@ -6,7 +6,7 @@ import makeWASocket, {
   type AnyMessageContent,
   type WASocket
 } from "@whiskeysockets/baileys";
-import { mkdir, rm } from "fs/promises";
+import { mkdir, readdir, rm } from "fs/promises";
 import { join, resolve } from "path";
 import P from "pino";
 import QRCode from "qrcode";
@@ -850,6 +850,69 @@ export async function resetWhatsappInstance(instanceId?: string | null) {
 }
 
 export const resetBaileysSessionForInstance = resetWhatsappInstance;
+
+async function removeWhatsappInstanceSessionDir(
+  instance: Pick<WhatsappInstance, "id" | "sessionKey">
+) {
+  const sessionDir = resolve(getBaileysSessionDirForInstance(instance));
+
+  if (instance.id !== DEFAULT_WHATSAPP_INSTANCE_ID && instance.sessionKey !== "default") {
+    await rm(sessionDir, { recursive: true, force: true });
+    return;
+  }
+
+  const entries = await readdir(sessionDir, { withFileTypes: true }).catch(() => []);
+  for (const entry of entries) {
+    if (entry.isDirectory()) continue;
+    await rm(resolve(sessionDir, entry.name), { recursive: true, force: true });
+  }
+}
+
+export async function deleteWhatsappInstance(instanceId: string) {
+  const instance = await resolveWhatsappInstance(instanceId);
+  await disconnectWhatsappInstance(instance.id);
+
+  const replacementDefault = instance.isDefault
+    ? await prisma.whatsappInstance.findFirst({
+        where: { id: { not: instance.id } },
+        orderBy: { createdAt: "asc" }
+      })
+    : null;
+
+  await prisma.$transaction(async (transaction) => {
+    await transaction.sendLog.deleteMany({ where: { instanceId: instance.id } });
+    await transaction.campaignRecipient.deleteMany({ where: { instanceId: instance.id } });
+    await transaction.campaign.deleteMany({ where: { instanceId: instance.id } });
+    await transaction.contact.deleteMany({ where: { instanceId: instance.id } });
+    await transaction.whatsappChatLabel.deleteMany({ where: { instanceId: instance.id } });
+    await transaction.whatsappMessage.deleteMany({ where: { instanceId: instance.id } });
+    await transaction.whatsappLabel.deleteMany({ where: { instanceId: instance.id } });
+    await transaction.whatsappContact.deleteMany({ where: { instanceId: instance.id } });
+    await transaction.whatsappChat.deleteMany({ where: { instanceId: instance.id } });
+    await transaction.whatsappSession.deleteMany({ where: { instanceId: instance.id } });
+    await transaction.whatsappInstance.delete({ where: { id: instance.id } });
+
+    if (replacementDefault) {
+      await transaction.whatsappInstance.update({
+        where: { id: replacementDefault.id },
+        data: { isDefault: true }
+      });
+    }
+  });
+
+  await removeWhatsappInstanceSessionDir(instance);
+  runtimeByInstanceId.delete(instance.id);
+  startPromiseByInstanceId.delete(instance.id);
+
+  console.log("[instance-manager] deleted instance", {
+    instanceId: instance.id
+  });
+
+  return {
+    deletedInstanceId: instance.id,
+    nextActiveInstanceId: replacementDefault?.id ?? null
+  };
+}
 
 export async function getWhatsappInstanceRuntimeStatus(instanceId?: string | null) {
   const instance = await resolveWhatsappInstance(instanceId);

@@ -5,6 +5,7 @@ import {
   enqueueMutateWhatsappChatLabel,
   enqueueWhatsappCatalogSync,
   enqueueWhatsappConnect,
+  enqueueWhatsappInstanceDelete,
   enqueueWhatsappHistorySync,
   enqueueWhatsappPreserveDisconnect,
   enqueueWhatsappIdentityRebuild
@@ -157,10 +158,21 @@ export async function connectInternalInstance(
     );
   }
 
-  const job = await enqueueWhatsappConnect(instanceId);
+  const job = await enqueueWhatsappConnect(instanceId, mode);
   return {
     instanceId,
     status: "connecting",
+    enqueued: !job.deduped,
+    jobId: job.jobId
+  };
+}
+
+export async function deleteInternalInstance(instanceId: string) {
+  await requireInternalInstance(instanceId);
+  const job = await enqueueWhatsappInstanceDelete(instanceId);
+  return {
+    instanceId,
+    status: "deleting",
     enqueued: !job.deduped,
     jobId: job.jobId
   };

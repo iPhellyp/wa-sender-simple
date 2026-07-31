@@ -13,9 +13,16 @@ export const SYNC_WHATSAPP_CATALOG_JOB = "sync-whatsapp-catalog";
 export const APPLY_WHATSAPP_LABELS_JOB = "apply-whatsapp-labels";
 export const MUTATE_WHATSAPP_CHAT_LABEL_JOB = "mutate-whatsapp-chat-label";
 export const REBUILD_WHATSAPP_IDENTITIES_JOB = "rebuild-whatsapp-identities";
+export const DELETE_WHATSAPP_INSTANCE_JOB = "delete-whatsapp-instance";
 
 type InstanceJobData = {
   instanceId?: string;
+};
+
+export type WhatsappConnectMode = "auto" | "resume" | "new_qr";
+
+export type ConnectWhatsappJobData = InstanceJobData & {
+  mode?: WhatsappConnectMode;
 };
 
 export type RebuildWhatsappIdentitiesJobData = InstanceJobData & {
@@ -175,11 +182,25 @@ export async function enqueueRecipient(recipientId: string, delayMs: number): Pr
   };
 }
 
-export async function enqueueWhatsappConnect(instanceId: string): Promise<SyncJobEnqueueResult> {
+export async function enqueueWhatsappConnect(
+  instanceId: string,
+  mode: WhatsappConnectMode = "auto"
+): Promise<SyncJobEnqueueResult> {
   const normalizedInstanceId = requireInstanceId(instanceId, CONNECT_WHATSAPP_JOB);
   return enqueueDedupedSyncJob(
     CONNECT_WHATSAPP_JOB,
     buildJobId(CONNECT_WHATSAPP_JOB, normalizedInstanceId),
+    { instanceId: normalizedInstanceId, mode }
+  );
+}
+
+export async function enqueueWhatsappInstanceDelete(
+  instanceId: string
+): Promise<SyncJobEnqueueResult> {
+  const normalizedInstanceId = requireInstanceId(instanceId, DELETE_WHATSAPP_INSTANCE_JOB);
+  return enqueueDedupedSyncJob(
+    DELETE_WHATSAPP_INSTANCE_JOB,
+    buildJobId(DELETE_WHATSAPP_INSTANCE_JOB, normalizedInstanceId),
     { instanceId: normalizedInstanceId }
   );
 }

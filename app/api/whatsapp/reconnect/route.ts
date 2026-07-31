@@ -45,11 +45,10 @@ export async function POST(request: NextRequest) {
 
   const hasConfirmedSession = Boolean(
     currentSession.hasRegisteredSession ||
-    currentSession.hasMeId ||
-    currentSession.connectedPhone ||
-    currentSession.status === WhatsappStatus.connected
+    currentSession.hasMeId
   );
   const action = hasConfirmedSession ? "resume_session" : "generate_qr";
+  const mode = hasConfirmedSession ? "resume" : "new_qr";
   const currentUpdatedAt = currentSession.updatedAt ? new Date(currentSession.updatedAt).getTime() : Date.now();
   const isQrStale =
     currentSession.status === "qr" &&
@@ -97,7 +96,7 @@ export async function POST(request: NextRequest) {
     }
   });
 
-  const connectJob = await enqueueWhatsappConnect(instance.id);
+  const connectJob = await enqueueWhatsappConnect(instance.id, mode);
   console.log("[whatsapp-api] connection enqueued", {
     action,
     instanceId: instance.id,
