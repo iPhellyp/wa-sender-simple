@@ -36,3 +36,19 @@ test("new_qr preserva a proteção de sessão confirmada", async () => {
   assert.match(services, /INSTANCE_STATE_CONFLICT/);
   assert.match(services, /enqueueWhatsappConnect\(instanceId, mode\)/);
 });
+
+
+test("versão canário e resultado real são obrigatórios", async () => {
+  const [manager, worker, stack] = await Promise.all([
+    read("src/lib/baileys/instance-manager.ts"),
+    read("src/worker/sender-worker.ts"),
+    read("docker-stack.yml")
+  ]);
+  assert.match(manager, /fetchLatestBaileysVersion/);
+  assert.match(manager, /WA_WEB_VERSION/);
+  assert.match(manager, /version,\s*auth: state/);
+  assert.match(worker, /outcomeDeadline/);
+  assert.match(worker, /WA_HANDSHAKE_REJECTED/);
+  assert.match(worker, /outcome: finalStatus === "connected" \? "connected" : "qr_ready"/);
+  assert.match(stack, /WA_WEB_VERSION:/);
+});

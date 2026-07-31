@@ -1152,7 +1152,73 @@ async function main() {
         }
 
         await reconnectWhatsappInstance(instanceId);
-        console.log("[worker] connect-whatsapp finished", { instanceId, mode });
+
+        const outcomeDeadline = Date.now() + 35_000;
+        let outcome = await getWhatsappInstanceRuntimeStatus(instanceId);
+        let outcomeView = outcome as {
+          status?: string;
+          hasQr?: boolean;
+          hasQrCode?: boolean;
+          hasLiveSocket?: boolean;
+          lastError?: string | null;
+          lastErrorCode?: string | null;
+        };
+
+        while (Date.now() < outcomeDeadline) {
+          const status = String(outcomeView.status ?? "");
+          const hasQr = Boolean(outcomeView.hasQr || outcomeView.hasQrCode);
+
+          if (status === "connected" || hasQr) {
+            break;
+          }
+
+          if (
+            !outcomeView.hasLiveSocket &&
+            ["disconnected", "error"].includes(status) &&
+            (outcomeView.lastError || outcomeView.lastErrorCode)
+          ) {
+            const code = String(outcomeView.lastErrorCode ?? "");
+            const detail = String(
+              outcomeView.lastError ?? outcomeView.lastErrorCode ?? "unknown"
+            );
+
+            if (code === "405") {
+              throw new Error(
+                `WA_HANDSHAKE_REJECTED: statusCode=405 detail=${detail}`
+              );
+            }
+
+            throw new Error(
+              `WA_CONNECTION_CLOSED_BEFORE_READY: status=${status} code=${code} detail=${detail}`
+            );
+          }
+
+          await new Promise<void>((resolve) => {
+            setTimeout(resolve, 250);
+          });
+
+          outcome = await getWhatsappInstanceRuntimeStatus(instanceId);
+          outcomeView = outcome as typeof outcomeView;
+        }
+
+        const finalStatus = String(outcomeView.status ?? "");
+        const finalHasQr = Boolean(
+          outcomeView.hasQr || outcomeView.hasQrCode
+        );
+
+        if (finalStatus !== "connected" && !finalHasQr) {
+          throw new Error(
+            `WA_CONNECT_OUTCOME_TIMEOUT: status=${finalStatus} code=${String(
+              outcomeView.lastErrorCode ?? ""
+            )}`
+          );
+        }
+
+        console.log("[worker] connect-whatsapp finished", {
+          instanceId,
+          mode,
+          outcome: finalStatus === "connected" ? "connected" : "qr_ready"
+        });
       } catch (error) {
         if (isBaileysStartSkippedError(error)) {
           console.log("[worker] connect-whatsapp skipped", {

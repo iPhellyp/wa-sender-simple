@@ -2,6 +2,7 @@ import makeWASocket, {
   ALL_WA_PATCH_NAMES,
   Browsers,
   DisconnectReason,
+  fetchLatestBaileysVersion,
   useMultiFileAuthState,
   type AnyMessageContent,
   type WASocket
@@ -63,6 +64,90 @@ const startPromiseByInstanceId = new Map<string, Promise<WASocket>>();
 const INSTANCE_CONNECTION_TIMEOUT_MS = 30_000;
 const INSTANCE_CONNECTION_POLL_MS = 250;
 const AUTO_QUICK_SYNC_COOLDOWN_MS = 5 * 60_000;
+const WA_WEB_VERSION_FETCH_TIMEOUT_MS = 15_000;
+let cachedWhatsappWebVersion: [number, number, number] | null = null;
+let whatsappWebVersionPromise: Promise<[number, number, number]> | null = null;
+
+function parseWhatsappWebVersion(value: string) {
+  const parts = value
+    .trim()
+    .split(".")
+    .map((part) => Number(part));
+
+  if (
+    parts.length !== 3 ||
+    parts.some((part) => !Number.isSafeInteger(part) || part < 0)
+  ) {
+    throw new Error("WA_WEB_VERSION deve usar o formato numero.numero.numero");
+  }
+
+  return [parts[0], parts[1], parts[2]] as [number, number, number];
+}
+
+async function resolveWhatsappWebVersion() {
+  if (cachedWhatsappWebVersion) {
+    return cachedWhatsappWebVersion;
+  }
+
+  const configured = String(process.env.WA_WEB_VERSION ?? "").trim();
+  if (configured) {
+    cachedWhatsappWebVersion = parseWhatsappWebVersion(configured);
+    console.log("[instance-manager] using pinned WhatsApp Web version", {
+      version: cachedWhatsappWebVersion.join(".")
+    });
+    return cachedWhatsappWebVersion;
+  }
+
+  if (!whatsappWebVersionPromise) {
+    whatsappWebVersionPromise = (async () => {
+      let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+
+      try {
+        const result = await Promise.race([
+          fetchLatestBaileysVersion(),
+          new Promise<never>((_, reject) => {
+            timeoutHandle = setTimeout(() => {
+              reject(new Error("WA_WEB_VERSION_FETCH_TIMEOUT"));
+            }, WA_WEB_VERSION_FETCH_TIMEOUT_MS);
+          })
+        ]);
+
+        const version = result.version;
+        if (
+          !Array.isArray(version) ||
+          version.length !== 3 ||
+          version.some(
+            (part) => !Number.isSafeInteger(part) || Number(part) < 0
+          )
+        ) {
+          throw new Error("WA_WEB_VERSION_FETCH_INVALID");
+        }
+
+        const normalized: [number, number, number] = [
+          Number(version[0]),
+          Number(version[1]),
+          Number(version[2])
+        ];
+
+        cachedWhatsappWebVersion = normalized;
+        console.log("[instance-manager] fetched WhatsApp Web version", {
+          version: normalized.join("."),
+          fetchReportedError: Boolean(result.error)
+        });
+        return normalized;
+      } catch (error) {
+        whatsappWebVersionPromise = null;
+        throw error;
+      } finally {
+        if (timeoutHandle) {
+          clearTimeout(timeoutHandle);
+        }
+      }
+    })();
+  }
+
+  return whatsappWebVersionPromise;
+}
 
 export class WhatsappInstanceUnavailableError extends Error {
   constructor(message: string) {
@@ -543,8 +628,10 @@ async function startSecondaryWhatsappInstance(instance: WhatsappInstance) {
       isPairingPartial: sessionInfo.isPairingPartial
     });
 
+    const version = await resolveWhatsappWebVersion();
     const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
     const socket = makeWASocket({
+      version,
       auth: state,
       browser: Browsers.ubuntu("Chrome"),
       logger: P({ level: process.env.BAILEYS_LOG_LEVEL ?? "silent" }),
