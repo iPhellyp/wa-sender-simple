@@ -3,6 +3,7 @@ import { prisma } from "../prisma/client";
 
 const DEFAULT_TIMEOUT_MS = 2_000;
 const MAX_ATTEMPTS = 12;
+let deliveryInProgress = false;
 
 function config() {
   const url = String(process.env.CRM_INTERNAL_LABEL_EVENT_URL ?? "").trim();
@@ -26,11 +27,15 @@ function retryAt(attempts: number) {
 }
 
 export async function deliverPendingCrmLabelEvents(limit = 10) {
+  if (deliveryInProgress) return { skipped: true, delivered: 0 };
+  deliveryInProgress = true;
+  try {
   const { url, secret, timeout } = config();
   if (!url || !secret) return { skipped: true, delivered: 0 };
   const rows = await prisma.$queryRaw<Array<{ id: bigint; attempts: number; payload: unknown }>>(Prisma.sql`
     UPDATE "CrmLabelEventDelivery"
-    SET "status" = 'RETRY', "attempts" = "attempts" + 1, "updatedAt" = CURRENT_TIMESTAMP
+    SET "status" = 'RETRY', "attempts" = "attempts" + 1,
+        "nextAttemptAt" = CURRENT_TIMESTAMP + INTERVAL '60 seconds', "updatedAt" = CURRENT_TIMESTAMP
     WHERE "id" IN (
       SELECT "id" FROM "CrmLabelEventDelivery"
       WHERE "status" IN ('PENDING', 'RETRY') AND "nextAttemptAt" <= CURRENT_TIMESTAMP
@@ -49,7 +54,11 @@ export async function deliverPendingCrmLabelEvents(limit = 10) {
         body: JSON.stringify(row.payload),
         signal: controller.signal
       });
-      if (!response.ok) throw new Error(`CRM_PUSH_HTTP_${response.status}`);
+      if (!response.ok) {
+        const error = new Error(`CRM_PUSH_HTTP_${response.status}`);
+        (error as Error & { permanent?: boolean }).permanent = [400, 401, 403, 404, 405, 422].includes(response.status);
+        throw error;
+      }
       await prisma.$executeRaw(Prisma.sql`
         UPDATE "CrmLabelEventDelivery" SET "status" = 'SENT', "sentAt" = CURRENT_TIMESTAMP, "updatedAt" = CURRENT_TIMESTAMP
         WHERE "id" = ${row.id}
@@ -58,10 +67,15 @@ export async function deliverPendingCrmLabelEvents(limit = 10) {
     } catch (error) {
       const attempts = Number(row.attempts ?? 1);
       const terminal = attempts >= MAX_ATTEMPTS;
-      const message = error instanceof Error && error.name === "AbortError" ? "CRM_PUSH_TIMEOUT" : "CRM_PUSH_FAILED";
+      const message = error instanceof Error && error.name === "AbortError"
+        ? "CRM_PUSH_TIMEOUT"
+        : error instanceof Error && /^CRM_PUSH_HTTP_\d+$/.test(error.message)
+          ? error.message
+          : "CRM_PUSH_NETWORK_ERROR";
+      const permanent = error instanceof Error && (error as Error & { permanent?: boolean }).permanent === true;
       await prisma.$executeRaw(Prisma.sql`
         UPDATE "CrmLabelEventDelivery"
-        SET "status" = ${terminal ? "FAILED" : "RETRY"}::"CrmLabelEventDeliveryStatus",
+        SET "status" = ${(terminal || permanent) ? "FAILED" : "RETRY"}::"CrmLabelEventDeliveryStatus",
             "nextAttemptAt" = ${retryAt(attempts)}, "lastError" = ${message}, "updatedAt" = CURRENT_TIMESTAMP
         WHERE "id" = ${row.id}
       `);
@@ -70,4 +84,7 @@ export async function deliverPendingCrmLabelEvents(limit = 10) {
     }
   }
   return { skipped: false, delivered };
+  } finally {
+    deliveryInProgress = false;
+  }
 }
