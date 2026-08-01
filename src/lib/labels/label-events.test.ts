@@ -42,7 +42,8 @@ function fakeTransaction(results: number[]) {
       }) => {
         queries.push(query);
         return results.shift() ?? 0;
-      }
+      },
+      $queryRaw: async () => [{ waLabelId: "10", name: "FEZ PROVA" }]
     }
   };
 }

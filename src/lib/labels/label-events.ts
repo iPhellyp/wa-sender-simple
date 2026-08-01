@@ -23,6 +23,7 @@ type LabelAssociationChange = {
 
 type LabelEventTransaction = {
   $executeRaw(query: Prisma.Sql): Promise<number>;
+  $queryRaw(query: Prisma.Sql): Promise<unknown>;
 };
 
 type PendingMutation = {
@@ -179,6 +180,17 @@ export async function persistLabelAssociationChange(
 
   const target = classifyLabelEventTarget(change.jid, change.phoneNormalized);
   const eventId = randomUUID();
+  const activeLabels = await transaction.$queryRaw(Prisma.sql`
+    SELECT l."waLabelId", l."name"
+    FROM "WhatsappChatLabel" cl
+    JOIN "WhatsappLabel" l ON l."id" = cl."labelId"
+    WHERE cl."instanceId" = ${change.instanceId} AND cl."chatId" = ${change.chatId}
+      AND l."deleted" = false
+    ORDER BY l."waLabelId" ASC
+    LIMIT 100
+  `) as Array<{ waLabelId: string; name: string }>;
+  const currentRemoteLabelIds = [...new Set(activeLabels.map((label) => label.waLabelId))];
+  const waLabelName = activeLabels.find((label) => label.waLabelId === change.waLabelId)?.name ?? null;
   await transaction.$executeRaw(
     Prisma.sql`
       INSERT INTO "WhatsappLabelEvent" (
@@ -209,7 +221,9 @@ export async function persistLabelAssociationChange(
     observedAt: (change.observedAt ?? new Date()).toISOString(),
     eligibleForCrm: target.eligibleForCrm,
     ineligibleReason: target.ineligibleReason,
-    correlationKey: cleanCorrelationKey(change.correlationKey)
+    correlationKey: cleanCorrelationKey(change.correlationKey),
+    waLabelName,
+    currentRemoteLabelIds
   });
 
   return { changed: true, eventId };
