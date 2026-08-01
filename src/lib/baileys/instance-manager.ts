@@ -109,6 +109,7 @@ const startPromiseByInstanceId = new Map<string, Promise<WASocket>>();
 const INSTANCE_CONNECTION_TIMEOUT_MS = 30_000;
 const INSTANCE_CONNECTION_POLL_MS = 250;
 const AUTO_QUICK_SYNC_COOLDOWN_MS = 5 * 60_000;
+const AUTO_FULL_SYNC_COOLDOWN_MS = 30 * 60_000;
 const QR_RUNTIME_REVISION = "branch-cjs-direct-version-v1";
 
 export class WhatsappInstanceUnavailableError extends Error {
@@ -706,14 +707,30 @@ async function startSecondaryWhatsappInstance(instance: WhatsappInstance) {
             now - runtime.lastQuickSyncAt.getTime() >= AUTO_QUICK_SYNC_COOLDOWN_MS
           ) {
             runtime.lastQuickSyncAt = new Date(now);
-            void requestWhatsappCatalogSyncForInstance(instance.id)
-              .then(() => {
+            const forceSnapshot = Boolean(
+              !instance.lastSyncAt ||
+              now - instance.lastSyncAt.getTime() >= AUTO_FULL_SYNC_COOLDOWN_MS
+            );
+
+            void requestWhatsappCatalogSyncForInstance(instance.id, {
+              forceSnapshot
+            })
+              .then(async (catalogResult) => {
                 runtime.lastCatalogSyncAt = new Date();
+                const identities = await rebuildWhatsappIdentitiesForInstance(instance.id);
+
+                console.log("[instance-manager] automatic full contact sync finished", {
+                  instanceId: instance.id,
+                  forceSnapshot,
+                  catalogMode: catalogResult.mode,
+                  identities
+                });
               })
               .catch((error) => {
-                runtime.lastErrorCode = "AUTO_QUICK_SYNC_FAILED";
-                console.warn("[instance-manager] automatic quick sync failed", {
+                runtime.lastErrorCode = "AUTO_FULL_SYNC_FAILED";
+                console.warn("[instance-manager] automatic full contact sync failed", {
                   instanceId: instance.id,
+                  forceSnapshot,
                   error: errorMessage(error)
                 });
               });

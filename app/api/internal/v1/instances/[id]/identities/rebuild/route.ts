@@ -14,7 +14,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
     const phones = Array.isArray(body.phones)
       ? [...new Set(body.phones.filter(
           (phone): phone is string => typeof phone === "string" && /^55[1-9]\d{9,10}$/.test(phone)
-        ))].slice(0, 2_000)
+        ))].slice(0, 50_000)
       : [];
     return internalJson(
       await rebuildInternalIdentities(validateResourceId(id, "instanceId"), phones),

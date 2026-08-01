@@ -51,6 +51,11 @@ let whatsappContacts: Array<{
   jid: string;
   phone: string | null;
 }> = [];
+let whatsappIdentities: Array<{
+  id: string;
+  lidJid?: string;
+  phoneNormalized?: string;
+}> = [];
 let label: { id: string; waLabelId: string } | null = null;
 let chatLabel: { id: string } | null = null;
 let queueCalls: Array<{ name: string; data: unknown }> = [];
@@ -105,6 +110,10 @@ const prismaMock = {
     findMany: async () => whatsappContacts,
     findFirst: async () => whatsappContacts[0] ?? null
   },
+  whatsappIdentity: {
+    findFirst: async () => whatsappIdentities[0] ?? null,
+    findMany: async () => whatsappIdentities
+  },
   $transaction: async (callback: (transaction: unknown) => Promise<unknown>) =>
     callback(prismaMock)
 };
@@ -150,6 +159,7 @@ function reset() {
   chats = [];
   crmContacts = [];
   whatsappContacts = [];
+  whatsappIdentities = [];
   label = null;
   chatLabel = null;
   queueCalls = [];
@@ -547,4 +557,20 @@ test("worker continua delegando connect para reconnectWhatsappInstance", async (
     workerSource,
     /if \(job\.name === CONNECT_WHATSAPP_JOB\)[\s\S]*await reconnectWhatsappInstance\(instanceId\)/
   );
+});
+
+test("LID com identidade determinística persistida pode receber etiqueta", async () => {
+  chat = { id: "chat-identity", jid: "456@lid" };
+  label = { id: "label-identity", waLabelId: "10" };
+  whatsappIdentities = [{ id: "identity-1" }];
+
+  const result = await services.mutateInternalChatLabel({
+    instanceId: "instance-1",
+    chatId: "chat-identity",
+    waLabelId: "10",
+    operation: "apply"
+  });
+
+  assert.equal(result.enqueued, true);
+  assert.deepEqual(queueCalls.map((call) => call.name), ["label"]);
 });

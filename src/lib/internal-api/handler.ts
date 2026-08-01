@@ -26,6 +26,21 @@ type InternalHandler = (
 
 type InternalApiRedis = IdempotencyRedis & RateLimitRedis;
 
+function shouldAbandonIdempotencyAfterError(
+  phase: "pre-handler" | "handler-running" | "handler-complete",
+  error: ReturnType<typeof toInternalApiError>
+) {
+  if (phase === "pre-handler") {
+    return true;
+  }
+
+  return (
+    phase === "handler-running" &&
+    error.status >= 400 &&
+    error.status < 500
+  );
+}
+
 export function withInternalApi(
   handler: InternalHandler,
   options: { idempotent?: boolean; redis?: InternalApiRedis } = {}
@@ -110,11 +125,16 @@ export function withInternalApi(
 
       return response;
     } catch (error) {
-      if (idempotencyState && phase === "pre-handler") {
+      const apiError = toInternalApiError(error);
+
+      if (
+        idempotencyState &&
+        shouldAbandonIdempotencyAfterError(phase, apiError)
+      ) {
         await abandonIdempotency(options.redis ?? getInternalApiRedis(), idempotencyState.key);
       }
 
-      const response = internalErrorResponse(toInternalApiError(error), requestId);
+      const response = internalErrorResponse(apiError, requestId);
       response.headers.set("X-Request-Id", requestId);
       return response;
     }

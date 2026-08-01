@@ -423,3 +423,43 @@ test("falha anterior ao handler não executa efeito nem cria processing inválid
   assert.equal(redis.values.size, 0);
   restoreEnv("WA2_INTERNAL_API_SECRET", previousSecret);
 });
+
+test("erro controlado 422 abandona idempotência e permite nova tentativa", async () => {
+  const previousSecret = process.env.WA2_INTERNAL_API_SECRET;
+  process.env.WA2_INTERNAL_API_SECRET = "configured-secret";
+  const redis = new MemoryInternalRedis();
+  let executions = 0;
+
+  const wrapped = withInternalApi(
+    async () => {
+      executions += 1;
+      throw new InternalApiError(
+        "LID_UNRESOLVED",
+        "LID sem telefone resolvido",
+        422
+      );
+    },
+    { idempotent: true, redis }
+  );
+
+  const request = () =>
+    new NextRequest("http://localhost/api/internal/v1/labels", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer configured-secret",
+        "idempotency-key": "controlled-error-422"
+      },
+      body: "{}"
+    });
+
+  const first = await wrapped(request());
+  assert.equal(first.status, 422);
+  assert.equal(redis.values.size, 0);
+
+  const second = await wrapped(request());
+  assert.equal(second.status, 422);
+  assert.equal(executions, 2);
+  assert.equal(redis.values.size, 0);
+
+  restoreEnv("WA2_INTERNAL_API_SECRET", previousSecret);
+});

@@ -285,15 +285,27 @@ export async function listInternalChatLabels(instanceId: string, chatId: string)
 async function assertMutableChatJid(instanceId: string, jid: string) {
   const type = classifyJid(jid);
   if (type === "lid") {
-    const mapping = await prisma.whatsappContact.findFirst({
-      where: {
-        instanceId,
-        jid,
-        phone: { not: null }
-      },
-      select: { id: true }
-    });
-    if (!mapping) {
+    const [contactMapping, identityMapping] = await Promise.all([
+      prisma.whatsappContact.findFirst({
+        where: {
+          instanceId,
+          jid,
+          phone: { not: null }
+        },
+        select: { id: true }
+      }),
+      prisma.whatsappIdentity.findFirst({
+        where: {
+          instanceId,
+          lidJid: jid,
+          confidence: "DETERMINISTIC",
+          phoneNormalized: { not: null }
+        },
+        select: { id: true }
+      })
+    ]);
+
+    if (!contactMapping && !identityMapping) {
       throw new InternalApiError("LID_UNRESOLVED", "LID sem telefone resolvido", 422);
     }
     return;
