@@ -51,6 +51,51 @@ import { getBaileysSessionFilesInfo } from "./session-files";
 import { persistIdentityPair, persistIdentityPairs, rebuildPersistedIdentities } from "./identity-map";
 
 const CATALOG_APP_STATE_COLLECTIONS = ALL_WA_PATCH_NAMES;
+type CatalogAppStateCollection = (typeof CATALOG_APP_STATE_COLLECTIONS)[number];
+
+async function clearInstanceCatalogAppStateVersionsForSnapshot(
+  socket: WASocket,
+  instanceId: string
+) {
+  const collections = [...CATALOG_APP_STATE_COLLECTIONS];
+  const currentVersions = await socket.authState.keys.get(
+    "app-state-sync-version",
+    collections
+  );
+  const resetVersions = CATALOG_APP_STATE_COLLECTIONS.reduce(
+    (versions, collection) => {
+      versions[collection] = null;
+      return versions;
+    },
+    {} as Record<CatalogAppStateCollection, null>
+  );
+  const versionSummary = CATALOG_APP_STATE_COLLECTIONS.reduce(
+    (summary, collection) => {
+      summary[collection] = currentVersions[collection]?.version ?? null;
+      return summary;
+    },
+    {} as Record<CatalogAppStateCollection, number | null>
+  );
+
+  console.log("[catalog] instance force snapshot app-state versions backup", {
+    instanceId,
+    collections,
+    versions: versionSummary
+  });
+
+  await socket.authState.keys.set({
+    "app-state-sync-version": resetVersions
+  });
+
+  console.log("[catalog] instance force snapshot app-state versions cleared", {
+    instanceId,
+    collections
+  });
+
+  return {
+    cleared: CATALOG_APP_STATE_COLLECTIONS.length
+  };
+}
 const RECOVERABLE_SESSION_MESSAGE =
   "Sessao salva, aguardando retomada. Clique em Retomar sessao se nao reconectar automaticamente.";
 const PAIRING_INCOMPLETE_MESSAGE =
@@ -1243,11 +1288,29 @@ export async function requestWhatsappCatalogSyncForInstance(
     };
   }
 
+  const forceSnapshot = options.forceSnapshot === true;
+  let snapshotReset: { cleared: number } | null = null;
+
+  if (forceSnapshot) {
+    snapshotReset = await clearInstanceCatalogAppStateVersionsForSnapshot(
+      socket,
+      instance.id
+    );
+  }
+
   console.log("[catalog] app-state resync requested", {
     instanceId: instance.id,
-    forceSnapshot: options.forceSnapshot === true
+    forceSnapshot,
+    isInitialSync: true,
+    snapshotReset
   });
-  await resyncAppState(CATALOG_APP_STATE_COLLECTIONS, options.forceSnapshot === true);
+  await resyncAppState(CATALOG_APP_STATE_COLLECTIONS, true);
+
+  console.log("[catalog] app-state resync finished", {
+    instanceId: instance.id,
+    forceSnapshot,
+    snapshotReset
+  });
 
   const materialized = await materializeWhatsappContactsAsChats(instance.id);
 
@@ -1263,6 +1326,8 @@ export async function requestWhatsappCatalogSyncForInstance(
   return {
     ok: true,
     mode: "resync-app-state" as const,
+    forceSnapshot,
+    snapshotReset,
     materialized,
     message: "Sincronizacao da instancia solicitada."
   };
