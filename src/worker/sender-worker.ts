@@ -72,6 +72,7 @@ import {
   removeWorkerReadiness
 } from "./heartbeat";
 import { withTimeout } from "./timeout";
+import { deliverPendingCrmLabelEvents } from "../lib/labels/crm-push";
 
 const finalRecipientStatuses: CampaignRecipientStatus[] = [
   CampaignRecipientStatus.sent,
@@ -81,6 +82,7 @@ const finalRecipientStatuses: CampaignRecipientStatus[] = [
 const HEARTBEAT_INITIALIZATION_TIMEOUT_MS = 5_000;
 const BULLMQ_READINESS_TIMEOUT_MS = 10_000;
 const RESOURCE_CLOSE_TIMEOUT_MS = 2_000;
+const CRM_PUSH_INTERVAL_MS = 1_000;
 
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Erro desconhecido";
@@ -1539,6 +1541,10 @@ async function main() {
     process.exit(1);
   }
   let shuttingDown = false;
+  const crmPushTimer = setInterval(() => {
+    void deliverPendingCrmLabelEvents().catch(() => undefined);
+  }, CRM_PUSH_INTERVAL_MS);
+  crmPushTimer.unref();
 
   async function shutdown(signal: "SIGTERM" | "SIGINT") {
     if (shuttingDown) return;
@@ -1548,6 +1554,7 @@ async function main() {
     try {
       if (heartbeatTimer) clearInterval(heartbeatTimer);
       if (readinessTimer) clearInterval(readinessTimer);
+      clearInterval(crmPushTimer);
       if (campaignScheduler) await campaignScheduler.stop();
       await closeWorkerRuntimeResources(worker);
       console.log("[worker] shutdown finished", { signal });

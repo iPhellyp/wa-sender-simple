@@ -48,7 +48,7 @@ function fakeTransaction(results: number[]) {
 }
 
 test("aplicação manual gera evento WHATSAPP somente quando a associação muda", async () => {
-  const fake = fakeTransaction([1, 1]);
+  const fake = fakeTransaction([1, 1, 1]);
   const result = await labelEvents.persistLabelAssociationChange(fake.transaction, {
     instanceId: "instance-1",
     chatId: "chat-1",
@@ -60,7 +60,7 @@ test("aplicação manual gera evento WHATSAPP somente quando a associação muda
   });
 
   assert.equal(result.changed, true);
-  assert.equal(fake.queries.length, 2);
+  assert.equal(fake.queries.length, 3);
   assert.ok(fake.queries[1]?.values.includes("WHATSAPP"));
   assert.ok(fake.queries[1]?.values.includes("APPLY"));
 });

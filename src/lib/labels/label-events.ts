@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../prisma/client";
 import { classifyJid } from "../internal-api/jid";
 import { InternalApiError } from "../internal-api/errors";
+import { enqueueCrmLabelEventDelivery } from "./crm-push";
 
 export type LabelEventOperation = "APPLY" | "REMOVE";
 export type LabelEventSource = "INTERNAL_API" | "WHATSAPP" | "UNKNOWN";
@@ -196,6 +197,20 @@ export async function persistLabelAssociationChange(
       )
     `
   );
+  await enqueueCrmLabelEventDelivery(transaction, {
+    eventId,
+    instanceId: change.instanceId,
+    chatId: change.chatId,
+    jid: change.jid,
+    phoneNormalized: target.phoneNormalized,
+    waLabelId: change.waLabelId,
+    operation: change.operation,
+    source: change.source,
+    observedAt: (change.observedAt ?? new Date()).toISOString(),
+    eligibleForCrm: target.eligibleForCrm,
+    ineligibleReason: target.ineligibleReason,
+    correlationKey: cleanCorrelationKey(change.correlationKey)
+  });
 
   return { changed: true, eventId };
 }

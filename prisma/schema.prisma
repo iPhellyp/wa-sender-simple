@@ -166,6 +166,13 @@ model WhatsappContact {
   @@index([phone])
 }
 
+enum CrmLabelEventDeliveryStatus {
+  PENDING
+  SENT
+  RETRY
+  FAILED
+}
+
 model WhatsappIdentity {
   id              String   @id @default(cuid())
   instanceId      String
@@ -264,6 +271,21 @@ model WhatsappLabelEvent {
 
   @@index([instanceId, id])
   @@index([createdAt, id])
+}
+
+model CrmLabelEventDelivery {
+  id            BigInt                      @id @default(autoincrement())
+  eventId       String                      @unique @db.Uuid
+  payload       Json
+  status        CrmLabelEventDeliveryStatus @default(PENDING)
+  attempts      Int                         @default(0)
+  nextAttemptAt DateTime                    @default(now())
+  lastError     String?
+  sentAt        DateTime?
+  createdAt     DateTime                    @default(now())
+  updatedAt     DateTime                    @updatedAt
+
+  @@index([status, nextAttemptAt, id])
 }
 
 model Campaign {

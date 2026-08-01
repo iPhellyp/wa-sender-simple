@@ -76,3 +76,10 @@ nome | telefone | mensagem | origem
 - [Boas praticas anti-spam](docs/production/BOAS_PRATICAS_ANTISPAM.md)
 - [SDD macro](docs/COMMAND_CENTER_WHATSAPP_SDD.md)
 - [Deploy](README_DEPLOY.md)
+
+### Push persistente de eventos de etiquetas
+
+O worker mantém uma entrega persistente para o CRM em `CrmLabelEventDelivery`.
+Configure `CRM_INTERNAL_LABEL_EVENT_URL`, `CRM_INTERNAL_API_SECRET` e
+`CRM_INTERNAL_API_TIMEOUT_MS` somente no ambiente de execução. O feed por
+cursor permanece como fallback e nenhum segredo deve ser commitado.
