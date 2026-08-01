@@ -48,6 +48,9 @@ services:
       DATABASE_URL: "${DATABASE_URL:-postgresql://wa_sender:wa_sender@wa_sender_simple_postgres:5432/wa_sender_simple?schema=public}"
       NEXT_PUBLIC_APP_URL: "${NEXT_PUBLIC_APP_URL:-https://wa2.supereducarbrasil.com.br}"
       REDIS_URL: "${REDIS_URL:-redis://wa_sender_simple_redis:6379}"
+      CRM_INTERNAL_LABEL_EVENT_URL: "${CRM_INTERNAL_LABEL_EVENT_URL:-}"
+      CRM_INTERNAL_API_SECRET: "${CRM_INTERNAL_API_SECRET:-}"
+      CRM_INTERNAL_API_TIMEOUT_MS: "${CRM_INTERNAL_API_TIMEOUT_MS:-2000}"
       WA2_INTERNAL_API_SECRET: "${WA2_INTERNAL_API_SECRET}"
       WA2_INTERNAL_API_PREVIOUS_SECRET: "${WA2_INTERNAL_API_PREVIOUS_SECRET:-}"
       WA2_INTERNAL_API_RATE_LIMIT: "${WA2_INTERNAL_API_RATE_LIMIT:-60}"
@@ -93,6 +96,9 @@ services:
       DATABASE_URL: "${DATABASE_URL:-postgresql://wa_sender:wa_sender@wa_sender_simple_postgres:5432/wa_sender_simple?schema=public}"
       NEXT_PUBLIC_APP_URL: "${NEXT_PUBLIC_APP_URL:-https://wa2.supereducarbrasil.com.br}"
       REDIS_URL: "${REDIS_URL:-redis://wa_sender_simple_redis:6379}"
+      CRM_INTERNAL_LABEL_EVENT_URL: "${CRM_INTERNAL_LABEL_EVENT_URL:-}"
+      CRM_INTERNAL_API_SECRET: "${CRM_INTERNAL_API_SECRET:-}"
+      CRM_INTERNAL_API_TIMEOUT_MS: "${CRM_INTERNAL_API_TIMEOUT_MS:-2000}"
     volumes:
       - baileys_session:/app/data/baileys-session
       - uploads:/app/uploads
