@@ -35,3 +35,17 @@ test("catalog-full limpa versões app-state da instância secundária antes do r
     /"app-state-sync-version": resetVersions/
   );
 });
+
+test("sessão já registrada solicita histórico e pareamento novo permanece em QR seguro", async () => {
+  const source = await readFile(
+    new URL("./instance-manager.ts", import.meta.url),
+    "utf8"
+  );
+
+  assert.match(source, /const syncFullHistory = sessionInfo\.hasRegisteredSession/);
+  assert.match(source, /syncFullHistory,\s*\n\s*shouldSyncHistoryMessage: \(\) => syncFullHistory/);
+  assert.doesNotMatch(
+    source,
+    /syncFullHistory:\s*true[\s\S]{0,120}hasRegisteredSession/
+  );
+});

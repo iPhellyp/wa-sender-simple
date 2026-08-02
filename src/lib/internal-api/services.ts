@@ -10,6 +10,7 @@ import {
   enqueueWhatsappPreserveDisconnect,
   enqueueWhatsappIdentityRebuild
 } from "../queue/campaign-queue";
+import { enqueueManualMessage } from "../queue/campaign-queue";
 import { getWhatsappIdentityRebuildStatus } from "../queue/campaign-queue";
 import { getIdentityDiagnostics } from "../baileys/identity-map";
 import { createWhatsappInstance } from "../server/whatsapp-instances";
@@ -251,6 +252,128 @@ export async function listInternalLabels(instanceId: string) {
     ...label,
     updatedAt: label.updatedAt.toISOString()
   }));
+}
+
+export async function listInternalChats(
+  instanceId: string,
+  options: { search?: string; cursor?: string; limit?: number } = {}
+) {
+  await requireInternalInstance(instanceId);
+  const limit = Math.min(Math.max(options.limit ?? 50, 1), 100);
+  const search = options.search?.trim().slice(0, 120) ?? "";
+  const where = {
+    instanceId,
+    ...(search
+      ? {
+          OR: [
+            { name: { contains: search, mode: "insensitive" as const } },
+            { jid: { contains: search, mode: "insensitive" as const } },
+            { lastMessageText: { contains: search, mode: "insensitive" as const } }
+          ]
+        }
+      : {})
+  };
+  const chats = await prisma.whatsappChat.findMany({
+    where,
+    orderBy: [{ lastMessageAt: "desc" }, { updatedAt: "desc" }, { id: "desc" }],
+    take: limit + 1,
+    ...(options.cursor ? { skip: 1, cursor: { id: options.cursor } } : {}),
+    select: {
+      id: true,
+      jid: true,
+      name: true,
+      isGroup: true,
+      unreadCount: true,
+      lastMessageAt: true,
+      lastMessageText: true,
+      lastInboundAt: true,
+      lastOutboundAt: true,
+      updatedAt: true,
+      _count: { select: { messages: true } },
+      labels: {
+        where: { label: { deleted: false } },
+        orderBy: { label: { name: "asc" } },
+        select: { label: { select: { waLabelId: true, name: true, color: true } } }
+      }
+    }
+  });
+  const hasMore = chats.length > limit;
+  const page = hasMore ? chats.slice(0, limit) : chats;
+  return {
+    chats: page.map((chat) => ({
+      ...chat,
+      lastMessageAt: chat.lastMessageAt?.toISOString() ?? null,
+      lastInboundAt: chat.lastInboundAt?.toISOString() ?? null,
+      lastOutboundAt: chat.lastOutboundAt?.toISOString() ?? null,
+      updatedAt: chat.updatedAt.toISOString(),
+      labels: chat.labels.map((row) => row.label)
+    })),
+    nextCursor: hasMore ? page.at(-1)?.id ?? null : null,
+    hasMore
+  };
+}
+
+export async function listInternalChatMessages(
+  instanceId: string,
+  chatId: string,
+  options: { before?: string; limit?: number } = {}
+) {
+  await requireInternalChat(instanceId, chatId);
+  const limit = Math.min(Math.max(options.limit ?? 50, 1), 100);
+  const before = options.before ? new Date(options.before) : null;
+  const messages = await prisma.whatsappMessage.findMany({
+    where: {
+      instanceId,
+      chatId,
+      ...(before && !Number.isNaN(before.getTime()) ? { timestamp: { lt: before } } : {})
+    },
+    orderBy: [{ timestamp: "desc" }, { createdAt: "desc" }, { id: "desc" }],
+    take: limit + 1,
+    select: {
+      id: true,
+      waMessageId: true,
+      jid: true,
+      fromMe: true,
+      senderJid: true,
+      timestamp: true,
+      messageType: true,
+      text: true,
+      createdAt: true
+    }
+  });
+  const hasMore = messages.length > limit;
+  const page = hasMore ? messages.slice(0, limit) : messages;
+  return {
+    messages: page.reverse().map((message) => ({
+      ...message,
+      timestamp: message.timestamp?.toISOString() ?? null,
+      createdAt: message.createdAt.toISOString()
+    })),
+    nextBefore: hasMore ? page[0]?.timestamp?.toISOString() ?? null : null,
+    hasMore
+  };
+}
+
+export async function enqueueInternalChatMessage(
+  instanceId: string,
+  chatId: string,
+  text: string
+) {
+  const chat = await requireInternalChat(instanceId, chatId);
+  const normalizedText = text.trim();
+  if (!normalizedText || normalizedText.length > 4000) {
+    throw new InternalApiError("VALIDATION_ERROR", "Mensagem inválida", 400);
+  }
+  if (classifyJid(chat.jid) !== "individual_phone" && classifyJid(chat.jid) !== "lid") {
+    throw new InternalApiError("UNSUPPORTED_JID", "Chat não suporta envio", 422);
+  }
+  const jobId = await enqueueManualMessage({
+    instanceId,
+    chatId,
+    jid: chat.jid,
+    text: normalizedText
+  });
+  return { jobId, queued: true };
 }
 
 export async function requireInternalChat(instanceId: string, chatId: string) {

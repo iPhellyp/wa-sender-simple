@@ -593,9 +593,11 @@ async function startSecondaryWhatsappInstance(instance: WhatsappInstance) {
 
     const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
     const { version } = await fetchLatestBaileysVersion();
+    const syncFullHistory = sessionInfo.hasRegisteredSession;
     console.log("[instance-manager] qr socket runtime", {
       revision: QR_RUNTIME_REVISION,
-      version: version.join(".")
+      version: version.join("."),
+      syncFullHistory
     });
     const socket = makeWASocket({
       version,
@@ -603,8 +605,8 @@ async function startSecondaryWhatsappInstance(instance: WhatsappInstance) {
       browser: Browsers.ubuntu("Chrome"),
       logger: P({ level: process.env.BAILEYS_LOG_LEVEL ?? "silent" }),
       printQRInTerminal: false,
-      syncFullHistory: false,
-      shouldSyncHistoryMessage: () => false
+      syncFullHistory,
+      shouldSyncHistoryMessage: () => syncFullHistory
     });
     runtime.socket = socket;
 
