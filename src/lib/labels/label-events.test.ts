@@ -5,16 +5,23 @@ import { resolve } from "node:path";
 
 let queryRows: Array<Record<string, unknown>> = [];
 let lastQuery: { strings: readonly string[]; values: readonly unknown[] } | null = null;
+let knownIdentity: { phoneNormalized: string; confidence: string } | null = null;
 
 const prismaMock = {
   whatsappContact: {
     findUnique: async () => null
   },
+  whatsappIdentity: {
+    findUnique: async () => knownIdentity
+  },
   whatsappChat: {
     upsert: async () => ({ id: "chat-1" })
   },
   $transaction: async (callback: (transaction: unknown) => Promise<unknown>) =>
-    callback({ $executeRaw: async () => 1 }),
+    callback({
+      $executeRaw: async () => 1,
+      $queryRaw: async () => [{ waLabelId: "10", name: "FEZ PROVA" }]
+    }),
   $queryRaw: async (query: { strings: readonly string[]; values: readonly unknown[] }) => {
     lastQuery = query;
     return queryRows;
@@ -138,6 +145,21 @@ test("classifica contato, LID, grupo e broadcast para automação do CRM", () =>
     labelEvents.classifyLabelEventTarget("status@broadcast").ineligibleReason,
     "BROADCAST"
   );
+});
+
+test("evento de etiqueta usa identidade LID determinística quando contato não tem telefone", async () => {
+  knownIdentity = { phoneNormalized: "5511987654321", confidence: "DETERMINISTIC" };
+  const result = await labelEvents.recordLabelAssociationChange({
+    instanceId: "instance-identity",
+    chatId: "chat-identity",
+    labelId: "label-identity",
+    waLabelId: "10",
+    jid: "123@lid",
+    operation: "APPLY",
+    source: "WHATSAPP"
+  });
+  knownIdentity = null;
+  assert.equal(result.changed, true);
 });
 
 test("cursor opaco pagina, retoma e mantém ordenação estável por id", async () => {
