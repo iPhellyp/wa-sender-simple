@@ -34,6 +34,8 @@ type PendingMutation = {
 const pendingInternalMutations = new Map<string, PendingMutation>();
 const PENDING_MUTATION_TTL_MS = 120_000;
 const MAX_PAGE_SIZE = 200;
+const LABEL_EVENT_TRANSACTION_MAX_WAIT_MS = 10_000;
+const LABEL_EVENT_TRANSACTION_TIMEOUT_MS = 10_000;
 
 function pendingMutationKey(input: {
   instanceId: string;
@@ -266,17 +268,22 @@ export async function recordLabelAssociationChange(
         })
   ]);
 
-  return prisma.$transaction((transaction) =>
-    persistLabelAssociationChange(transaction, {
-      ...change,
-      jid,
-      chatId: chat.id,
-      phoneNormalized: knownContact?.phone ?? (
-        knownIdentity?.confidence === "DETERMINISTIC"
-          ? knownIdentity.phoneNormalized
-          : null
-      )
-    })
+  return prisma.$transaction(
+    (transaction) =>
+      persistLabelAssociationChange(transaction, {
+        ...change,
+        jid,
+        chatId: chat.id,
+        phoneNormalized: knownContact?.phone ?? (
+          knownIdentity?.confidence === "DETERMINISTIC"
+            ? knownIdentity.phoneNormalized
+            : null
+        )
+      }),
+    {
+      maxWait: LABEL_EVENT_TRANSACTION_MAX_WAIT_MS,
+      timeout: LABEL_EVENT_TRANSACTION_TIMEOUT_MS
+    }
   );
 }
 

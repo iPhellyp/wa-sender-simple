@@ -11,6 +11,7 @@ import {
 } from "../labels/label-events";
 
 const CHAT_LABEL_TYPE = "label_jid";
+const associationQueues = new Map<string, Promise<void>>();
 
 type LabelEditEvent = BaileysEventMap["labels.edit"];
 type LabelAssociationEvent = BaileysEventMap["labels.association"];
@@ -154,7 +155,7 @@ export async function syncLabelsEdit(
   return upsertWhatsappLabels([label], instanceId);
 }
 
-export async function syncLabelsAssociation(
+async function syncLabelsAssociationNow(
   event: LabelAssociationEvent,
   instanceId = DEFAULT_WHATSAPP_INSTANCE_ID
 ) {
@@ -238,6 +239,24 @@ export async function syncLabelsAssociation(
 
   console.log("[catalog] associations saved", counters);
   return counters;
+}
+
+export async function syncLabelsAssociation(
+  event: LabelAssociationEvent,
+  instanceId = DEFAULT_WHATSAPP_INSTANCE_ID
+) {
+  const previous = associationQueues.get(instanceId) ?? Promise.resolve();
+  const current = previous.then(() => syncLabelsAssociationNow(event, instanceId));
+  const tail = current.then(() => undefined, () => undefined);
+  associationQueues.set(instanceId, tail);
+
+  try {
+    return await current;
+  } finally {
+    if (associationQueues.get(instanceId) === tail) {
+      associationQueues.delete(instanceId);
+    }
+  }
 }
 
 export function isChatLabelAssociation(
