@@ -239,11 +239,17 @@ export async function recordLabelAssociationChange(
     return { changed: false, eventId: null, skipped: "INVALID_JID" as const };
   }
 
-  const [knownContact, chat] = await Promise.all([
+  const [knownContact, knownIdentity, chat] = await Promise.all([
     jid.endsWith("@lid")
       ? prisma.whatsappContact.findUnique({
           where: { instanceId_jid: { instanceId: change.instanceId, jid } },
           select: { phone: true }
+        })
+      : Promise.resolve(null),
+    jid.endsWith("@lid")
+      ? prisma.whatsappIdentity.findUnique({
+          where: { instanceId_lidJid: { instanceId: change.instanceId, lidJid: jid } },
+          select: { phoneNormalized: true, confidence: true }
         })
       : Promise.resolve(null),
     change.chatId
@@ -265,7 +271,11 @@ export async function recordLabelAssociationChange(
       ...change,
       jid,
       chatId: chat.id,
-      phoneNormalized: knownContact?.phone ?? null
+      phoneNormalized: knownContact?.phone ?? (
+        knownIdentity?.confidence === "DETERMINISTIC"
+          ? knownIdentity.phoneNormalized
+          : null
+      )
     })
   );
 }
