@@ -42,7 +42,7 @@ test("sessão já registrada solicita histórico e pareamento novo permanece em 
     "utf8"
   );
 
-  assert.match(source, /const syncFullHistory = sessionInfo\.hasRegisteredSession/);
+  assert.match(source, /const syncFullHistory = sessionInfo\.hasRegisteredSession \|\| sessionInfo\.hasMeId/);
   assert.match(source, /syncFullHistory,\s*\n\s*shouldSyncHistoryMessage: \(\) => syncFullHistory/);
   assert.doesNotMatch(
     source,

@@ -593,7 +593,7 @@ async function startSecondaryWhatsappInstance(instance: WhatsappInstance) {
 
     const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
     const { version } = await fetchLatestBaileysVersion();
-    const syncFullHistory = sessionInfo.hasRegisteredSession;
+    const syncFullHistory = sessionInfo.hasRegisteredSession || sessionInfo.hasMeId;
     console.log("[instance-manager] qr socket runtime", {
       revision: QR_RUNTIME_REVISION,
       version: version.join("."),
