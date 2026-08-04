@@ -13,7 +13,7 @@
     "worker:health": "tsx src/worker/healthcheck.ts",
     "worker:preflight": "tsx src/worker/preflight.ts",
     "test:campaigns": "tsx --test src/lib/campaigns/dispatch-policy.test.ts",
-    "test:internal-api": "node --experimental-test-module-mocks --import tsx --test scripts/baileys-receive-diagnostic.test.ts src/lib/baileys/catalog-snapshot.test.ts src/lib/baileys/identity-map.test.ts src/lib/baileys/labels-sync.test.ts src/lib/internal-api/deploy-hardening.test.ts src/lib/internal-api/internal-api.test.ts src/lib/internal-api/recovery-hardening.test.ts src/lib/internal-api/phone-resolution.test.ts src/lib/internal-api/services.test.ts src/lib/labels/label-events.test.ts src/lib/server/whatsapp-instances.test.ts src/worker/health-diagnostics.test.ts src/worker/sender-worker-cjs.test.ts src/lib/internal-api/instance-lifecycle.test.ts",
+    "test:internal-api": "node --experimental-test-module-mocks --import tsx --test scripts/baileys-receive-diagnostic.test.ts src/lib/baileys/catalog-snapshot.test.ts src/lib/baileys/identity-map.test.ts src/lib/baileys/labels-sync.test.ts src/lib/baileys/sync.test.ts src/lib/internal-api/deploy-hardening.test.ts src/lib/internal-api/internal-api.test.ts src/lib/internal-api/recovery-hardening.test.ts src/lib/internal-api/phone-resolution.test.ts src/lib/internal-api/services.test.ts src/lib/labels/label-events.test.ts src/lib/server/whatsapp-instances.test.ts src/worker/health-diagnostics.test.ts src/worker/sender-worker-cjs.test.ts src/lib/internal-api/instance-lifecycle.test.ts",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:deploy": "prisma migrate deploy"

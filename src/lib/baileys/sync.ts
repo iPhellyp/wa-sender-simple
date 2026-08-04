@@ -937,8 +937,10 @@ export async function upsertMessageFromBaileys(
   const text = extractMessageText(message.message);
   const skipReason = getMessageSkipReason(messageType, text);
   const lastMessageText = skipReason ? null : getVisibleMessageText(text, messageType);
+  const persistLiveInboundInFastMode =
+    FAST_LABEL_SENDER_MODE && !fromMe && options.logScope !== "history";
 
-  if (FAST_LABEL_SENDER_MODE) {
+  if (FAST_LABEL_SENDER_MODE && !persistLiveInboundInFastMode) {
     await upsertContactFromMessage({
       chatJid: jid,
       fromMe,
@@ -958,7 +960,7 @@ export async function upsertMessageFromBaileys(
     return false;
   }
 
-  if (skipReason) {
+  if (skipReason && !persistLiveInboundInFastMode) {
     if (options.log) {
       console.log(`${getMessageLogNamespace(options)} message skipped`, {
         reason: skipReason,
