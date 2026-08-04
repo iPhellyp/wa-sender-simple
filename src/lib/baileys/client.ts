@@ -75,12 +75,12 @@ const QR_SAFE_405_EXHAUSTED_MESSAGE =
   "Falha ao gerar QR: todos os perfis seguros de pareamento retornaram erro 405. Tente novamente em alguns minutos ou revise a versao/browser Baileys.";
 const CATALOG_APP_STATE_COLLECTIONS = ALL_WA_PATCH_NAMES;
 const CATALOG_HISTORY_SYNC_TYPES = new Set<number>([
-  proto.Message.HistorySyncNotification.HistorySyncType.INITIAL_BOOTSTRAP,
-  proto.Message.HistorySyncNotification.HistorySyncType.RECENT,
-  proto.Message.HistorySyncNotification.HistorySyncType.FULL,
-  proto.Message.HistorySyncNotification.HistorySyncType.PUSH_NAME,
-  proto.Message.HistorySyncNotification.HistorySyncType.NON_BLOCKING_DATA,
-  proto.Message.HistorySyncNotification.HistorySyncType.ON_DEMAND
+  proto.Message.HistorySyncType.INITIAL_BOOTSTRAP,
+  proto.Message.HistorySyncType.RECENT,
+  proto.Message.HistorySyncType.FULL,
+  proto.Message.HistorySyncType.PUSH_NAME,
+  proto.Message.HistorySyncType.NON_BLOCKING_DATA,
+  proto.Message.HistorySyncType.ON_DEMAND
 ]);
 
 type CatalogAppStateCollection = (typeof CATALOG_APP_STATE_COLLECTIONS)[number];
@@ -774,14 +774,6 @@ async function createSocket(options: {
   });
   sock.ev.on("contacts.update", (event) => {
     void syncContactsUpdate(event).catch((error) => logAsyncHandlerError("sync contacts update", error));
-  });
-  sock.ev.on("chats.phoneNumberShare", (event) => {
-    void persistIdentityPair(DEFAULT_WHATSAPP_INSTANCE_ID, {
-      lidJid: event.lid,
-      phoneJid: event.jid,
-      source: "PHONE_NUMBER_SHARE",
-      evidence: "chats.phoneNumberShare"
-    }).catch((error) => logAsyncHandlerError("persist phone number share", error));
   });
   sock.ev.on("messages.upsert", (event) => {
     void handleIncomingMessages(event).catch((error) => logAsyncHandlerError("baileys opt-out", error));

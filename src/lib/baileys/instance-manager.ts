@@ -621,14 +621,6 @@ async function startSecondaryWhatsappInstance(instance: WhatsappInstance) {
     socket.ev.on("chats.update", (chats) => void syncChatsUpdate(chats, instance.id));
     socket.ev.on("contacts.upsert", (contacts) => void syncContactsUpsert(contacts, instance.id));
     socket.ev.on("contacts.update", (contacts) => void syncContactsUpdate(contacts, instance.id));
-    socket.ev.on("chats.phoneNumberShare", (event) => {
-      void persistIdentityPair(instance.id, {
-        lidJid: event.lid,
-        phoneJid: event.jid,
-        source: "PHONE_NUMBER_SHARE",
-        evidence: "chats.phoneNumberShare"
-      });
-    });
     socket.ev.on("messages.upsert", (event) => {
       void handleIncomingOptOutMessages(event, instance.id);
       void syncMessagesUpsert(event, instance.id);
@@ -1117,7 +1109,8 @@ export async function rebuildWhatsappIdentitiesForInstance(
     const batch = uniqueJids.slice(index, index + 100);
     const results = await socket.onWhatsApp(...batch);
     queried += batch.length;
-    for (const result of results ?? []) {
+    for (const rawResult of results ?? []) {
+      const result = rawResult as { lid?: string; jid?: string };
       if (!result.lid || !result.jid) continue;
       observed++;
       const saved = await persistIdentityPair(instanceId, {

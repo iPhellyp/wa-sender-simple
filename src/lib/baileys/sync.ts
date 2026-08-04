@@ -39,6 +39,12 @@ type MessageSyncOptions = {
   instanceId?: string;
 };
 
+type CompatibleContact = Partial<Contact> & {
+  jid?: string;
+  id?: string;
+  lid?: string;
+};
+
 type MaterializableWhatsappContact = {
   jid?: string | null;
   name?: string | null;
@@ -397,8 +403,8 @@ function unwrapMessageContent(message: WAMessage["message"] | null | undefined) 
       current.documentWithCaptionMessage?.message ??
       current.editedMessage?.message ??
       current.groupMentionedMessage?.message ??
-      current.pollCreationMessageV4?.message ??
-      current.pollCreationMessageV5?.message ??
+      (current as typeof current & { pollCreationMessageV4?: { message?: typeof current } }).pollCreationMessageV4?.message ??
+      (current as typeof current & { pollCreationMessageV5?: { message?: typeof current } }).pollCreationMessageV5?.message ??
       null;
 
     if (!next) {
@@ -531,7 +537,7 @@ function getBaileysMessageJid(message: WAMessage | WAMessageUpdate) {
   return normalizeChatJid(message.key.remoteJid);
 }
 
-function getBaileysContactJid(contact: Partial<Contact>) {
+function getBaileysContactJid(contact: CompatibleContact) {
   return normalizeChatJid(contact.jid ?? contact.id ?? contact.lid);
 }
 
@@ -571,7 +577,7 @@ function splitX1Messages<T extends WAMessage | WAMessageUpdate>(messages: T[]) {
   return { allowed, groupSkipped };
 }
 
-function splitX1Contacts<T extends Partial<Contact>>(contacts: T[]) {
+function splitX1Contacts<T extends CompatibleContact>(contacts: T[]) {
   const allowed: T[] = [];
   let groupSkipped = 0;
 
@@ -658,7 +664,7 @@ export async function upsertChatFromBaileys(
 }
 
 export async function upsertContactFromBaileys(
-  contact: Partial<Contact>,
+  contact: CompatibleContact,
   instanceId = DEFAULT_WHATSAPP_INSTANCE_ID
 ) {
   const rawCandidates = [contact.jid, contact.id, contact.lid]
