@@ -30,7 +30,7 @@ done
 actual_image_id="$(docker image inspect "$IMAGE" --format '{{.Id}}' 2>/dev/null || true)"
 [[ "$actual_image_id" = "$EXPECTED_IMAGE_ID" ]] || die "image id mismatch or image missing"
 service_line() { docker service ls --format '{{.Name}}|{{.Replicas}}|{{.Image}}' | awk -F'|' -v wanted="$1" '$1 == wanted { print; exit }'; }
-require_service() { local line; line="$(service_line "$1")"; [[ "$line" == "$1|$2|*" ]] || die "unexpected service state: $1"; printf '%s\n' "$line"; }
+require_service() { local line; line="$(service_line "$1")"; [[ "${line#*|}" == "$2|"* ]] || die "unexpected service state: $1"; printf '%s\n' "$line"; }
 worker_line="$(require_service wa_sender_simple_worker 0/0)"
 app_line="$(require_service wa_sender_simple_app 1/1)"
 postgres_line="$(require_service wa_sender_simple_postgres 1/1)"
