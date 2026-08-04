@@ -75,12 +75,12 @@ const QR_SAFE_405_EXHAUSTED_MESSAGE =
   "Falha ao gerar QR: todos os perfis seguros de pareamento retornaram erro 405. Tente novamente em alguns minutos ou revise a versao/browser Baileys.";
 const CATALOG_APP_STATE_COLLECTIONS = ALL_WA_PATCH_NAMES;
 const CATALOG_HISTORY_SYNC_TYPES = new Set<number>([
-  proto.Message.HistorySyncType.INITIAL_BOOTSTRAP,
-  proto.Message.HistorySyncType.RECENT,
-  proto.Message.HistorySyncType.FULL,
-  proto.Message.HistorySyncType.PUSH_NAME,
-  proto.Message.HistorySyncType.NON_BLOCKING_DATA,
-  proto.Message.HistorySyncType.ON_DEMAND
+  proto.HistorySync.HistorySyncType.INITIAL_BOOTSTRAP,
+  proto.HistorySync.HistorySyncType.RECENT,
+  proto.HistorySync.HistorySyncType.FULL,
+  proto.HistorySync.HistorySyncType.PUSH_NAME,
+  proto.HistorySync.HistorySyncType.NON_BLOCKING_DATA,
+  proto.HistorySync.HistorySyncType.ON_DEMAND
 ]);
 
 type CatalogAppStateCollection = (typeof CATALOG_APP_STATE_COLLECTIONS)[number];
