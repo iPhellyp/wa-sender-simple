@@ -12,6 +12,7 @@ import makeWASocket, {
 import { mkdir, readdir, rm, unlink, writeFile } from "fs/promises";
 import { join, parse, resolve } from "path";
 import P from "pino";
+import { BAILEYS_LOG_REDACT_PATHS, BadMacTelemetry } from "./bad-mac-telemetry";
 import QRCode from "qrcode";
 import { WhatsappStatus, type Prisma } from "@prisma/client";
 import { prisma } from "../prisma/client";
@@ -742,10 +743,23 @@ async function createSocket(options: {
     };
   }
 
+  const telemetry = new BadMacTelemetry(DEFAULT_WHATSAPP_INSTANCE_ID);
   const sock = makeWASocket({
     auth: state,
     printQRInTerminal: false,
-    logger: P({ level: process.env.BAILEYS_LOG_LEVEL ?? "silent" }),
+    logger: P({
+      level: process.env.BAILEYS_LOG_LEVEL ?? "silent",
+      redact: {
+        paths: BAILEYS_LOG_REDACT_PATHS,
+        censor: "[REDACTED]"
+      },
+      hooks: {
+        logMethod(inputArgs, method) {
+          telemetry.inspectLoggerArguments(inputArgs);
+          method.apply(this, inputArgs);
+        }
+      }
+    }),
     browser: cleanPairingProfile ? cleanPairingProfile.browser() : Browsers.macOS("Desktop"),
     syncFullHistory: shouldSyncCatalogHistory,
     shouldSyncHistoryMessage: (message) =>
@@ -776,10 +790,18 @@ async function createSocket(options: {
     void syncContactsUpdate(event).catch((error) => logAsyncHandlerError("sync contacts update", error));
   });
   sock.ev.on("messages.upsert", (event) => {
+    const telemetryContext = telemetry.observeMessagesUpsert(event);
     void handleIncomingMessages(event).catch((error) => logAsyncHandlerError("baileys opt-out", error));
-    void syncMessagesUpsert(event).catch((error) => logAsyncHandlerError("sync messages upsert", error));
+    void syncMessagesUpsert(event)
+      .then((result) => {
+        telemetry.recordMessagesUpsertResult(telemetryContext, result);
+      })
+      .catch((error) => logAsyncHandlerError("sync messages upsert", error));
     void persistIdentityPairs(DEFAULT_WHATSAPP_INSTANCE_ID, event.messages, "MESSAGES_UPSERT")
       .catch((error) => logAsyncHandlerError("persist message identities", error));
+  });
+  sock.ev.on("message-receipt.update", (updates) => {
+    telemetry.observeReceiptUpdates(updates);
   });
   sock.ev.on("messages.update", (event) => {
     void syncMessagesUpdate(event).catch((error) => logAsyncHandlerError("sync messages update", error));
@@ -792,7 +814,9 @@ async function createSocket(options: {
   });
 
   sock.ev.on("connection.update", (update) => {
+    telemetry.observeConnectionUpdate(update.connection);
     void (async () => {
+      try {
       if (localGeneration !== socketGeneration) {
         console.log("[baileys] stale connection update ignored");
         return;
@@ -1184,6 +1208,9 @@ async function createSocket(options: {
         generalReconnectCount += 1;
         const backoffMs = Math.min(5000 * generalReconnectCount, 30_000);
         scheduleReconnect(backoffMs, "connection-close");
+      }
+      } finally {
+        telemetry.dispose();
       }
     })();
   });

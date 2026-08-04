@@ -49,6 +49,7 @@ import { syncLabelsAssociation, syncLabelsEdit } from "./labels-sync";
 import { extractMessageText, isOptOutMessage } from "./opt-out";
 import { getBaileysSessionFilesInfo } from "./session-files";
 import { persistIdentityPair, persistIdentityPairs, rebuildPersistedIdentities } from "./identity-map";
+import { BAILEYS_LOG_REDACT_PATHS, BadMacTelemetry } from "./bad-mac-telemetry";
 
 const CATALOG_APP_STATE_COLLECTIONS = ALL_WA_PATCH_NAMES;
 type CatalogAppStateCollection = (typeof CATALOG_APP_STATE_COLLECTIONS)[number];
@@ -593,6 +594,7 @@ async function startSecondaryWhatsappInstance(instance: WhatsappInstance) {
 
     const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
     const { version } = await fetchLatestBaileysVersion();
+    const telemetry = new BadMacTelemetry(instance.id);
     console.log("[instance-manager] qr socket runtime", {
       revision: QR_RUNTIME_REVISION,
       version: version.join(".")
@@ -601,7 +603,19 @@ async function startSecondaryWhatsappInstance(instance: WhatsappInstance) {
       version,
       auth: state,
       browser: Browsers.ubuntu("Chrome"),
-      logger: P({ level: process.env.BAILEYS_LOG_LEVEL ?? "silent" }),
+      logger: P({
+        level: process.env.BAILEYS_LOG_LEVEL ?? "silent",
+        redact: {
+          paths: BAILEYS_LOG_REDACT_PATHS,
+          censor: "[REDACTED]"
+        },
+        hooks: {
+          logMethod(inputArgs, method) {
+            telemetry.inspectLoggerArguments(inputArgs);
+            method.apply(this, inputArgs);
+          }
+        }
+      }),
       printQRInTerminal: false,
       syncFullHistory: false,
       shouldSyncHistoryMessage: () => false
@@ -622,9 +636,15 @@ async function startSecondaryWhatsappInstance(instance: WhatsappInstance) {
     socket.ev.on("contacts.upsert", (contacts) => void syncContactsUpsert(contacts, instance.id));
     socket.ev.on("contacts.update", (contacts) => void syncContactsUpdate(contacts, instance.id));
     socket.ev.on("messages.upsert", (event) => {
+      const telemetryContext = telemetry.observeMessagesUpsert(event);
       void handleIncomingOptOutMessages(event, instance.id);
-      void syncMessagesUpsert(event, instance.id);
+      void syncMessagesUpsert(event, instance.id).then((result) => {
+        telemetry.recordMessagesUpsertResult(telemetryContext, result);
+      });
       void persistIdentityPairs(instance.id, event.messages, "MESSAGES_UPSERT");
+    });
+    socket.ev.on("message-receipt.update", (updates) => {
+      telemetry.observeReceiptUpdates(updates);
     });
     socket.ev.on("messages.update", (messages) => void syncMessagesUpdate(messages, instance.id));
     socket.ev.on("labels.edit", (label) => void syncLabelsEdit(label, instance.id));
@@ -635,6 +655,7 @@ async function startSecondaryWhatsappInstance(instance: WhatsappInstance) {
     });
 
     socket.ev.on("connection.update", (update) => {
+      telemetry.observeConnectionUpdate(update.connection);
       void (async () => {
         runtime.lastSocketEventAt = new Date();
         if (update.qr) {
@@ -768,6 +789,7 @@ async function startSecondaryWhatsappInstance(instance: WhatsappInstance) {
               errorMessage: closeErrorMessage,
               sessionInfo
             });
+            telemetry.dispose();
             return;
           }
 
@@ -778,6 +800,7 @@ async function startSecondaryWhatsappInstance(instance: WhatsappInstance) {
               errorMessage: closeErrorMessage,
               sessionInfo
             });
+            telemetry.dispose();
             return;
           }
 
@@ -787,6 +810,7 @@ async function startSecondaryWhatsappInstance(instance: WhatsappInstance) {
               lastError: runtime.lastError,
               sessionInfo
             });
+            telemetry.dispose();
             return;
           }
 
@@ -812,6 +836,7 @@ async function startSecondaryWhatsappInstance(instance: WhatsappInstance) {
           if (statusCode && statusCode !== DisconnectReason.loggedOut) {
             startPromiseByInstanceId.delete(instance.id);
           }
+          telemetry.dispose();
         }
       })().catch((error) => {
         console.error("[instance-manager] connection update failed", {

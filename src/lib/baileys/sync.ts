@@ -1308,6 +1308,13 @@ export async function syncMessagesUpsert(
   });
 
   logSyncResult("messages upsert", { type: event.type, messages: event.messages.length, instanceId }, result);
+
+  return {
+    messageCount: event.messages.length,
+    processed: result.processed,
+    skipped: result.skipped,
+    failed: result.failed
+  };
 }
 
 export async function syncMessagesUpdate(
