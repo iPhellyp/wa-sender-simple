@@ -83,8 +83,9 @@ export async function resolveWebVersion(
   fetcher: WebVersionFetcher,
   timeoutMs = 15000
 ): Promise<WebVersion> {
+  let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {
-    setTimeout(() => reject(new Error(VERSION_PROBE_TIMEOUT_ERROR)), timeoutMs);
+    timeoutHandle = setTimeout(() => reject(new Error(VERSION_PROBE_TIMEOUT_ERROR)), timeoutMs);
   });
   try {
     const result = await Promise.race([Promise.resolve().then(fetcher), timeout]);
@@ -94,6 +95,8 @@ export async function resolveWebVersion(
   } catch (error) {
     if (error instanceof Error && error.message === VERSION_PROBE_TIMEOUT_ERROR) throw error;
     throw new Error(VERSION_PROBE_FAILURE_ERROR);
+  } finally {
+    if (timeoutHandle) clearTimeout(timeoutHandle);
   }
 }
 
