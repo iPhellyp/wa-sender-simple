@@ -18,8 +18,17 @@ export type DiagnosticStats = {
   decryptionErrors: number;
 };
 
+export type WebVersion = {
+  version: [number, number, number];
+  isLatest: boolean;
+};
+
+export type WebVersionFetcher = () => Promise<WebVersion>;
+
 export const CLEAN_MODE_ERROR = "CLEAN_MODE_REQUIRES_SEPARATE_QR_AUTHORIZATION";
 export const UNEXPECTED_QR_ERROR = "UNEXPECTED_QR_FROM_SESSION_COPY";
+export const VERSION_PROBE_TIMEOUT_ERROR = "WA_VERSION_FETCH_TIMEOUT";
+export const VERSION_PROBE_FAILURE_ERROR = "WA_VERSION_FETCH_FAILED";
 
 const PRODUCTION_PATHS = [
   "/app/data/baileys-session",
@@ -43,11 +52,90 @@ export function validateExecutionFlags(input: {
   run: boolean;
   isolatedRun: boolean;
   isolatedPreflight: boolean;
+  versionProbeOnly?: boolean;
 }) {
   if (input.mode === "clean") throw new Error(CLEAN_MODE_ERROR);
+  if (input.versionProbeOnly && input.run) throw new Error("VERSION_PROBE_CANNOT_RUN_SOCKET");
+  if (input.versionProbeOnly && input.isolatedRun) throw new Error("VERSION_PROBE_CANNOT_ISOLATE_RUN");
+  if (input.versionProbeOnly && input.isolatedPreflight) throw new Error("VERSION_PROBE_CANNOT_ISOLATE_PREFLIGHT");
   if (input.isolatedRun && !input.run) throw new Error("ISOLATED_RUN_REQUIRES_RUN");
   if (input.isolatedRun && input.isolatedPreflight) {
     throw new Error("ISOLATED_RUN_CANNOT_COMBINE_WITH_ISOLATED_PREFLIGHT");
+  }
+}
+
+function versionTimeoutMs() {
+  const value = Number(arg("--version-timeout-ms") ?? "15000");
+  if (!Number.isInteger(value) || value < 100 || value > 60000) {
+    throw new Error("version-timeout-ms must be an integer between 100 and 60000");
+  }
+  return value;
+}
+
+export function formatWebVersion(version: [number, number, number]) {
+  if (version.length !== 3 || version.some((part) => !Number.isInteger(part) || part < 0)) {
+    throw new Error(VERSION_PROBE_FAILURE_ERROR);
+  }
+  return version.join(".");
+}
+
+export async function resolveWebVersion(
+  fetcher: WebVersionFetcher,
+  timeoutMs = 15000
+): Promise<WebVersion> {
+  const timeout = new Promise<never>((_, reject) => {
+    setTimeout(() => reject(new Error(VERSION_PROBE_TIMEOUT_ERROR)), timeoutMs);
+  });
+  try {
+    const result = await Promise.race([Promise.resolve().then(fetcher), timeout]);
+    formatWebVersion(result.version);
+    if (typeof result.isLatest !== "boolean") throw new Error(VERSION_PROBE_FAILURE_ERROR);
+    return result;
+  } catch (error) {
+    if (error instanceof Error && error.message === VERSION_PROBE_TIMEOUT_ERROR) throw error;
+    throw new Error(VERSION_PROBE_FAILURE_ERROR);
+  }
+}
+
+export async function createSocketWithLatestVersion<T>(options: {
+  fetcher: WebVersionFetcher;
+  makeSocket: (version: [number, number, number]) => T;
+  timeoutMs?: number;
+}) {
+  const resolved = await resolveWebVersion(options.fetcher, options.timeoutMs);
+  return {
+    resolved,
+    socket: options.makeSocket(resolved.version)
+  };
+}
+
+export async function runVersionProbe(
+  fetcher: WebVersionFetcher,
+  log: (line: string) => void,
+  timeoutMs: number
+) {
+  try {
+    const resolved = await resolveWebVersion(fetcher, timeoutMs);
+    log(JSON.stringify({
+      event: "WA_WEB_VERSION_RESOLVED",
+      version: formatWebVersion(resolved.version),
+      isLatest: resolved.isLatest,
+      queriedAt: new Date().toISOString(),
+      success: true,
+      source: "fetchLatestBaileysVersion",
+      socketStarted: false
+    }));
+    return 0;
+  } catch (error) {
+    log(JSON.stringify({
+      event: "WA_WEB_VERSION_RESOLUTION_FAILED",
+      queriedAt: new Date().toISOString(),
+      success: false,
+      source: "fetchLatestBaileysVersion",
+      error: error instanceof Error ? error.message : VERSION_PROBE_FAILURE_ERROR,
+      socketStarted: false
+    }));
+    return 20;
   }
 }
 
@@ -170,21 +258,50 @@ async function run(sessionDir: string, isolated: boolean) {
     socket?.end(undefined);
   };
 
-  socket = baileys.default({
-    auth: state,
-    browser: baileys.Browsers.ubuntu("Chrome"),
-    connectTimeoutMs: 15_000,
-    logger,
-    printQRInTerminal: false,
-    syncFullHistory: false,
-    shouldSyncHistoryMessage: () => false
-  });
+  let socketWithVersion: { resolved: WebVersion; socket: ReturnType<typeof baileys.default> };
+  try {
+    socketWithVersion = await createSocketWithLatestVersion<ReturnType<typeof baileys.default>>({
+      fetcher: baileys.fetchLatestBaileysVersion,
+      timeoutMs: versionTimeoutMs(),
+      makeSocket: (version) => baileys.default({
+        version,
+        auth: state,
+        browser: baileys.Browsers.ubuntu("Chrome"),
+        connectTimeoutMs: 15_000,
+        logger,
+        printQRInTerminal: false,
+        syncFullHistory: false,
+        shouldSyncHistoryMessage: () => false
+      })
+    });
+  } catch (error) {
+    console.log(JSON.stringify({
+      event: "WA_WEB_VERSION_RESOLUTION_FAILED",
+      queriedAt: new Date().toISOString(),
+      success: false,
+      source: "fetchLatestBaileysVersion",
+      error: error instanceof Error ? error.message : VERSION_PROBE_FAILURE_ERROR,
+      socketStarted: false
+    }));
+    return 20;
+  }
+  console.log(JSON.stringify({
+    event: "WA_WEB_VERSION_RESOLVED",
+    version: formatWebVersion(socketWithVersion.resolved.version),
+    isLatest: socketWithVersion.resolved.isLatest,
+    queriedAt: new Date().toISOString(),
+    success: true,
+    source: "fetchLatestBaileysVersion",
+    socketStarted: true
+  }));
+  const activeSocket = socketWithVersion.socket;
+  socket = activeSocket;
 
-  socket.ev.on("creds.update", async () => {
+  activeSocket.ev.on("creds.update", async () => {
     stats.credsUpdates += 1;
     try { await saveCreds(); } catch { /* sanitized counter intentionally omitted */ }
   });
-  socket.ev.on("connection.update", (update: BaileysEventMap["connection.update"]) => {
+  activeSocket.ev.on("connection.update", (update: BaileysEventMap["connection.update"]) => {
     stats.connectionUpdates += 1;
     if (update.connection === "open") stats.connectionOpen += 1;
     if (update.connection === "close") stats.connectionClose += 1;
@@ -197,7 +314,7 @@ async function run(sessionDir: string, isolated: boolean) {
     console.log(JSON.stringify({ event: "connection.update", connection: update.connection ?? null, statusCode: statusCode(update.lastDisconnect?.error) }));
     if (update.connection === "close") finish(11);
   });
-  socket.ev.on("messages.upsert", ({ messages }: BaileysEventMap["messages.upsert"]) => {
+  activeSocket.ev.on("messages.upsert", ({ messages }: BaileysEventMap["messages.upsert"]) => {
     stats.messagesUpsert += 1;
     stats.messagesCount += messages.length;
   });
@@ -218,7 +335,12 @@ async function main() {
   const runRequested = process.argv.includes("--run");
   const isolatedRun = process.argv.includes("--isolated-run");
   const isolatedPreflight = process.argv.includes("--isolated-preflight");
-  validateExecutionFlags({ mode: mode as "copy" | "clean", run: runRequested, isolatedRun, isolatedPreflight });
+  const versionProbeOnly = process.argv.includes("--version-probe-only");
+  validateExecutionFlags({ mode: mode as "copy" | "clean", run: runRequested, isolatedRun, isolatedPreflight, versionProbeOnly });
+  if (versionProbeOnly) {
+    const baileys = await import("@whiskeysockets/baileys");
+    return runVersionProbe(baileys.fetchLatestBaileysVersion, console.log, versionTimeoutMs());
+  }
   const sessionDir = arg("--session-dir");
   if (!sessionDir) throw new Error("SESSION_DIR_REQUIRED");
   if (!runRequested) {
